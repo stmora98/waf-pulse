@@ -1,0 +1,237 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "config": {
+      "isWizard": true,
+      "basics": {
+        "description": "Deploys the WAF Pulse dashboard and collector into your own subscription. Choose the subscription, resource group and region below. The collector scans your entire Microsoft Entra tenant using a service principal that you create.",
+        "resourceGroup": {
+          "allowExisting": true
+        }
+      }
+    },
+    "basics": [
+      {
+        "name": "toolName",
+        "type": "Microsoft.Common.TextBox",
+        "label": "Tool name",
+        "toolTip": "Used in every resource name. 2 to 10 lowercase letters or digits.",
+        "defaultValue": "wafpulse",
+        "constraints": {
+          "required": true,
+          "regex": "^[a-z0-9]{2,10}$",
+          "validationMessage": "Use 2 to 10 lowercase letters or digits."
+        }
+      }
+    ],
+    "steps": [
+      {
+        "name": "collector",
+        "label": "Collector service principal",
+        "elements": [
+          {
+            "name": "info",
+            "type": "Microsoft.Common.InfoBox",
+            "visible": true,
+            "options": {
+              "icon": "Info",
+              "text": "Create the service principal first and grant it Reader at the tenant root management group. The README explains each step. The secret is stored in Azure Key Vault.",
+              "uri": "https://github.com/stmora98/waf-pulse#2-create-the-service-principal"
+            }
+          },
+          {
+            "name": "collectorTenantId",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Tenant ID",
+            "toolTip": "Directory (tenant) ID of the Microsoft Entra tenant to scan.",
+            "constraints": {
+              "required": true,
+              "regex": "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$",
+              "validationMessage": "Enter a valid GUID."
+            }
+          },
+          {
+            "name": "collectorClientId",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Application (client) ID",
+            "toolTip": "Application (client) ID of your service principal.",
+            "constraints": {
+              "required": true,
+              "regex": "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$",
+              "validationMessage": "Enter a valid GUID."
+            }
+          },
+          {
+            "name": "collectorClientSecret",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": {
+              "password": "Client secret",
+              "confirmPassword": "Confirm client secret"
+            },
+            "toolTip": {
+              "password": "Client secret value of your service principal."
+            },
+            "constraints": {
+              "required": true
+            },
+            "options": {
+              "hideConfirmation": false
+            }
+          },
+          {
+            "name": "subscriptionFilter",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Subscription filter (optional)",
+            "toolTip": "Comma separated subscription IDs. Leave empty to scan the entire tenant.",
+            "defaultValue": "",
+            "constraints": {
+              "required": false
+            }
+          }
+        ]
+      },
+      {
+        "name": "refresh",
+        "label": "Refresh mode",
+        "elements": [
+          {
+            "name": "refreshMode",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Refresh mode",
+            "toolTip": "How often the collector refreshes data. You can change it later without redeploying.",
+            "defaultValue": "Daily",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                {
+                  "label": "Daily",
+                  "value": "daily"
+                },
+                {
+                  "label": "Weekly",
+                  "value": "weekly"
+                },
+                {
+                  "label": "Near real time (polls Azure Resource Graph changes)",
+                  "value": "nearRealTime"
+                },
+                {
+                  "label": "Manual (button only)",
+                  "value": "manual"
+                }
+              ]
+            }
+          },
+          {
+            "name": "nearRealTimeIntervalMinutes",
+            "type": "Microsoft.Common.Slider",
+            "min": 5,
+            "max": 60,
+            "label": "Near real time interval (minutes)",
+            "subLabel": "Minutes",
+            "defaultValue": 15,
+            "showStepMarkers": false,
+            "toolTip": "Polling interval used when the refresh mode is near real time.",
+            "constraints": {
+              "required": false
+            },
+            "visible": "[equals(steps('refresh').refreshMode, 'nearRealTime')]"
+          }
+        ]
+      },
+      {
+        "name": "dashboard",
+        "label": "Dashboard",
+        "elements": [
+          {
+            "name": "appServiceSku",
+            "type": "Microsoft.Common.DropDown",
+            "label": "App Service plan SKU",
+            "toolTip": "B1 is the low cost default. P1v3 adds performance and deployment slots.",
+            "defaultValue": "B1 (low cost)",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                {
+                  "label": "B1 (low cost)",
+                  "value": "B1"
+                },
+                {
+                  "label": "P1v3 (premium)",
+                  "value": "P1v3"
+                }
+              ]
+            }
+          },
+          {
+            "name": "authInfo",
+            "type": "Microsoft.Common.InfoBox",
+            "visible": true,
+            "options": {
+              "icon": "Warning",
+              "text": "The dashboard has no sign-in until you enable it. After deployment, open the App Service > Authentication and add the Microsoft identity provider, or provide an app registration client ID below."
+            }
+          },
+          {
+            "name": "dashboardAuthClientId",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Dashboard sign-in app registration client ID (optional)",
+            "toolTip": "Client ID of an app registration used for Microsoft Entra sign-in. If empty, configure authentication after deployment.",
+            "defaultValue": "",
+            "constraints": {
+              "required": false,
+              "regex": "^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$",
+              "validationMessage": "Enter a valid GUID or leave empty."
+            }
+          }
+        ]
+      },
+      {
+        "name": "advanced",
+        "label": "Advanced",
+        "elements": [
+          {
+            "name": "webPackageUrl",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Dashboard package URL",
+            "toolTip": "Package the dashboard runs from. Change only to use your own fork.",
+            "defaultValue": "https://github.com/stmora98/waf-pulse/releases/latest/download/dashboard.zip",
+            "constraints": {
+              "required": true,
+              "regex": "^https://.+$",
+              "validationMessage": "Enter an https URL."
+            }
+          },
+          {
+            "name": "collectorPackageUrl",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Collector package URL",
+            "toolTip": "Package deployed to the Function App. Change only to use your own fork.",
+            "defaultValue": "https://github.com/stmora98/waf-pulse/releases/latest/download/collector.zip",
+            "constraints": {
+              "required": true,
+              "regex": "^https://.+$",
+              "validationMessage": "Enter an https URL."
+            }
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "location": "[location()]",
+      "toolName": "[basics('toolName')]",
+      "collectorTenantId": "[steps('collector').collectorTenantId]",
+      "collectorClientId": "[steps('collector').collectorClientId]",
+      "collectorClientSecret": "[steps('collector').collectorClientSecret]",
+      "subscriptionFilter": "[steps('collector').subscriptionFilter]",
+      "refreshMode": "[steps('refresh').refreshMode]",
+      "nearRealTimeIntervalMinutes": "[steps('refresh').nearRealTimeIntervalMinutes]",
+      "appServiceSku": "[steps('dashboard').appServiceSku]",
+      "dashboardAuthClientId": "[steps('dashboard').dashboardAuthClientId]",
+      "webPackageUrl": "[steps('advanced').webPackageUrl]",
+      "collectorPackageUrl": "[steps('advanced').collectorPackageUrl]"
+    }
+  }
+}

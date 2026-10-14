@@ -1,0 +1,33 @@
+name: Validate infrastructure
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+
+jobs:
+  arm-in-sync:
+    name: Compiled ARM template matches Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Bicep
+        run: az bicep build --file infra/main.bicep --outfile "$RUNNER_TEMP/azuredeploy.json"
+
+      - name: Compare with committed azuredeploy.json
+        run: |
+          normalize() { jq -S 'walk(if type == "object" then del(._generator) else . end)' "$1"; }
+          if ! diff <(normalize infra/azuredeploy.json) <(normalize "$RUNNER_TEMP/azuredeploy.json"); then
+            echo "::error::infra/azuredeploy.json is out of date. Run: az bicep build --file infra/main.bicep --outfile infra/azuredeploy.json"
+            exit 1
+          fi
+
+      - name: Validate JSON files
+        run: |
+          jq empty infra/createUiDefinition.json
+          jq empty infra/main.parameters.json
