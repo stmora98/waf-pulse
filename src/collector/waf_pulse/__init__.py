@@ -1,0 +1,1 @@
+"""WAF Pulse collector logic."""

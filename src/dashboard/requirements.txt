@@ -1,0 +1,5 @@
+flask>=3.0.0
+gunicorn>=22.0.0
+azure-identity>=1.19.0
+azure-cosmos>=4.7.0
+azure-storage-queue>=12.9.0

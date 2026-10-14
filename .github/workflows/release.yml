@@ -1,0 +1,60 @@
+name: Release
+
+# Builds dashboard.zip and collector.zip with their dependencies vendored (no build step on Azure)
+# and publishes them as release assets. The Deploy to Azure template downloads them from
+# https://github.com/<owner>/<repo>/releases/latest/download/<file>.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create, for example v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest -r src/collector/requirements.txt -r src/dashboard/requirements.txt
+          python -m pytest tests -q
+
+      - name: Build packages
+        run: |
+          set -euo pipefail
+          for app in dashboard collector; do
+            mkdir -p "build/$app"
+            cp -r "src/$app/." "build/$app/"
+            pip install --no-cache-dir \
+              --target "build/$app/.python_packages/lib/site-packages" \
+              --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 \
+              --only-binary=:all: -r "src/$app/requirements.txt"
+            find "build/$app" -name '__pycache__' -type d -prune -exec rm -rf {} +
+            (cd "build/$app" && zip -qr "../../$app.zip" .)
+          done
+          ls -l dashboard.zip collector.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dashboard.zip collector.zip --clobber
+          else
+            gh release create "$TAG" dashboard.zip collector.zip --title "$TAG" --generate-notes --latest
+          fi

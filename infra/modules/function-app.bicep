@@ -17,6 +17,13 @@ param refreshMode string
 param nearRealTimeIntervalMinutes int
 param subscriptionFilter string
 
+// NCRONTAB (six fields). Editing the REFRESH_CRON app setting later changes the schedule without redeploying.
+var refreshCron = refreshMode == 'weekly'
+  ? '0 0 2 * * 1'
+  : refreshMode == 'nearRealTime'
+      ? (nearRealTimeIntervalMinutes >= 60 ? '0 0 * * * *' : '0 */${nearRealTimeIntervalMinutes} * * * *')
+      : '0 0 2 * * *'
+
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planName
   location: location
@@ -97,6 +104,14 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'REFRESH_MODE'
           value: refreshMode
+        }
+        {
+          name: 'REFRESH_CRON'
+          value: refreshCron
+        }
+        {
+          name: 'AzureWebJobs.scheduled_refresh.Disabled'
+          value: refreshMode == 'manual' ? 'true' : 'false'
         }
         {
           name: 'NEAR_REAL_TIME_INTERVAL_MINUTES'

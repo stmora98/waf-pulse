@@ -7,6 +7,7 @@ param managedIdentityClientId string
 param cosmosEndpoint string
 param cosmosDatabase string
 param storageAccountUrl string
+param storageQueueEndpoint string
 param appInsightsConnectionString string
 param webPackageUrl string
 param dashboardAuthClientId string
@@ -34,6 +35,8 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
       ftpsState: 'Disabled'
       http20Enabled: true
       healthCheckPath: '/api/health'
+      // Dependencies are vendored in the package, so the app starts without a build step.
+      appCommandLine: 'PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app'
       appSettings: [
         {
           name: 'WEBSITE_RUN_FROM_PACKAGE'
@@ -58,6 +61,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'STORAGE_ACCOUNT_URL'
           value: storageAccountUrl
+        }
+        {
+          name: 'STORAGE_QUEUE_URL'
+          value: storageQueueEndpoint
         }
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

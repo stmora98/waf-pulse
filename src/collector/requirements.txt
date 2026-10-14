@@ -1,0 +1,7 @@
+azure-functions>=1.21.0
+azure-functions-durable>=1.2.9
+azure-identity>=1.19.0
+azure-mgmt-resourcegraph>=8.0.0
+azure-mgmt-subscription>=3.1.1
+azure-cosmos>=4.7.0
+azure-storage-blob>=12.19.0

@@ -168,6 +168,7 @@ module dashboardApp './modules/app-service.bicep' = {
     cosmosEndpoint: cosmosDb.outputs.endpoint
     cosmosDatabase: cosmosDb.outputs.databaseName
     storageAccountUrl: storage.outputs.blobEndpoint
+    storageQueueEndpoint: storage.outputs.queueEndpoint
     appInsightsConnectionString: appInsights.outputs.connectionString
     webPackageUrl: webPackageUrl
     dashboardAuthClientId: dashboardAuthClientId

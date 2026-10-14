@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "17858584083727746670"
+      "templateHash": "9354176134709590680"
     }
   },
   "parameters": {
@@ -532,7 +532,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "2412405529294950130"
+              "templateHash": "4436919016353770458"
             }
           },
           "parameters": {
@@ -610,6 +610,22 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
               ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/queueServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', 'refresh-requests')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/queueServices', parameters('storageAccountName'), 'default')]"
+              ]
             }
           ],
           "outputs": {
@@ -624,6 +640,10 @@
             "blobEndpoint": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.blob]"
+            },
+            "queueEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.queue]"
             },
             "deploymentContainerName": {
               "type": "string",
@@ -1081,6 +1101,9 @@
           "storageAccountUrl": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
           },
+          "storageQueueEndpoint": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.queueEndpoint.value]"
+          },
           "appInsightsConnectionString": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.connectionString.value]"
           },
@@ -1101,7 +1124,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "14999738521520319319"
+              "templateHash": "14628770010075289847"
             }
           },
           "parameters": {
@@ -1130,6 +1153,9 @@
               "type": "string"
             },
             "storageAccountUrl": {
+              "type": "string"
+            },
+            "storageQueueEndpoint": {
               "type": "string"
             },
             "appInsightsConnectionString": {
@@ -1170,6 +1196,7 @@
                   "ftpsState": "Disabled",
                   "http20Enabled": true,
                   "healthCheckPath": "/api/health",
+                  "appCommandLine": "PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app",
                   "appSettings": [
                     {
                       "name": "WEBSITE_RUN_FROM_PACKAGE",
@@ -1194,6 +1221,10 @@
                     {
                       "name": "STORAGE_ACCOUNT_URL",
                       "value": "[parameters('storageAccountUrl')]"
+                    },
+                    {
+                      "name": "STORAGE_QUEUE_URL",
+                      "value": "[parameters('storageQueueEndpoint')]"
                     },
                     {
                       "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -1392,7 +1423,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "18087108602047410181"
+              "templateHash": "788417157900807090"
             }
           },
           "parameters": {
@@ -1450,6 +1481,9 @@
             "subscriptionFilter": {
               "type": "string"
             }
+          },
+          "variables": {
+            "refreshCron": "[if(equals(parameters('refreshMode'), 'weekly'), '0 0 2 * * 1', if(equals(parameters('refreshMode'), 'nearRealTime'), if(greaterOrEquals(parameters('nearRealTimeIntervalMinutes'), 60), '0 0 * * * *', format('0 */{0} * * * *', parameters('nearRealTimeIntervalMinutes'))), '0 0 2 * * *'))]"
           },
           "resources": [
             {
@@ -1535,6 +1569,14 @@
                     {
                       "name": "REFRESH_MODE",
                       "value": "[parameters('refreshMode')]"
+                    },
+                    {
+                      "name": "REFRESH_CRON",
+                      "value": "[variables('refreshCron')]"
+                    },
+                    {
+                      "name": "AzureWebJobs.scheduled_refresh.Disabled",
+                      "value": "[if(equals(parameters('refreshMode'), 'manual'), 'true', 'false')]"
                     },
                     {
                       "name": "NEAR_REAL_TIME_INTERVAL_MINUTES",

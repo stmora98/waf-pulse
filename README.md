@@ -4,7 +4,7 @@ Continuous Azure Well-Architected Framework (WAF) and Cloud Adoption Framework (
 
 Each company deploys its **own isolated copy** into its **own subscription** with one click, using its **own service principal**. Nothing is shared and nothing leaves your tenant.
 
-> **Status:** the infrastructure template and the Deploy to Azure experience are ready. The dashboard and collector application packages (`dashboard.zip`, `collector.zip`) are published to GitHub Releases by a release workflow that is not part of this repository yet. Until the first release exists, a deployment creates all Azure resources but the dashboard shows an error page and the collector has no functions.
+> **Status: early preview.** The first vertical slice is in place: the collector inventories every subscription in the tenant and checks 7 Well-Architected rules, and the dashboard shows scores per pillar and the findings. More rules and checks are added over time. Packages are published to GitHub Releases by the [Release workflow](.github/workflows/release.yml).
 
 ## Deploy to Azure
 
@@ -97,10 +97,28 @@ Alternatively, pass an existing app registration client ID in the `dashboardAuth
 
 | Mode | Behavior |
 |---|---|
-| Daily | Full collection once a day. |
-| Weekly | Full collection once a week. |
-| Near real time | Every 5 to 60 minutes (default 15) one Azure Resource Graph `resourcechanges` query covers the whole tenant and refreshes only what changed. |
-| Manual | Only when you select the refresh button. |
+| Daily | Full collection once a day (02:00 UTC). |
+| Weekly | Full collection once a week (Monday 02:00 UTC). |
+| Near real time | Full collection every 5 to 60 minutes (default 15). Incremental refresh from the Azure Resource Graph `resourcechanges` table is planned. |
+| Manual | Only when you select **Refresh now** in the dashboard. |
+
+**Refresh now** works in every mode. The dashboard puts a message in a storage queue and the collector picks it up, so the collector exposes no public endpoint. Only one assessment runs at a time.
+
+To change the schedule later without redeploying, edit the `REFRESH_CRON` application setting of the Function App (a six field NCRONTAB expression, for example `0 0 2 * * *`). To turn the schedule off, set `AzureWebJobs.scheduled_refresh.Disabled` to `true`.
+
+## What it checks
+
+| Rule | Pillar | Severity |
+|---|---|---|
+| Storage account allows public blob access | Security | High |
+| SQL server allows public network access | Security | High |
+| Storage account accepts TLS older than 1.2 | Security | Medium |
+| Virtual machine is not in an availability zone or availability set | Reliability | Medium |
+| Public IP address is not attached to any resource | Cost Optimization | Medium |
+| Managed disk is not attached to a virtual machine | Cost Optimization | Medium |
+| Resource group has no tags | Operational Excellence | Low |
+
+Each pillar score is `100 - (weighted findings / resources x 10)`, where weights are critical 10, high 5, medium 2 and low 1. A pillar with no rules shows `n/a`. Rules live in [`rules.py`](src/collector/waf_pulse/rules.py); adding one needs no other change.
 
 ## Security notes
 
@@ -116,12 +134,30 @@ Delete the resource group you deployed into. The service principal and its role 
 ## Repository layout
 
 ```text
+src/
+  collector/               Azure Functions (Python, Durable Functions)
+  dashboard/               Flask web app
+tests/                     Unit tests
 infra/
   main.bicep               Source of truth (resource group scope)
   modules/                 One module per Azure service
   azuredeploy.json         Compiled ARM template used by the button
   createUiDefinition.json  Portal form
   main.parameters.json     Example parameters
+.github/workflows/         Tests, template check, release
+```
+
+## Development
+
+```bash
+pip install pytest -r src/collector/requirements.txt -r src/dashboard/requirements.txt
+python -m pytest tests -q
+```
+
+Publish a release (the Deploy to Azure template downloads `dashboard.zip` and `collector.zip` from the latest release):
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 The button supports ARM JSON only, so `azuredeploy.json` is committed. After changing Bicep, rebuild it:

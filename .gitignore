@@ -1,3 +1,10 @@
 .copilot-azure/
 *.env
 .vscode/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.python_packages/
+build/
+*.zip
