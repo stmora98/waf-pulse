@@ -135,3 +135,7 @@ A workflow checks that the committed template matches the Bicep source.
 ## Acknowledgements
 
 Inspired by the [Azure Optimization Engine](https://learn.microsoft.com/cloud-computing/finops/toolkit/optimization-engine/overview) and the CAF-WAF workshop toolkit.
+
+## License
+
+[MIT](LICENSE)
