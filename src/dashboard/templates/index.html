@@ -42,7 +42,7 @@
       <section>
         <h2>Findings{% if selected_pillar %} · {{ selected_pillar }}{% endif %}{% if selected_severity %} · {{ selected_severity }}{% endif %}</h2>
         {% if findings %}
-          <table>
+          <div class="table-wrap"><table>
             <thead><tr><th>Severity</th><th>Pillar</th><th>Finding</th><th>Resource</th><th>Recommendation</th></tr></thead>
             <tbody>
               {% for f in findings %}
@@ -55,7 +55,7 @@
                 </tr>
               {% endfor %}
             </tbody>
-          </table>
+          </table></div>
           <p class="muted">Showing up to 200 findings, most severe first.</p>
         {% else %}
           <p class="muted">No findings for this filter.</p>
@@ -64,14 +64,14 @@
 
       <section>
         <h2>Subscriptions</h2>
-        <table>
+        <div class="table-wrap"><table>
           <thead><tr><th>Subscription</th><th>Resources</th><th>Findings</th></tr></thead>
           <tbody>
             {% for sub in summary.subscriptions %}
               <tr><td>{{ sub.name }}<br><span class="muted">{{ sub.id }}</span></td><td>{{ sub.resourceCount }}</td><td>{{ sub.findingCount }}</td></tr>
             {% endfor %}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       {% if summary.errors %}

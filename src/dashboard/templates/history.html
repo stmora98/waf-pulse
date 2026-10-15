@@ -21,7 +21,7 @@
               {% for d in s.dots %}<circle class="dot line-{{ s.slug }}" cx="{{ d.x }}" cy="{{ d.y }}" r="3"></circle>{% endfor %}
             {% endfor %}
             {% for l in trend.labels %}
-              <text class="axis" x="{{ l.x }}" y="{{ trend.label_y }}" text-anchor="middle">{{ l.text }}</text>
+              <text class="axis" x="{{ l.x }}" y="{{ trend.label_y }}" text-anchor="{{ l.anchor }}">{{ l.text }}</text>
             {% endfor %}
           </svg>
           <ul class="legend">
@@ -31,6 +31,7 @@
         </section>
       {% endif %}
 
+      <div class="table-wrap">
       <table>
         <thead>
           <tr>
@@ -52,7 +53,7 @@
                 <td>{% if run.scores and run.scores.get(pillar) is not none %}{{ run.scores.get(pillar) }}{% else %}<span class="muted">·</span>{% endif %}</td>
               {% endfor %}
               <td>
-                {% if run.status == 'completed' and run.previous %}
+                {% if run.status == 'completed' and run.previous and run.scores %}
                   <a href="{{ url_for('compare_page', base=run.previous, target=run.id) }}">Compare with previous</a>
                 {% endif %}
               </td>
@@ -60,6 +61,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <p class="muted">Showing the most recent 30 runs. Findings are kept for the retention period (90 days by default); run summaries are kept.</p>
     {% endif %}
 {% endblock %}

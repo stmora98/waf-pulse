@@ -65,9 +65,14 @@ def trend(runs):
 
     labels = []
     if scored:
-        labels.append({"x": round(x_at(0), 1), "text": short_time(scored[0].get("completedUtc"))})
-        if len(scored) > 1:
-            labels.append({"x": round(x_at(len(scored) - 1), 1), "text": short_time(scored[-1].get("completedUtc"))})
+        only_one = len(scored) == 1
+        labels.append(
+            {"x": round(x_at(0), 1), "text": short_time(scored[0].get("completedUtc")), "anchor": "middle" if only_one else "start"}
+        )
+        if not only_one:
+            labels.append(
+                {"x": round(x_at(len(scored) - 1), 1), "text": short_time(scored[-1].get("completedUtc")), "anchor": "end"}
+            )
 
     return {
         "width": CHART_WIDTH,

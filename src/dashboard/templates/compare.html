@@ -29,7 +29,7 @@
 
       <section>
         <h3>Scores</h3>
-        <table class="narrow">
+        <div class="table-wrap"><table class="narrow">
           <thead><tr><th>Pillar</th><th>Base</th><th>Target</th><th>Change</th></tr></thead>
           <tbody>
             {% for row in result.scores %}
@@ -46,14 +46,14 @@
               </tr>
             {% endfor %}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       {% for title, items, count in [('New findings', result.new, result.newCount), ('Resolved findings', result.resolved, result.resolvedCount)] %}
         <section>
           <h3>{{ title }}</h3>
           {% if items %}
-            <table>
+            <div class="table-wrap"><table>
               <thead><tr><th>Severity</th><th>Pillar</th><th>Finding</th><th>Resource</th></tr></thead>
               <tbody>
                 {% for f in items %}
@@ -65,7 +65,7 @@
                   </tr>
                 {% endfor %}
               </tbody>
-            </table>
+            </table></div>
             {% if count > items | length %}<p class="muted">Showing {{ items | length }} of {{ count }}.</p>{% endif %}
           {% else %}
             <p class="muted">None.</p>
