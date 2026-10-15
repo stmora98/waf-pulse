@@ -20,6 +20,11 @@ QUEUE_NAME = "refresh-requests"
 _database = None
 
 
+def public(document):
+    """Removes Cosmos DB system properties (_rid, _self, _etag, ...) before data leaves the service."""
+    return {key: value for key, value in document.items() if not key.startswith("_")}
+
+
 def _credential():
     client_id = os.environ.get("MANAGED_IDENTITY_CLIENT_ID")
     return ManagedIdentityCredential(client_id=client_id) if client_id else DefaultAzureCredential()
@@ -43,11 +48,11 @@ def latest_run(completed_only=False):
             partition_key=TENANT_PARTITION,
         )
     )
-    return items[0] if items else None
+    return public(items[0]) if items else None
 
 
 def summary(run_id):
-    return _db().get_container_client("summaries").read_item(run_id, partition_key=run_id)
+    return public(_db().get_container_client("summaries").read_item(run_id, partition_key=run_id))
 
 
 def findings(run_id, pillar=None, severity=None, limit=200):
@@ -66,7 +71,7 @@ def findings(run_id, pillar=None, severity=None, limit=200):
             parameters.append({"name": "@pillar", "value": pillar})
         query += " OFFSET 0 LIMIT @limit"
         parameters.append({"name": "@limit", "value": remaining})
-        results.extend(container.query_items(query, parameters=parameters, partition_key=run_id))
+        results.extend(public(item) for item in container.query_items(query, parameters=parameters, partition_key=run_id))
     return results
 
 

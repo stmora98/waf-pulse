@@ -127,7 +127,14 @@ To change the schedule later without redeploying, edit the `REFRESH_CRON` applic
 | Managed disk is not attached to a virtual machine | Cost Optimization | Medium |
 | Resource group has no tags | Operational Excellence | Low |
 
-Each pillar score is `100 - (weighted findings / resources x 10)`, where weights are critical 10, high 5, medium 2 and low 1. A pillar with no rules shows `n/a`. Rules live in [`rules.py`](src/collector/waf_pulse/rules.py); adding one needs no other change.
+Each rule is scored against the resources it actually evaluates, so one finding is not diluted by unrelated resources:
+
+- `prevalence = affected / applicable` for every rule that has at least one applicable resource.
+- `score = 100 - (sum of weight x prevalence / sum of weights) x 100`, with weights critical 10, high 5, medium 2 and low 1.
+- The worst severity found caps the pillar: a critical finding limits it to 49, a high to 79 and a medium to 89.
+- A pillar with nothing to evaluate shows `n/a`.
+
+Rules live in [`rules.py`](src/collector/waf_pulse/rules.py), each with the resource types it applies to. Adding one needs no other change.
 
 ## Security notes
 

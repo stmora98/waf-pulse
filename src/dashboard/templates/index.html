@@ -44,7 +44,7 @@
              href="{{ url_for('index', pillar=pillar) }}">
             <span class="card-title">{{ pillar }}</span>
             <span class="card-score">{% if score is none %}n/a{% else %}{{ score }}{% endif %}</span>
-            {% if score is none %}<span class="muted">No rules yet</span>{% endif %}
+            {% if score is none %}<span class="muted">Not evaluated</span>{% endif %}
           </a>
         {% endfor %}
       </section>
