@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}WAF Pulse{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>WAF Pulse</h1>
+      <p class="muted">Well-Architected assessment of your Azure tenant</p>
+    </div>
+    <div class="actions">
+      <nav class="nav" aria-label="Sections">
+        <a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active" aria-current="page"{% endif %}>Overview</a>
+        <a href="{{ url_for('history_page') }}" {% if request.endpoint == 'history_page' %}class="active" aria-current="page"{% endif %}>History</a>
+        <a href="{{ url_for('compare_page') }}" {% if request.endpoint == 'compare_page' %}class="active" aria-current="page"{% endif %}>Compare</a>
+      </nav>
+      {% if user %}<span class="muted">{{ user }}</span>{% endif %}
+      <button id="refresh" type="button">Refresh now</button>
+    </div>
+  </header>
+  <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

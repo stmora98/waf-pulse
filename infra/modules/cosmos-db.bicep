@@ -5,6 +5,7 @@ param managedIdentityPrincipalId string
 param workspaceId string
 
 var databaseName = 'cafwaf'
+// defaultTtl -1 enables per-document expiry. Only findings set a ttl, so the other containers never expire.
 var containers = [
   {
     name: 'runs'
@@ -70,6 +71,7 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
     properties: {
       resource: {
         id: c.name
+        defaultTtl: -1
         partitionKey: {
           paths: [
             c.partitionKey

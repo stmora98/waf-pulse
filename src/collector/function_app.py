@@ -110,6 +110,8 @@ def act_finalize(payload: dict):
             "subscriptionCount": summary["subscriptionCount"],
             "resourceCount": summary["resourceCount"],
             "findingCount": summary["findingCount"],
+            "scores": summary["scores"],
+            "severityTotals": summary["severityTotals"],
         }
     )
     try:

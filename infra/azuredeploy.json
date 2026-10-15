@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "4231038920433675211"
+      "templateHash": "17755820304195977422"
     }
   },
   "parameters": {
@@ -686,7 +686,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "16936841805582988105"
+              "templateHash": "5245519232629623309"
             }
           },
           "parameters": {
@@ -782,6 +782,7 @@
               "properties": {
                 "resource": {
                   "id": "[variables('containers')[copyIndex()].name]",
+                  "defaultTtl": -1,
                   "partitionKey": {
                     "paths": [
                       "[variables('containers')[copyIndex()].partitionKey]"
@@ -1423,7 +1424,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "788417157900807090"
+              "templateHash": "3166612853927719299"
             }
           },
           "parameters": {
@@ -1573,6 +1574,10 @@
                     {
                       "name": "REFRESH_CRON",
                       "value": "[variables('refreshCron')]"
+                    },
+                    {
+                      "name": "FINDINGS_RETENTION_DAYS",
+                      "value": "90"
                     },
                     {
                       "name": "AzureWebJobs.scheduled_refresh.Disabled",

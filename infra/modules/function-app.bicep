@@ -110,6 +110,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: refreshCron
         }
         {
+          name: 'FINDINGS_RETENTION_DAYS'
+          value: '90'
+        }
+        {
           name: 'AzureWebJobs.scheduled_refresh.Disabled'
           value: refreshMode == 'manual' ? 'true' : 'false'
         }

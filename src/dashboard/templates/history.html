@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}History · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Run history</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not runs %}
+      <section class="notice">No runs yet. Select <strong>Refresh now</strong> to start the first one.</section>
+    {% else %}
+      {% if trend.runs > 0 %}
+        <section class="panel">
+          <h3>Score over time</h3>
+          <svg class="chart" viewBox="0 0 {{ trend.width }} {{ trend.height }}" role="img"
+               aria-label="Score per pillar over the last {{ trend.runs }} completed runs">
+            {% for g in trend.grid %}
+              <line class="grid" x1="{{ trend.left }}" x2="{{ trend.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+              <text class="axis" x="{{ trend.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+            {% endfor %}
+            {% for s in trend.series %}
+              <polyline class="line line-{{ s.slug }}" fill="none" points="{{ s.points }}"></polyline>
+              {% for d in s.dots %}<circle class="dot line-{{ s.slug }}" cx="{{ d.x }}" cy="{{ d.y }}" r="3"></circle>{% endfor %}
+            {% endfor %}
+            {% for l in trend.labels %}
+              <text class="axis" x="{{ l.x }}" y="{{ trend.label_y }}" text-anchor="middle">{{ l.text }}</text>
+            {% endfor %}
+          </svg>
+          <ul class="legend">
+            {% for s in trend.series %}<li><span class="swatch line-{{ s.slug }}"></span>{{ s.pillar }}</li>{% endfor %}
+          </ul>
+          {% if trend.runs == 1 %}<p class="muted">One completed run so far. The trend appears after the next one.</p>{% endif %}
+        </section>
+      {% endif %}
+
+      <table>
+        <thead>
+          <tr>
+            <th>Started (UTC)</th><th>Trigger</th><th>Status</th><th>Duration</th><th>Resources</th><th>Findings</th>
+            {% for pillar in pillars %}<th title="{{ pillar }}">{{ pillar.split(' ')[0] }}</th>{% endfor %}
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for run in runs %}
+            <tr>
+              <td>{{ run.when }}</td>
+              <td>{{ run.trigger or '' }}</td>
+              <td><span class="chip {% if run.status == 'completed' %}low{% elif run.status == 'failed' %}failed{% else %}running{% endif %}">{{ run.status }}</span></td>
+              <td>{% if run.duration is not none %}{{ run.duration }} s{% endif %}</td>
+              <td>{{ run.resourceCount if run.resourceCount is not none else '' }}</td>
+              <td>{{ run.findingCount if run.findingCount is not none else '' }}</td>
+              {% for pillar in pillars %}
+                <td>{% if run.scores and run.scores.get(pillar) is not none %}{{ run.scores.get(pillar) }}{% else %}<span class="muted">·</span>{% endif %}</td>
+              {% endfor %}
+              <td>
+                {% if run.status == 'completed' and run.previous %}
+                  <a href="{{ url_for('compare_page', base=run.previous, target=run.id) }}">Compare with previous</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted">Showing the most recent 30 runs. Findings are kept for the retention period (90 days by default); run summaries are kept.</p>
+    {% endif %}
+{% endblock %}

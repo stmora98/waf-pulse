@@ -1,9 +1,13 @@
 """WAF Pulse dashboard."""
 import logging
+import re
 
-from flask import Flask, jsonify, render_template, request
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
+from flask import Flask, abort, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 
 import data
+import history
 
 app = Flask(__name__)
 
@@ -79,6 +83,108 @@ def api_findings():
     if error:
         return jsonify(error=error), 503
     return jsonify(runId=summary["runId"] if summary else None, findings=findings)
+
+
+@app.context_processor
+def inject_user():
+    return {"user": request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "")}
+
+
+RUN_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+def _run_rows(runs):
+    rows = [
+        {**run, "duration": history.duration_seconds(run), "when": history.short_time(run.get("startedUtc"))}
+        for run in runs
+    ]
+    completed = [row["id"] for row in rows if row.get("status") == "completed"]
+    for row in rows:
+        if row.get("status") == "completed":
+            position = completed.index(row["id"])
+            row["previous"] = completed[position + 1] if position + 1 < len(completed) else None
+    return rows
+
+
+@app.get("/history")
+def history_page():
+    try:
+        runs = data.history()
+    except Exception:
+        logging.exception("Could not load run history")
+        return render_template("history.html", error="The data store is not reachable right now.", runs=[],
+                               trend=history.trend([]), pillars=data.PILLARS, slug=history.slug)
+    return render_template("history.html", error=None, runs=_run_rows(runs), trend=history.trend(runs),
+                           pillars=data.PILLARS, slug=history.slug)
+
+
+@app.get("/api/history")
+def api_history():
+    try:
+        return jsonify(runs=data.history())
+    except Exception:
+        logging.exception("Could not load run history")
+        return jsonify(error="The data store is not reachable right now."), 503
+
+
+def _select_runs(base_id, target_id):
+    """Defaults to the latest completed run against the one before it."""
+    runs = data.history()
+    completed = [run for run in runs if run.get("status") == "completed"]
+    by_id = {run["id"]: run for run in runs}
+
+    def pick(run_id, fallback):
+        if not run_id:
+            return fallback
+        if not RUN_ID.match(run_id):
+            abort(400)
+        return by_id.get(run_id) or data.run(run_id)
+
+    target = pick(target_id, completed[0] if completed else None)
+    base = pick(base_id, completed[1] if len(completed) > 1 else None)
+    return runs, base, target
+
+
+def _compare(base_id, target_id):
+    runs, base, target = _select_runs(base_id, target_id)
+    if not base or not target:
+        return runs, base, target, None
+    result = history.compare(data.run_findings(base["id"]), data.run_findings(target["id"]))
+    result["scores"] = history.score_deltas(base.get("scores"), target.get("scores"))
+    return runs, base, target, result
+
+
+@app.get("/compare")
+def compare_page():
+    try:
+        runs, base, target, result = _compare(request.args.get("base"), request.args.get("target"))
+    except HTTPException:
+        raise
+    except CosmosResourceNotFoundError:
+        abort(404)
+    except Exception:
+        logging.exception("Could not compare runs")
+        return render_template("compare.html", error="The data store is not reachable right now.", runs=[],
+                               base=None, target=None, result=None, pillars=data.PILLARS), 503
+    options = _run_rows([run for run in runs if run.get("status") == "completed"])
+    return render_template("compare.html", error=None, runs=options, base=base, target=target, result=result,
+                           pillars=data.PILLARS)
+
+
+@app.get("/api/compare")
+def api_compare():
+    try:
+        _, base, target, result = _compare(request.args.get("base"), request.args.get("target"))
+    except HTTPException:
+        raise
+    except CosmosResourceNotFoundError:
+        abort(404)
+    except Exception:
+        logging.exception("Could not compare runs")
+        return jsonify(error="The data store is not reachable right now."), 503
+    if result is None:
+        return jsonify(error="At least two completed runs are needed."), 409
+    return jsonify(base=base, target=target, **result)
 
 
 @app.post("/api/refresh")

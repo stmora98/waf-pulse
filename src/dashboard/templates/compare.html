@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Compare · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Compare runs</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not base or not target %}
+      <section class="notice">At least two completed runs are needed to compare. Select <strong>Refresh now</strong> to create another one.</section>
+    {% else %}
+      <form class="picker" method="get" action="{{ url_for('compare_page') }}">
+        <label>Base
+          <select name="base">
+            {% for run in runs %}<option value="{{ run.id }}" {% if run.id == base.id %}selected{% endif %}>{{ run.when }} · {{ run.findingCount if run.findingCount is not none else '' }} findings</option>{% endfor %}
+          </select>
+        </label>
+        <label>Target
+          <select name="target">
+            {% for run in runs %}<option value="{{ run.id }}" {% if run.id == target.id %}selected{% endif %}>{{ run.when }} · {{ run.findingCount if run.findingCount is not none else '' }} findings</option>{% endfor %}
+          </select>
+        </label>
+        <button type="submit">Compare</button>
+      </form>
+
+      <section class="meta">
+        <span class="chip failed">New: {{ result.newCount }}</span>
+        <span class="chip low">Resolved: {{ result.resolvedCount }}</span>
+        <span class="chip">Unchanged: {{ result.unchangedCount }}</span>
+      </section>
+
+      <section>
+        <h3>Scores</h3>
+        <table class="narrow">
+          <thead><tr><th>Pillar</th><th>Base</th><th>Target</th><th>Change</th></tr></thead>
+          <tbody>
+            {% for row in result.scores %}
+              <tr>
+                <td>{{ row.pillar }}</td>
+                <td>{{ row.base if row.base is not none else '·' }}</td>
+                <td>{{ row.target if row.target is not none else '·' }}</td>
+                <td>
+                  {% if row.delta is none %}<span class="muted">·</span>
+                  {% elif row.delta > 0 %}<span class="delta up">+{{ row.delta }}</span>
+                  {% elif row.delta < 0 %}<span class="delta down">{{ row.delta }}</span>
+                  {% else %}<span class="muted">0</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      {% for title, items, count in [('New findings', result.new, result.newCount), ('Resolved findings', result.resolved, result.resolvedCount)] %}
+        <section>
+          <h3>{{ title }}</h3>
+          {% if items %}
+            <table>
+              <thead><tr><th>Severity</th><th>Pillar</th><th>Finding</th><th>Resource</th></tr></thead>
+              <tbody>
+                {% for f in items %}
+                  <tr>
+                    <td><span class="chip {{ f.severity }}">{{ f.severity }}</span></td>
+                    <td>{{ f.pillar }}</td>
+                    <td>{{ f.title }}</td>
+                    <td><span title="{{ f.resourceId }}">{{ f.resourceName }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% if count > items | length %}<p class="muted">Showing {{ items | length }} of {{ count }}.</p>{% endif %}
+          {% else %}
+            <p class="muted">None.</p>
+          {% endif %}
+        </section>
+      {% endfor %}
+      <p class="muted">Runs started before history tracking was added have no scores and cannot be matched finding by finding.</p>
+    {% endif %}
+{% endblock %}

@@ -1,25 +1,5 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WAF Pulse</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-  <header class="top">
-    <div>
-      <h1>WAF Pulse</h1>
-      <p class="muted">Well-Architected assessment of your Azure tenant</p>
-    </div>
-    <div class="actions">
-      {% if user %}<span class="muted">{{ user }}</span>{% endif %}
-      <button id="refresh" type="button">Refresh now</button>
-    </div>
-  </header>
-  <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
-
-  <main>
+{% extends "base.html" %}
+{% block content %}
     {% if error %}
       <section class="notice error">{{ error }}</section>
     {% elif not summary %}
@@ -35,6 +15,7 @@
         <span>Findings: <strong>{{ summary.findingCount }}</strong></span>
         {% if latest and latest.status == 'running' %}<span class="chip running">Refresh running</span>{% endif %}
         {% if latest and latest.status == 'failed' %}<span class="chip failed">Last refresh failed</span>{% endif %}
+        <a href="{{ url_for('compare_page') }}">What changed since the previous run?</a>
       </section>
 
       <section class="cards">
@@ -99,7 +80,4 @@
         </section>
       {% endif %}
     {% endif %}
-  </main>
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
-</body>
-</html>
+{% endblock %}

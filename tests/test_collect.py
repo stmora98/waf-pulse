@@ -16,6 +16,26 @@ def test_finding_id_is_stable_and_cosmos_safe():
     assert collect.build_finding("run2", first_rule, row)["id"] != first["id"]
 
 
+def test_finding_key_is_the_same_in_every_run():
+    first_rule = RULES[0]
+    row = {"id": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/a", "name": "a", "type": "t", "subscriptionId": "s"}
+    assert collect.build_finding("run1", first_rule, row)["key"] == collect.build_finding("run2", first_rule, row)["key"]
+    other = collect.build_finding("run1", RULES[1], row)
+    assert other["key"] != collect.build_finding("run1", first_rule, row)["key"]
+
+
+def test_findings_expire_after_the_retention_period(monkeypatch):
+    row = {"id": "/x", "name": "a", "type": "t", "subscriptionId": "s"}
+    monkeypatch.delenv("FINDINGS_RETENTION_DAYS", raising=False)
+    assert collect.build_finding("r", RULES[0], row)["ttl"] == 90 * 86400
+    monkeypatch.setenv("FINDINGS_RETENTION_DAYS", "7")
+    assert collect.build_finding("r", RULES[0], row)["ttl"] == 7 * 86400
+    monkeypatch.setenv("FINDINGS_RETENTION_DAYS", "0")
+    assert "ttl" not in collect.build_finding("r", RULES[0], row)
+    monkeypatch.setenv("FINDINGS_RETENTION_DAYS", "not-a-number")
+    assert collect.build_finding("r", RULES[0], row)["ttl"] == 90 * 86400
+
+
 def test_collect_subscription_counts_findings_and_survives_a_failing_rule(monkeypatch):
     failing = rule("SEC-STG-002")
 

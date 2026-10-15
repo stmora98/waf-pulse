@@ -115,6 +115,12 @@ Alternatively, pass an existing app registration client ID in the `dashboardAuth
 
 To change the schedule later without redeploying, edit the `REFRESH_CRON` application setting of the Function App (a six field NCRONTAB expression, for example `0 0 2 * * *`). To turn the schedule off, set `AzureWebJobs.scheduled_refresh.Disabled` to `true`.
 
+## History and comparison
+
+- **History** (`/history`): the last 30 runs with duration, resources, findings, a score per pillar and a line chart of the scores over time.
+- **Compare** (`/compare`): the findings that are new, resolved or unchanged between two runs, and the score change per pillar. By default it compares the latest completed run with the one before it.
+- Findings are kept for 90 days (`FINDINGS_RETENTION_DAYS` application setting of the Function App, `0` keeps them forever). Run summaries and scores are kept.
+
 ## What it checks
 
 | Rule | Pillar | Severity |

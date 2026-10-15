@@ -1,17 +1,34 @@
 """Assessment logic: turn Resource Graph results into findings, summaries and scores."""
 import hashlib
+import os
 
 from . import graph, scoring
 from .rules import INVENTORY_QUERY, RESOURCE_GROUP_INVENTORY_QUERY, RULES, SEVERITIES
 
 MAX_FINDINGS_PER_RULE = 1000
+DEFAULT_RETENTION_DAYS = 90
+
+
+def retention_seconds():
+    """Findings expire after FINDINGS_RETENTION_DAYS (default 90). 0 keeps them forever."""
+    try:
+        days = int(os.environ.get("FINDINGS_RETENTION_DAYS", DEFAULT_RETENTION_DAYS))
+    except ValueError:
+        days = DEFAULT_RETENTION_DAYS
+    return days * 86400 if days > 0 else None
+
+
+def finding_key(rule_id, resource_id):
+    """Stable across runs, so two runs can be compared finding by finding."""
+    return hashlib.sha1(f"{rule_id}|{str(resource_id).lower()}".encode("utf-8")).hexdigest()
 
 
 def build_finding(run_id, rule, row):
     resource_id = str(row.get("id", ""))
     digest = hashlib.sha1(f"{run_id}|{rule.id}|{resource_id.lower()}".encode("utf-8")).hexdigest()
-    return {
+    finding = {
         "id": digest,
+        "key": finding_key(rule.id, resource_id),
         "runId": run_id,
         "subscriptionId": row.get("subscriptionId", ""),
         "ruleId": rule.id,
@@ -23,6 +40,10 @@ def build_finding(run_id, rule, row):
         "resourceName": row.get("name", ""),
         "resourceType": row.get("type", ""),
     }
+    ttl = retention_seconds()
+    if ttl:
+        finding["ttl"] = ttl
+    return finding
 
 
 def _inventory(credential, subscription_id):
