@@ -35,16 +35,24 @@ jobs:
       - name: Build packages
         run: |
           set -euo pipefail
-          for app in dashboard collector; do
-            mkdir -p "build/$app"
-            cp -r "src/$app/." "build/$app/"
-            pip install --no-cache-dir \
-              --target "build/$app/.python_packages/lib/site-packages" \
-              --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 \
-              --only-binary=:all: -r "src/$app/requirements.txt"
-            find "build/$app" -name '__pycache__' -type d -prune -exec rm -rf {} +
-            (cd "build/$app" && zip -qr "../../$app.zip" .)
-          done
+
+          # Dashboard: runs from the package, so its dependencies are vendored inside the zip.
+          mkdir -p build/dashboard
+          cp -r src/dashboard/. build/dashboard/
+          pip install --no-cache-dir \
+            --target build/dashboard/.python_packages/lib/site-packages \
+            --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 \
+            --only-binary=:all: -r src/dashboard/requirements.txt
+          find build/dashboard -name '__pycache__' -type d -prune -exec rm -rf {} +
+          (cd build/dashboard && zip -qr ../../dashboard.zip .)
+
+          # Collector: Python on Flex Consumption is deployed with a remote build, so the zip holds
+          # only the project source. The platform installs requirements.txt.
+          mkdir -p build/collector
+          cp -r src/collector/. build/collector/
+          find build/collector -name '__pycache__' -type d -prune -exec rm -rf {} +
+          (cd build/collector && zip -qr ../../collector.zip .)
+
           ls -l dashboard.zip collector.zip
 
       - name: Publish release

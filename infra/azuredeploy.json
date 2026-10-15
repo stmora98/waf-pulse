@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "9354176134709590680"
+      "templateHash": "4231038920433675211"
     }
   },
   "parameters": {
@@ -1680,7 +1680,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "5318149128341260782"
+              "templateHash": "13911625720564980938"
             }
           },
           "parameters": {
@@ -1743,8 +1743,8 @@
               "properties": {
                 "azCliVersion": "2.67.0",
                 "timeout": "PT30M",
-                "retentionInterval": "PT1H",
-                "cleanupPreference": "OnSuccess",
+                "retentionInterval": "PT2H",
+                "cleanupPreference": "OnExpiration",
                 "environmentVariables": [
                   {
                     "name": "PACKAGE_URL",
@@ -1763,7 +1763,7 @@
                     "value": "[parameters('managedIdentityClientId')]"
                   }
                 ],
-                "scriptContent": "#!/bin/bash\nset -u\n\nresult() {\n  echo \"{\\\"deployed\\\": $1, \\\"message\\\": \\\"$2\\\"}\" > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n}\n\n# The package may not be published yet; infrastructure must still deploy.\nif ! curl -fsSL \"$PACKAGE_URL\" -o /tmp/collector.zip; then\n  echo \"WARNING: could not download $PACKAGE_URL. Publish a release and run the deployment again.\"\n  result false \"package not available\"\n  exit 0\nfi\n\naz login --identity --username \"$IDENTITY_CLIENT_ID\" --allow-no-subscriptions --output none\n\n# Role assignments can take a few minutes to propagate.\nfor attempt in 1 2 3 4 5 6; do\n  if az functionapp deploy --resource-group \"$RESOURCE_GROUP\" --name \"$FUNCTION_APP\" --src-path /tmp/collector.zip --type zip --output none; then\n    result true \"collector package deployed\"\n    exit 0\n  fi\n  echo \"Attempt $attempt failed, retrying in 30 seconds\"\n  sleep 30\ndone\n\necho \"WARNING: collector package could not be deployed.\"\nresult false \"deployment failed\"\nexit 0\n"
+                "scriptContent": "#!/bin/bash\nset -u\n\nresult() {\n  echo \"{\\\"deployed\\\": $1, \\\"message\\\": \\\"$2\\\"}\" > \"$AZ_SCRIPTS_OUTPUT_PATH\"\n}\n\n# One line, no quotes or backslashes, so the text is safe inside the JSON output.\nclean() {\n  printf '%s' \"$1\" | tr -d '\"\\\\\\r' | tr '\\n' ' ' | cut -c1-300\n}\n\n# The package may not be published yet; infrastructure must still deploy.\nif ! curl -fsSL \"$PACKAGE_URL\" -o /tmp/collector.zip; then\n  echo \"WARNING: could not download $PACKAGE_URL. Publish a release and run the deployment again.\"\n  result false \"package not available\"\n  exit 0\nfi\n\naz login --identity --username \"$IDENTITY_CLIENT_ID\" --allow-no-subscriptions --output none\n\n# Python on Flex Consumption is published with a remote build (dependencies are installed by the platform).\n# Role assignments can take a few minutes to propagate, so failures are retried.\nerror=\"\"\nfor attempt in 1 2 3; do\n  if error=$(az functionapp deployment source config-zip \\\n      --src /tmp/collector.zip --name \"$FUNCTION_APP\" --resource-group \"$RESOURCE_GROUP\" \\\n      --build-remote true 2>&1); then\n    result true \"collector package deployed\"\n    exit 0\n  fi\n  echo \"Attempt $attempt failed: $error\"\n  sleep 60\ndone\n\necho \"WARNING: collector package could not be deployed.\"\nresult false \"$(clean \"$error\")\"\nexit 0\n"
               },
               "dependsOn": [
                 "[extensionResourceId(resourceId('Microsoft.Web/sites', parameters('functionAppName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Web/sites', parameters('functionAppName')), parameters('managedIdentityPrincipalId'), variables('websiteContributor')))]"
@@ -1774,6 +1774,10 @@
             "deployed": {
               "type": "bool",
               "value": "[reference(resourceId('Microsoft.Resources/deploymentScripts', parameters('scriptName')), '2023-08-01').outputs.deployed]"
+            },
+            "message": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Resources/deploymentScripts', parameters('scriptName')), '2023-08-01').outputs.message]"
             }
           }
         }
@@ -1812,6 +1816,10 @@
     "collectorDeployed": {
       "type": "bool",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'collector-deployment'), '2025-04-01').outputs.deployed.value]"
+    },
+    "collectorDeploymentMessage": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'collector-deployment'), '2025-04-01').outputs.message.value]"
     }
   }
 }

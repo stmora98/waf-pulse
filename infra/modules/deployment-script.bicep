@@ -14,7 +14,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' existing = {
   name: functionAppName
 }
 
-// Lets the identity publish the package through the management plane (basic publishing credentials are not used).
+// Lets the identity publish the package to the Function App.
 resource websiteContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: functionApp
   name: guid(functionApp.id, managedIdentityPrincipalId, websiteContributor)
@@ -42,8 +42,9 @@ resource deployCollector 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
   properties: {
     azCliVersion: '2.67.0'
     timeout: 'PT30M'
-    retentionInterval: 'PT1H'
-    cleanupPreference: 'OnSuccess'
+    // Keep the script and its log for two hours so a failed publish can be diagnosed.
+    retentionInterval: 'PT2H'
+    cleanupPreference: 'OnExpiration'
     environmentVariables: [
       {
         name: 'PACKAGE_URL'
@@ -70,6 +71,11 @@ result() {
   echo "{\"deployed\": $1, \"message\": \"$2\"}" > "$AZ_SCRIPTS_OUTPUT_PATH"
 }
 
+# One line, no quotes or backslashes, so the text is safe inside the JSON output.
+clean() {
+  printf '%s' "$1" | tr -d '"\\\r' | tr '\n' ' ' | cut -c1-300
+}
+
 # The package may not be published yet; infrastructure must still deploy.
 if ! curl -fsSL "$PACKAGE_URL" -o /tmp/collector.zip; then
   echo "WARNING: could not download $PACKAGE_URL. Publish a release and run the deployment again."
@@ -79,21 +85,26 @@ fi
 
 az login --identity --username "$IDENTITY_CLIENT_ID" --allow-no-subscriptions --output none
 
-# Role assignments can take a few minutes to propagate.
-for attempt in 1 2 3 4 5 6; do
-  if az functionapp deploy --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" --src-path /tmp/collector.zip --type zip --output none; then
+# Python on Flex Consumption is published with a remote build (dependencies are installed by the platform).
+# Role assignments can take a few minutes to propagate, so failures are retried.
+error=""
+for attempt in 1 2 3; do
+  if error=$(az functionapp deployment source config-zip \
+      --src /tmp/collector.zip --name "$FUNCTION_APP" --resource-group "$RESOURCE_GROUP" \
+      --build-remote true 2>&1); then
     result true "collector package deployed"
     exit 0
   fi
-  echo "Attempt $attempt failed, retrying in 30 seconds"
-  sleep 30
+  echo "Attempt $attempt failed: $error"
+  sleep 60
 done
 
 echo "WARNING: collector package could not be deployed."
-result false "deployment failed"
+result false "$(clean "$error")"
 exit 0
 '''
   }
 }
 
 output deployed bool = deployCollector.properties.outputs.deployed
+output message string = deployCollector.properties.outputs.message

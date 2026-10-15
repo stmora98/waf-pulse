@@ -228,3 +228,4 @@ output storageAccountName string = storage.outputs.storageAccountName
 output keyVaultName string = keyVault.outputs.kvName
 output managedIdentityClientId string = managedIdentity.outputs.clientId
 output collectorDeployed bool = collectorDeployment.outputs.deployed
+output collectorDeploymentMessage string = collectorDeployment.outputs.message

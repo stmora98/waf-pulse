@@ -40,6 +40,15 @@ Estimated cost is about **$20 per month** with the defaults (App Service B1 is a
 - An Azure subscription where you can create resources and role assignments (`Owner`, or `Contributor` plus `User Access Administrator`, on the resource group).
 - Permission to create an app registration in Microsoft Entra ID.
 - To grant tenant-wide read access: a user who can [elevate access](https://learn.microsoft.com/azure/role-based-access-control/elevate-access-global-admin) (Global Administrator).
+- These resource providers registered in the subscription. New subscriptions often lack `Microsoft.ContainerInstance` (used by the deployment script) and `Microsoft.AlertsManagement` (used by Application Insights):
+
+  ```bash
+  for ns in Microsoft.Web Microsoft.DocumentDB Microsoft.KeyVault Microsoft.Storage \
+            Microsoft.OperationalInsights Microsoft.Insights Microsoft.ManagedIdentity \
+            Microsoft.ContainerInstance Microsoft.AlertsManagement; do
+    az provider register --namespace $ns
+  done
+  ```
 
 ## 2. Create the service principal
 
@@ -126,6 +135,15 @@ Each pillar score is `100 - (weighted findings / resources x 10)`, where weights
 - The web app, Functions, Cosmos DB and Storage use a managed identity. Cosmos DB local auth and Storage shared keys are disabled.
 - Resources use public endpoints so a one-click deployment works anywhere. Add private endpoints if your policy requires them.
 - Key Vault soft delete keeps a deleted vault name reserved for 90 days.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Deployment succeeds but the Function App has no functions | The collector package could not be published. Check the deployment outputs `collectorDeployed` and `collectorDeploymentMessage`. The script and its log stay in the resource group for two hours (`az deployment-scripts show-log`). To publish by hand: download `collector.zip` from the latest release and run `az functionapp deployment source config-zip --src collector.zip --name <function-app> --resource-group <rg> --build-remote true`. |
+| A nested deployment `Failure-Anomalies-Alert-Rule-Deployment-...` shows `MissingSubscriptionRegistration` | Register `Microsoft.AlertsManagement` (see prerequisites). The rest of the deployment is not affected. |
+| The dashboard says no assessment has completed | Select **Refresh now** and wait for the run. Check the Function App logs in Application Insights. |
+| The dashboard shows "data store is not reachable" | The managed identity may still be receiving its Cosmos DB role. Wait a few minutes and reload. |
 
 ## Clean up
 
