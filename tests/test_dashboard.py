@@ -94,8 +94,8 @@ def test_refresh_is_refused_while_running(client, monkeypatch):
 def test_invalid_filters_are_ignored(client, monkeypatch):
     seen = {}
 
-    def fake_findings(run_id, pillar=None, severity=None, limit=200):
-        seen.update(pillar=pillar, severity=severity)
+    def fake_findings(run_id, pillar=None, severity=None, limit=200, source=None):
+        seen.update(pillar=pillar, severity=severity, source=source)
         return []
 
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
@@ -103,5 +103,39 @@ def test_invalid_filters_are_ignored(client, monkeypatch):
         "runId": "r1", "completedUtc": "t", "subscriptionCount": 0, "resourceCount": 0, "findingCount": 0,
         "scores": {}, "severityTotals": {}, "subscriptions": [], "errors": []})
     monkeypatch.setattr(data, "findings", fake_findings)
-    client.get("/?pillar=%27%20OR%201%3D1&severity=nope")
-    assert seen == {"pillar": None, "severity": None}
+    client.get("/?pillar=%27%20OR%201%3D1&severity=nope&source=x")
+    assert seen == {"pillar": None, "severity": None, "source": None}
+    client.get("/?pillar=Security&severity=high&source=checklist")
+    assert seen == {"pillar": "Security", "severity": "high", "source": "checklist"}
+
+
+def test_new_insight_blocks_render_and_escape(client, monkeypatch):
+    run = {"id": "r1", "status": "completed", "startedUtc": "t0"}
+    summary = {
+        "runId": "r1", "completedUtc": "2026-01-01T00:00:00+00:00", "subscriptionCount": 1, "resourceCount": 5,
+        "findingCount": 3, "scores": {"Security": 40, "Reliability": 90, "Cost Optimization": 100,
+                                      "Operational Excellence": 100, "Performance Efficiency": None},
+        "severityTotals": {"critical": 0, "high": 1, "medium": 1, "low": 1},
+        "sources": {"builtin": {"rules": 20, "findings": 1}, "checklist": {"rules": 41, "findings": 2}},
+        "secureScore": {"average": 62.5, "subscriptions": [{"name": "Prod", "percentage": 62.5}],
+                        "topControls": [{"control": "Enable MFA", "unhealthy": 7, "healthy": 1}]},
+        "advisorSavings": {"USD": 3804.0},
+        "subscriptions": [{"id": "s1", "name": "Prod", "resourceCount": 5, "findingCount": 3}],
+        "errors": [{"ruleId": "CHK-1", "error": "<b>bad query</b>"}],
+    }
+    finding = {"severity": "high", "pillar": "Security", "title": "Use private endpoints", "source": "checklist",
+               "resourceId": "/x", "resourceName": "acct", "recommendation": "r",
+               "link": "https://learn.microsoft.com/x"}
+    unsafe = dict(finding, title="Other", link="javascript:alert(1)", source="advisor")
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: run)
+    monkeypatch.setattr(data, "summary", lambda run_id: summary)
+    monkeypatch.setattr(data, "findings", lambda *args, **kwargs: [finding, unsafe])
+
+    html = client.get("/").get_data(as_text=True)
+    assert "Secure Score" in html and "62.5%" in html and "Enable MFA" in html
+    assert "3,804 USD" in html
+    assert "Review checklists: 2" in html and "Built-in rules: 1" in html
+    assert 'href="https://learn.microsoft.com/x"' in html
+    assert "javascript:alert(1)" not in html  # only https links are rendered
+    assert "<b>bad query</b>" not in html and "&lt;b&gt;bad query&lt;/b&gt;" in html
+    assert "1 check(s) could not run" in html

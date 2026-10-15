@@ -1,0 +1,17 @@
+{
+ "name": "Service Bus Review Checklist",
+ "items": [
+  {
+   "guid": "786d60f9-6c96-4ad8-a55d-04c2b39c986b",
+   "id": "A02.02",
+   "text": "When possible, disable SAS key authentication (or local authentication) and use only Microsoft Entra ID for authentication",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identity and Access Management",
+   "service": "Service Bus",
+   "link": "https://learn.microsoft.com/en-us/azure/service-bus-messaging/disable-local-authentication",
+   "graph": "Resources | where type =~ 'microsoft.servicebus/namespaces' | extend compliant = iif(properties.disableLocalAuth == 'false', 'No', 'Yes') | project id, compliant"
+  }
+ ]
+}

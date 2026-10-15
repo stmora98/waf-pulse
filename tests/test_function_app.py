@@ -9,6 +9,9 @@ def test_functions_are_registered():
         "act_start_run",
         "act_discover",
         "act_collect",
+        "act_checklist",
+        "act_advisor",
+        "act_defender",
         "act_finalize",
         "act_fail",
     } <= names

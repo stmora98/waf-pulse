@@ -48,6 +48,16 @@ th { background: #fafbfc; color: var(--muted); font-weight: 600; }
   .card-score { font-size: 1.8rem; }
 }
 
+.chip.active { outline: 2px solid var(--accent); }
+.insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 18px; }
+.insights .panel { margin-bottom: 0; }
+.big { font-size: 1.8rem; font-weight: 600; margin: 4px 0; }
+.plain { list-style: none; padding: 0; margin: 6px 0; font-size: 0.9rem; }
+.plain li { padding: 2px 0; }
+h4 { font-size: 0.9rem; margin: 12px 0 4px; color: var(--muted); }
+details summary { cursor: pointer; font-weight: 600; }
+code { font-size: 0.82rem; background: var(--line); padding: 1px 5px; border-radius: 4px; }
+.severity .muted { align-self: center; margin-right: 2px; }
 .nav { display: flex; gap: 4px; }
 .nav a { padding: 7px 12px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 0.95rem; }
 .nav a:hover { background: var(--line); }

@@ -4,7 +4,10 @@ Triggers
   scheduled_refresh  timer, schedule comes from the REFRESH_CRON app setting
   manual_refresh     storage queue 'refresh-requests', written by the dashboard "Refresh now" button
 
-Both start the same orchestration, which scans every subscription the service principal can read.
+Both start the same orchestration. It discovers every subscription the service principal can read, then runs
+in parallel: the built-in rules (one activity per subscription), the Azure review checklists (batches, tenant
+wide), Azure Advisor and Defender for Cloud (tenant wide). Every activity stores its findings and statistics;
+the final activity aggregates them into the run summary and the pillar scores.
 """
 import logging
 from datetime import datetime, timezone
@@ -12,7 +15,7 @@ from datetime import datetime, timezone
 import azure.durable_functions as df
 import azure.functions as func
 
-from waf_pulse import collect, credentials, graph, store
+from waf_pulse import advisor, checklists, collect, credentials, defender, graph, store
 
 app = df.DFApp()
 
@@ -55,12 +58,24 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
     try:
         yield context.call_activity("act_start_run", {"runId": run_id, "startedUtc": started, "trigger": trigger})
         subscriptions = yield context.call_activity("act_discover", None)
-        results = yield context.task_all(
-            [context.call_activity("act_collect", {"runId": run_id, "subscription": sub}) for sub in subscriptions]
-        )
+        subscription_ids = [sub["id"] for sub in subscriptions]
+
+        tasks = [
+            context.call_activity("act_collect", {"runId": run_id, "subscription": sub}) for sub in subscriptions
+        ]
+        if subscription_ids:
+            scope = {"runId": run_id, "subscriptions": subscription_ids}
+            tasks += [
+                context.call_activity("act_checklist", {**scope, "batch": index})
+                for index in range(checklists.batch_count())
+            ]
+            tasks.append(context.call_activity("act_advisor", scope))
+            tasks.append(context.call_activity("act_defender", scope))
+        yield context.task_all(tasks)
+
         summary = yield context.call_activity(
             "act_finalize",
-            {"runId": run_id, "startedUtc": started, "trigger": trigger, "results": results},
+            {"runId": run_id, "startedUtc": started, "trigger": trigger, "subscriptions": subscriptions},
         )
         return summary
     except Exception as exc:
@@ -68,6 +83,13 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             "act_fail", {"runId": run_id, "startedUtc": started, "trigger": trigger, "error": str(exc)[:500]}
         )
         raise
+
+
+def _record_failure(run_id, key, exc):
+    """A failing source must not fail the run: its error is kept with the statistics."""
+    logging.exception("Collection step %s failed", key)
+    store.save_stats(run_id, key, {"stats": [], "errors": [{"ruleId": key, "error": str(exc)[:300]}]})
+    return {"key": key, "error": True}
 
 
 @app.activity_trigger(input_name="payload")
@@ -84,24 +106,84 @@ def act_discover(payload):
 
 @app.activity_trigger(input_name="payload")
 def act_collect(payload: dict):
-    findings, result = collect.collect_subscription(
-        credentials.collector_credential(), payload["runId"], payload["subscription"]
-    )
-    store.save_findings(findings)
-    return result
+    run_id, subscription = payload["runId"], payload["subscription"]
+    key = f"rules:{subscription['id'].lower()}"
+    try:
+        findings, document = collect.collect_subscription(credentials.collector_credential(), run_id, subscription)
+        store.save_findings(findings)
+        store.save_stats(run_id, key, document)
+        return {"key": key, "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, key, exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_checklist(payload: dict):
+    run_id, batch = payload["runId"], payload["batch"]
+    key = f"checklist:{batch}"
+    try:
+        credential = credentials.collector_credential()
+        findings, stats, errors = [], [], []
+        for chunk in graph.chunks(payload["subscriptions"]):
+            chunk_findings, chunk_stats, chunk_errors = checklists.run_batch(credential, run_id, chunk, batch)
+            findings += chunk_findings
+            stats += chunk_stats
+            errors += chunk_errors
+        store.save_findings(findings)
+        store.save_stats(run_id, key, {"stats": stats, "errors": errors})
+        return {"key": key, "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, key, exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_advisor(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, savings = advisor.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"]
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "advisor", {"stats": stats, "errors": []})
+        store.save_dataset(run_id, "advisor", {"savings": savings})
+        return {"key": "advisor", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "advisor", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_defender(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = defender.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"]
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "defender", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "defender", dataset)
+        return {"key": "defender", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "defender", exc)
 
 
 @app.activity_trigger(input_name="payload")
 def act_finalize(payload: dict):
+    run_id = payload["runId"]
     completed = datetime.now(timezone.utc).isoformat()
     summary, score_docs = collect.build_summary(
-        payload["runId"], payload["startedUtc"], completed, payload["trigger"], payload["results"]
+        run_id,
+        payload["startedUtc"],
+        completed,
+        payload["trigger"],
+        payload["subscriptions"],
+        store.load_run_documents(run_id, "stats"),
+        store.load_run_documents(run_id, "dataset"),
     )
     store.save_summary(summary)
     store.save_scores(score_docs)
     store.save_run(
         {
-            "id": payload["runId"],
+            "id": run_id,
             "subscriptionId": store.TENANT_PARTITION,
             "status": "completed",
             "trigger": payload["trigger"],
@@ -115,10 +197,10 @@ def act_finalize(payload: dict):
         }
     )
     try:
-        store.save_snapshot(payload["runId"], "summary", summary)
+        store.save_snapshot(run_id, "summary", summary)
     except Exception:  # the snapshot is a convenience copy, the run is already complete
         logging.exception("Could not write the summary snapshot")
-    return {"runId": payload["runId"], "findingCount": summary["findingCount"]}
+    return {"runId": run_id, "findingCount": summary["findingCount"]}
 
 
 @app.activity_trigger(input_name="payload")

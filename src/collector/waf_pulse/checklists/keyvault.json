@@ -1,0 +1,17 @@
+{
+ "name": "Azure Key Vault",
+ "items": [
+  {
+   "guid": "d0642c1c-312b-4116-94ab-439e1c836819",
+   "id": "05.01",
+   "text": "RBAC is recommended to control access to your key vault. Familiarize yourself with the Key Vault's access control guidance.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identity and Access Management",
+   "service": "Key Vault",
+   "link": "https://learn.microsoft.com/azure/key-vault/general/rbac-guide?tabs=azure-cli",
+   "graph": "resources| where type =~ 'microsoft.keyvault/vaults' | extend compliant = (properties.enableRbacAuthorization == true) | distinct id, compliant"
+  }
+ ]
+}

@@ -1,0 +1,64 @@
+{
+ "name": "Azure Service Fabric Review Checklist",
+ "items": [
+  {
+   "guid": "182840d2-9ef8-4238-8fd6-0d76186830ac",
+   "id": "A01.01",
+   "text": "Use Standard SKU for production scenarios.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Managed clusters",
+   "subcategory": "Cluster architecture",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/overview-managed-cluster#service-fabric-managed-cluster-skus",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/managedClusters' | extend compliant = (sku=~'{\"name\":\"Standard\"}') | distinct id,compliant"
+  },
+  {
+   "guid": "182840d2-9ef8-4238-8fd6-0d76186830ac",
+   "id": "A01.02",
+   "text": "Use durability level Silver (5 VMs) or greater for production scenarios",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Standard clusters",
+   "subcategory": "Cluster architecture",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/service-fabric-cluster-capacity#durability-characteristics-of-the-cluster",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/clusters' | extend nodeTypes= array_concat(properties.nodeTypes) | mv-expand nodeTypes | summarize BronzeDurabilityCount = countif(nodeTypes.durabilityLevel == 'Bronze') by id | extend compliant = (BronzeDurabilityCount == 0) | distinct id,compliant"
+  },
+  {
+   "guid": "2363878d-55c4-4cbd-9bc2-94523c85f12e",
+   "id": "A01.03",
+   "text": "Consider using Availability Zones for your Service Fabric clusters. Service Fabric managed cluster supports deployments that span across multiple Availability Zones to provide zone resiliency. This configuration will ensure high-availability of the critical system services and your applications to protect from single-points-of-failure.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Managed clusters",
+   "subcategory": "Cluster architecture",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/how-to-managed-cluster-availability-zones",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/managedClusters' | extend compliant= ( properties.zonalResiliency =~ 'true') | distinct id,compliant"
+  },
+  {
+   "guid": "4da21268-f775-4c89-a271-eb80543c8df7",
+   "id": "B01.01",
+   "text": "Avoid VM SKUs with temp disk offerings. Service Fabric uses managed disks by default, so avoiding temp disk offerings ensures you don't pay for unneeded resources.",
+   "severity": "Medium",
+   "waf": "Cost",
+   "category": "Managed clusters",
+   "subcategory": "Cluster architecture",
+   "service": "Azure Service Fabric",
+   "graph": "resources | where type=~'Microsoft.Compute/virtualMachineScaleSets' | extend vmssExtension= array_concat(properties.virtualMachineProfile.extensionProfile.extensions) | mv-expand vmssExtension | where vmssExtension.properties.publisher matches regex '^Microsoft.Azure.ServiceFabric.*' | summarize arg_max(id, *) | summarize compliant = countif(sku.name matches regex '^Standard_[^d]*$' ) by id"
+  },
+  {
+   "guid": "4e98c903-14cf-4c72-9c45-b8b23bc4cbd8",
+   "id": "C01.02",
+   "text": "Deploy Key Vault certificates to Service Fabric cluster virtual machine scale sets. Centralizing storage of application secrets in Azure Key Vault allows you to control their distribution. Key Vault greatly reduces the chances that secrets may be accidentally leaked.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Managed clusters",
+   "subcategory": "Cluster architecture",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/service-fabric-best-practices-security#deploy-key-vault-certificates-to-service-fabric-cluster-virtual-machine-scale-sets",
+   "graph": "resources | where type=~'Microsoft.Compute/virtualMachineScaleSets' | extend vmssExtension= array_concat(properties.virtualMachineProfile.extensionProfile.extensions) | mv-expand vmssExtension | where vmssExtension.properties.publisher matches regex '^Microsoft.Azure.ServiceFabric.*' | summarize arg_max(id, *) | extend compliant = (isnotnull(properties.virtualMachineProfile.osProfile.secrets))"
+  }
+ ]
+}

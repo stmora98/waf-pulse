@@ -1,0 +1,65 @@
+{
+ "name": "Azure App Service Review",
+ "items": [
+  {
+   "guid": "e4b31c6a-2e3f-4df1-8e8b-9c3aa5a27820",
+   "id": "01.01.02",
+   "text": "Use Premium and Standard tiers for staging slots and automated backups. Align your backup retention period with disaster recovery needs.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "BC and DR",
+   "subcategory": "High Availability",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/overview-hosting-plans",
+   "graph": "resources | where type =~ 'microsoft.web/serverfarms' | extend compliant = (sku.tier == 'Premium' or sku.tier == 'Standard') | distinct id,compliant"
+  },
+  {
+   "guid": "1275e4a9-7b6a-43c3-a9cd-5ee18d8995ad",
+   "id": "01.01.04",
+   "text": "Implement health checks to monitor and detect issues with App Service instances. Health checks enable automatic instance replacement on failure.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Operations",
+   "subcategory": "Monitoring",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/monitor-instances-health-check",
+   "graph": "appserviceresources  | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.HealthCheckPath != '') | distinct id,compliant"
+  },
+  {
+   "guid": "c115775c-2ea5-45b4-9ad4-8408ee72734b",
+   "id": "A04.06",
+   "text": "Set minimum TLS policy to 1.2 or higher, preferably 1.3, in App Service configuration.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Network Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-ssl-bindings#enforce-tls-versions",
+   "graph": "appserviceresources | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.MinTlsVersion>=1.2) | distinct id,compliant"
+  },
+  {
+   "guid": "475ba18f-dbf5-490c-b65d-e8e03f9bcbd4",
+   "id": "A04.07",
+   "text": "Use HTTPS only and consider enabling HTTP Strict Transport Security (HSTS).",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Network Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-ssl-bindings#enforce-https",
+   "graph": "where (type=='microsoft.web/sites' and (kind == 'app' or kind == 'app,linux' )) | extend compliant = (properties.httpsOnly==true) | distinct id,compliant"
+  },
+  {
+   "guid": "d9bd3baf-cda3-4b54-bb2e-b03dd9a25827",
+   "id": "A04.09",
+   "text": "Turn off remote debugging in production environments.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Network Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-common#configure-general-settings",
+   "graph": "appserviceresources | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.RemoteDebuggingEnabled == false) | distinct id,compliant"
+  }
+ ]
+}

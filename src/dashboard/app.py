@@ -33,7 +33,7 @@ def health():
     return jsonify(status="ok")
 
 
-def _load_dashboard(pillar, severity):
+def _load_dashboard(pillar, severity, source=None):
     """Returns (run, summary, findings, error). Errors are logged, never shown to the user."""
     try:
         latest = data.latest_run()
@@ -41,18 +41,23 @@ def _load_dashboard(pillar, severity):
         if not completed:
             return latest, None, [], None
         summary = data.summary(completed["id"])
-        findings = data.findings(completed["id"], pillar, severity)
+        findings = data.findings(completed["id"], pillar, severity, source=source)
         return latest, summary, findings, None
     except Exception:
         logging.exception("Could not load dashboard data")
         return None, None, [], "The data store is not reachable right now."
 
 
+def _allowed(value, options):
+    return value if value in options else None
+
+
 @app.get("/")
 def index():
-    pillar = request.args.get("pillar") if request.args.get("pillar") in data.PILLARS else None
-    severity = request.args.get("severity") if request.args.get("severity") in data.SEVERITIES else None
-    latest, summary, findings, error = _load_dashboard(pillar, severity)
+    pillar = _allowed(request.args.get("pillar"), data.PILLARS)
+    severity = _allowed(request.args.get("severity"), data.SEVERITIES)
+    source = _allowed(request.args.get("source"), data.SOURCES)
+    latest, summary, findings, error = _load_dashboard(pillar, severity, source)
     return render_template(
         "index.html",
         latest=latest,
@@ -61,8 +66,11 @@ def index():
         error=error,
         pillars=data.PILLARS,
         severities=data.SEVERITIES,
+        sources=data.SOURCES,
+        source_labels=data.SOURCE_LABELS,
         selected_pillar=pillar,
         selected_severity=severity,
+        selected_source=source,
         user=request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""),
     )
 
@@ -77,9 +85,9 @@ def api_summary():
 
 @app.get("/api/findings")
 def api_findings():
-    pillar = request.args.get("pillar")
-    severity = request.args.get("severity")
-    latest, summary, findings, error = _load_dashboard(pillar, severity)
+    latest, summary, findings, error = _load_dashboard(
+        request.args.get("pillar"), request.args.get("severity"), request.args.get("source")
+    )
     if error:
         return jsonify(error=error), 503
     return jsonify(runId=summary["runId"] if summary else None, findings=findings)

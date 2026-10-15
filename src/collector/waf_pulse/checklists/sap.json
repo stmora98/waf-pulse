@@ -1,0 +1,225 @@
+{
+ "name": "SAP Checklist",
+ "items": [
+  {
+   "guid": "ba07c007-1f90-43e9-aa4f-601346b80352",
+   "text": "Set up ExpressRoute connections from on-premises to the primary and secondary Azure disaster recovery regions. Also, as an alternative to using ExpressRoute, consider setting up VPN connections from on-premises to the primary and secondary Azure disaster recovery regions.",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Business Continuity and Disaster Recovery",
+   "subcategory": "Disaster recovery",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/expressroute/designing-for-disaster-recovery-with-expressroute-privatepeering",
+   "graph": "resources| where type =~ 'microsoft.network/virtualnetworkgateways'| where properties.gatewayType =~ 'vpn' or properties.gatewayType =~ 'ExpressRoute'| extend SKUName = properties.sku.name, SKUTier = properties.sku.tier, Type = properties.gatewayType| extend compliant = SKUTier contains 'AZ'| project name, id, subscriptionId, resourceGroup, Type, compliant"
+  },
+  {
+   "guid": "6561f847-3db5-4ff8-9200-5ad3c3b436ad",
+   "text": "The CIDR for the primary virtual network (VNet) shouldn't conflict or overlap with the CIDR of the DR site's VNet",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Business Continuity and Disaster Recovery",
+   "subcategory": "Disaster recovery",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/ja-jp/azure/virtual-network/virtual-networks-faq",
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | extend addressSpace = todynamic(properties.addressSpace) | extend addressPrefix = todynamic(properties.addressSpace.addressPrefixes) | mvexpand addressSpace | mvexpand addressPrefix | project name, id, location, resourceGroup, subscriptionId, cidr = addressPrefix | extend compliant = (cidr matches regex @'^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)')  | project id, compliant, cidr"
+  },
+  {
+   "guid": "a78b3d31-3170-44f2-b5d7-651a29f4ccf5",
+   "text": "Most failover clusters for SAP application layer components (ASCS) and the DBMS layer require a virtual IP address for a failover cluster.  Azure Load Balancer should handle the virtual IP address for all other cases. One design principle is to use one load balancer per cluster configuration. We recommend that you use the standard version of the load balancer (Standard Load Balancer SKU).",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Business Continuity and Disaster Recovery",
+   "subcategory": "High availability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/sap/workloads/high-availability-guide-standard-load-balancer-outbound-connections",
+   "graph": "resources | where type =~ 'Microsoft.Network/loadBalancers' | extend bep = properties.backendAddressPools | extend BackEndPools = array_length(bep) | where BackEndPools =~ 0 | project name, id, Param1='backendPools', Param2=toint(0), tags | union (resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Standard' | extend bep = properties.backendAddressPools | extend BackEndPools = toint(array_length(bep)) | mv-expand bip = properties.backendAddressPools | extend BackendAddresses = array_length(bip.properties.loadBalancerBackendAddresses) | where toint(BackendAddresses) <= 1 | project name, id, tags, Param1='backendAddresses', Param2=toint(BackendAddresses)) | union ( resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Basic' | mv-expand properties.backendAddressPools | extend backendPoolId = properties_backendAddressPools.id | project id, name, tags, tostring(backendPoolId), Param1='BackEndPools' | join kind = leftouter ( resources | where type =~ 'Microsoft.Network/networkInterfaces' | mv-expand properties.ipConfigurations | mv-expand properties_ipConfigurations.properties.loadBalancerBackendAddressPools | extend backendPoolId = tostring(properties_ipConfigurations_properties_loadBalancerBackendAddressPools.id) | summarize poolMembers = count() by backendPoolId | project tostring(backendPoolId), poolMembers ) on backendPoolId | where toint(poolMembers) <= 1 | extend BackendAddresses = poolMembers | project id, name, tags, Param1='backendAddresses', Param2=toint(BackendAddresses))"
+  },
+  {
+   "guid": "f656e745-0cfb-453e-8008-0528fa21c933",
+   "text": "Deploy both VMs in the high-availability pair in an availability set or in availability zones. These VMs should be the same size and have the same storage configuration.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Business Continuity and Disaster Recovery",
+   "subcategory": "High availability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/sap/eslz-business-continuity-and-disaster-recovery",
+   "graph": "Resources | where type =~ 'Microsoft.Storage/storageAccounts' | where sku.name in~ ('Standard_LRS', 'Premium_LRS') | project name, id, tags, param1 = strcat('sku: ', sku.name)"
+  },
+  {
+   "guid": "fda1dbf3-dc95-4d48-a7c7-91dca0f6c565",
+   "text": "Enforce a RBAC model for management groups, subscriptions, resource groups and resources",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Identity and Access",
+   "subcategory": "Identity",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/well-architected/sap/design-areas/security",
+   "graph": "resources | where type =~ 'microsoft.aad/domainservices' | extend replicaSets = properties.replicaSets | where array_length(replicaSets) < 2 | project name=name, id=id, tags=tags, param1=strcat('replicaSetLocation:', replicaSets[0].location)"
+  },
+  {
+   "guid": "6ba28021-4591-4147-9e39-e5309cccd979",
+   "text": "enforce existing Management Group policies to SAP Subscriptions",
+   "severity": "Medium",
+   "waf": "Operations",
+   "category": "Management Group and Subscriptions",
+   "subcategory": "Subscriptions",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/resource-org-management-groups",
+   "graph": "resourcecontainers| where type =~ 'microsoft.resources/subscriptions'| extend ManagementGroup = tostring(tags),mgmtChain = properties.managementGroupAncestorsChain| extend compliant =( array_length(mgmtChain) <= 4 and array_length(mgmtChain) > 1)"
+  },
+  {
+   "guid": "366bcda2-750a-4b1a-a039-d95d54c7c892",
+   "text": "Integrate tightly coupled applications into the same SAP subscription to avoid additional routing and management complexity",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Management Group and Subscriptions",
+   "subcategory": "Subscriptions",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/architecture/guide/sap/sap-whole-landscape",
+   "graph": "Resources | summarize count()"
+  },
+  {
+   "guid": "9cb107d5-325a-4e52-9ba3-4d4685e2213a",
+   "text": "Leverage Subscription as scale unit and scaling our resources, consider deploying subscription per environment eg. Sandbox, non-prod, prod ",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Management Group and Subscriptions",
+   "subcategory": "Subscriptions",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/architecture/guide/sap/sap-whole-landscape",
+   "graph": "Resources | where type contains 'publicIPAddresses' and isnotempty(properties.ipAddress) | summarize count () by subscriptionId"
+  },
+  {
+   "guid": "ce7bb122-f7c9-45f0-9e15-4e3aa3592829",
+   "text": "Ensure quota increase as a part of subscription provisioning (e.g. total available VM cores within a subscription)",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Management Group and Subscriptions",
+   "subcategory": "Subscriptions",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/quotas/quotas-overview",
+   "graph": "QuotaResources | where type =~ 'microsoft.compute/locations/usages' | where subscriptionId in~ ('<Subscription1>','<Subscription2>') | mv-expand json = properties.value limit 400 | extend usagevCPUs = json.currentValue, QuotaLimit = json['limit'], quotaName = tostring(json['name'].localizedValue) | extend usagePercent = toint(usagevCPUs)*100 / toint(QuotaLimit) |where quotaName =~ 'Total Regional vCPUs' or quotaName =~ 'Total Regional Low-priority vCPUs' |project subscriptionId,quotaName,usagevCPUs,QuotaLimit,usagePercent,location,['json'] | order by ['usagePercent'] desc"
+  },
+  {
+   "guid": "4e138115-2318-41aa-9174-26943ff8ae7d",
+   "text": "Leverage Azure resource tag for cost categorization and resource grouping (: BillTo, Department (or Business Unit), Environment (Production, Stage, Development), Tier (Web Tier, Application Tier), Application Owner, ProjectName)",
+   "severity": "Medium",
+   "waf": "Operations",
+   "category": "Management Group and Subscriptions",
+   "subcategory": "Subscriptions",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/sap/eslz-resource-organization",
+   "graph": "resources | extend compliant = isnotnull(['tags']) | project name, id, subscriptionId, resourceGroup, tags, compliant"
+  },
+  {
+   "guid": "579266bc-ca27-45fa-a1ab-fe9d55d04c3c",
+   "text": "Azure tagging can be leveraged to logically group and track resources, automate their deployments, and most importantly, provide visibility on the incurred costs.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "category": "Management and Monitoring",
+   "subcategory": "Monitoring",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cost-management-billing/costs/enable-tag-inheritance",
+   "graph": "resources | extend compliant = isnotnull(['tags']) | project name, id, subscriptionId, resourceGroup, tags, compliant"
+  },
+  {
+   "guid": "a3592829-e6e2-4061-9368-6af46791f893",
+   "text": "Local and global VNet peering provide connectivity and are the preferred approaches to ensure connectivity between landing zones for SAP deployments across multiple Azure regions",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Hybrid",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/virtual-network-peering-overview",
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | project id, peeringName=properties_virtualNetworkPeerings.name, compliant = (properties_virtualNetworkPeerings.properties.allowVirtualNetworkAccess =~ True)"
+  },
+  {
+   "guid": "7d4bc7d2-c34a-452e-8f1d-6ae3c8eafcc3",
+   "text": "Use Virtual WAN for Azure deployments in new, large, or global networks where you need global transit connectivity across Azure regions and on-premises locations. With this approach, you won't need to manually set up transitive routing for Azure networking, and you can follow a standard for SAP on Azure deployments.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Hybrid",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/training/modules/introduction-azure-virtual-wan/?source=recommendations",
+   "graph": "resources| where type =~ 'microsoft.network/virtualwans' | extend compliant= (properties.allowBranchToBranchTraffic =~ 'true') | distinct id,compliant"
+  },
+  {
+   "guid": "82734c88-6ba2-4802-8459-11475e39e530",
+   "text": "Public IP assignment to VM running SAP Workload is not recommended.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "IP plan",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/plan-for-ip-addressing",
+   "graph": "Resources | where type =~ 'Microsoft.Network/publicIPAddresses' and sku.tier =~ 'Regional' | where isempty(zones) or array_length(zones) <= 1 | extend az = case(isempty(zones), 'Non-zonal', array_length(zones) <= 1, strcat('Zonal (', strcat_array(zones, ','), ')'), zones) | project name, id, tags, param1 = strcat('sku: ', sku.name), param2 = strcat('availabilityZone: ', az)"
+  },
+  {
+   "guid": "9cccd979-366b-4cda-8750-ab1ab039d95d",
+   "text": "Consider reserving IP address on DR side when configuring ASR",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "IP plan",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/training/modules/protect-on-premises-infrastructure-with-azure-site-recovery/?source=recommendations",
+   "graph": "Resources | where type contains 'publicIPAddresses' and isnotempty(properties.ipAddress) | summarize count () by subscriptionId"
+  },
+  {
+   "guid": "d8a03e97-7784-424d-9167-85d6fa96c96a",
+   "text": "Use Azure Firewall to govern Azure outbound traffic to the internet, non-HTTP/S inbound connections, and East/West traffic filtering (if the organization requires it)",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Internet",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/well-architected/services/networking/azure-firewall?toc=%2Fazure%2Ffirewall%2Ftoc.json&bc=%2Fazure%2Ffirewall%2Fbreadcrumb%2Ftoc.json",
+   "graph": "resources | where type=~'microsoft.network/virtualhubs' | extend compliant = isnotnull(properties.azureFirewall.id) | project id, compliant"
+  },
+  {
+   "guid": "85e2213a-ce7b-4b12-8f7c-95f06e154e3a",
+   "text": "Make sure that Azure accelerated networking is enabled on the VMs used in the SAP application and DBMS layers.",
+   "severity": "High",
+   "waf": "Performance",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Segmentation",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/accelerated-networking-overview?tabs=redhat",
+   "graph": "Resources | where type =~ 'Microsoft.Network/NetworkInterfaces' | where properties.enableAcceleratedNetworking =~ 'false' | project name, subscriptionId, properties.enableAcceleratedNetworking"
+  },
+  {
+   "guid": "6791f893-5ada-4433-84e1-3811523181aa",
+   "text": "You can use application security group (ASG) and NSG rules to define network security access-control lists between the SAP application and DBMS layers. ASGs group virtual machines to help manage their security.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Segmentation",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/network-security-group-how-it-works",
+   "graph": "Resources | where type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets) | project name, resourceGroup | sort by name asc"
+  },
+  {
+   "guid": "ce9bd3bb-0cdb-43b5-9eb2-ec14eeaa3592",
+   "text": "Use Azure Key Vault to store your secrets and credentials",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security, Governance and Compliance",
+   "subcategory": "Secrets",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/key-vault/general/overview",
+   "graph": "Resources | join kind=leftouter (ResourceContainers | where type=~'microsoft.resources/subscriptions' | project SubName=name, subscriptionId) on subscriptionId | where type =~ 'microsoft.keyvault/vaults' | project type, name, SubName"
+  },
+  {
+   "guid": "4935ada4-2223-4ece-a1b1-23181a541741",
+   "text": "Use an Azure Key Vault per application per environment per region.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security, Governance and Compliance",
+   "subcategory": "Secrets",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/ja-jp/azure/key-vault/general/best-practices",
+   "graph": "Resources | join kind=leftouter (ResourceContainers | where type=~'microsoft.resources/subscriptions' | project SubName=name, subscriptionId) on subscriptionId | where type =~ 'microsoft.keyvault/vaults' | project type, name, SubName"
+  }
+ ]
+}

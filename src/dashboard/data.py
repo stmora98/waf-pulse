@@ -14,6 +14,13 @@ PILLARS = (
     "Performance Efficiency",
 )
 SEVERITIES = ("critical", "high", "medium", "low")
+SOURCES = ("builtin", "checklist", "advisor", "defender")
+SOURCE_LABELS = {
+    "builtin": "Built-in rules",
+    "checklist": "Review checklists",
+    "advisor": "Azure Advisor",
+    "defender": "Defender for Cloud",
+}
 TENANT_PARTITION = "tenant"
 QUEUE_NAME = "refresh-requests"
 
@@ -55,7 +62,7 @@ def summary(run_id):
     return public(_db().get_container_client("summaries").read_item(run_id, partition_key=run_id))
 
 
-def findings(run_id, pillar=None, severity=None, limit=200):
+def findings(run_id, pillar=None, severity=None, limit=200, source=None):
     """Most severe findings first, without loading more than `limit` documents."""
     container = _db().get_container_client("findings")
     severities = [severity] if severity in SEVERITIES else list(SEVERITIES)
@@ -69,6 +76,9 @@ def findings(run_id, pillar=None, severity=None, limit=200):
         if pillar in PILLARS:
             query += " AND c.pillar = @pillar"
             parameters.append({"name": "@pillar", "value": pillar})
+        if source in SOURCES:
+            query += " AND c.source = @source"
+            parameters.append({"name": "@source", "value": source})
         query += " OFFSET 0 LIMIT @limit"
         parameters.append({"name": "@limit", "value": remaining})
         results.extend(public(item) for item in container.query_items(query, parameters=parameters, partition_key=run_id))

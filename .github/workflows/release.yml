@@ -50,6 +50,7 @@ jobs:
           # only the project source. The platform installs requirements.txt.
           mkdir -p build/collector
           cp -r src/collector/. build/collector/
+          cp NOTICE build/collector/NOTICE
           find build/collector -name '__pycache__' -type d -prune -exec rm -rf {} +
           (cd build/collector && zip -qr ../../collector.zip .)
 

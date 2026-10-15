@@ -1,0 +1,125 @@
+{
+ "name": "Azure Application Delivery Networking",
+ "items": [
+  {
+   "guid": "553585a6-abe0-11ed-afa1-0242ac120002",
+   "id": "A01.03",
+   "text": "Ensure you are using Application Gateway v2 SKU",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/overview-v2",
+   "graph": "resources | where type == 'microsoft.network/applicationgateways' | project id, compliant = properties.sku.name in ('Standard_v2', 'WAF_v2') | project id,compliant"
+  },
+  {
+   "guid": "4e35fbf5-0ae2-48b2-97ce-753353edbd1a",
+   "id": "A01.04",
+   "text": "Ensure you are using the Standard SKU for your Azure Load Balancers",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Load Balancer",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/load-balancer/load-balancer-overview",
+   "graph": "resources | where type == 'microsoft.network/loadbalancers' | project id, compliant=(tolower(sku.name) == 'standard')"
+  },
+  {
+   "guid": "dfc50f87-3800-424c-937b-ed5f186e7c15",
+   "id": "A01.06",
+   "text": "Your Application Gateways v2 should be deployed in subnets with IP prefixes equal or larger than /24",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/configuration-infrastructure#size-of-the-subnet",
+   "graph": "resources | where type=='microsoft.network/applicationgateways' | extend subnetId = tostring(properties.gatewayIPConfigurations[0].properties.subnet.id) | project id, subnetId | join (resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | mv-expand subnets.properties.addressPrefixes | project id, subnetId = tostring(subnets.id), prefix1 = subnets.properties.addressPrefix, prefix2 = subnets.properties.addressPrefixes | mv-expand prefix2 | extend prefix = iff(isnotnull(prefix1), prefix1, prefix2) | extend subnetPrefixLength = split(prefix, '/')[1])on subnetId | extend compliant = (subnetPrefixLength <= 24 or subnetPrefixLength == 64) | distinct id,compliant"
+  },
+  {
+   "guid": "135bf4ac-f9db-461f-b76b-2ee9e30b12c0",
+   "id": "A01.09",
+   "text": "Configure autoscaling with a minimum amount of instances of two.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/application-gateway-autoscaling-zone-redundant",
+   "graph": "resources | where type =~ 'microsoft.network/applicationGateways' | extend compliant = (isnotnull(properties.autoscaleConfiguration) and properties.autoscaleConfiguration.minCapacity >= 2) | distinct id,compliant"
+  },
+  {
+   "guid": "060c6964-52b5-48db-af8b-83e4b2d85349",
+   "id": "A01.10",
+   "text": "Deploy Application Gateway across Availability Zones",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/reliability/migrate-app-gateway-v2",
+   "graph": "resources | where type =~ 'microsoft.network/applicationGateways' | extend compliant = (isnotnull(zones) and array_length(zones) > 1) | distinct id,compliant"
+  },
+  {
+   "guid": "97a2fd46-64b0-1dfa-b72d-9c8869496d75",
+   "id": "A01.22",
+   "text": "Use Azure NAT Gateway instead of Load Balancer outbound rules for better SNAT scalability",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Load Balancer",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/nat-gateway/nat-overview#outbound-connectivity",
+   "graph": "resources | where type=='microsoft.network/loadbalancers' | extend countOutRules=array_length(properties.outboundRules) | extend compliant = (countOutRules == 0) | distinct id,compliant"
+  },
+  {
+   "guid": "2f8e81eb-8e68-4026-8b1f-70f9b05f7cf9",
+   "id": "A01.37",
+   "text": "Enable the Azure Application Gateway WAF bot protection rule set. The bot rules detect good and bad bots.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/bot-protection",
+   "graph": "resources | where type == 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | mv-expand properties.managedRules.managedRuleSets | project id, rulesettype = properties_managedRules_managedRuleSets.ruleSetType | extend compliant1 = (rulesettype == 'Microsoft_BotManagerRuleSet') | project id, compliant1 | summarize compliant = max(compliant1) by id"
+  },
+  {
+   "guid": "8ea8e0d4-84e8-4b33-aeab-493f6391b4d6",
+   "id": "A01.38",
+   "text": "Ensure if request body inspection feature is enabled in Azure Application Gateway WAF policy.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/application-gateway-waf-request-size-limits#request-body-inspection",
+   "graph": "resources | where type =~ 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | extend compliant = (properties['policySettings']['requestBodyCheck'] == 'true' and properties['policySettings']['state'] =~ 'Enabled') | distinct id, name, compliant"
+  },
+  {
+   "guid": "baf8e317-2397-4d49-b3d1-0dcc16d8778d",
+   "id": "A01.40",
+   "text": "Deploy your WAF policy for Application Gateway in 'Prevention' mode.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/policy-overview?source=recommendations",
+   "graph": "resources | where type =~ 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | extend compliant = (properties['policySettings']['mode'] =~ 'Prevention')| where properties['policySettings']['mode'] =~ 'Prevention' | distinct id, name, compliant"
+  },
+  {
+   "guid": "a66f0fd8-2ca4-422e-8df3-235148127ca2",
+   "id": "A01.54",
+   "text": "You should encrypt traffic to the backend servers.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "App Gateway",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/ssl-overview",
+   "graph": "resources | where type == 'microsoft.network/applicationgateways'| extend compliant = (properties['backendHttpSettingsCollection'][0]['properties']['port'] =~ '443') |where properties['backendHttpSettingsCollection'][0]['properties']['port'] =~ '443'|distinct id,name,compliant"
+  }
+ ]
+}

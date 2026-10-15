@@ -1,0 +1,93 @@
+{
+ "name": "Azure API Management Review",
+ "items": [
+  {
+   "guid": "beae759e-4ddb-4326-bf26-47f87d3454b6",
+   "text": "For DR, leverage the premium tier with deployments scaled across two or more regions for 99.99% SLA",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Management",
+   "subcategory": "Business continuity and disaster recovery",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/api-management-howto-deploy-multi-region",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = ( sku.name == 'Premium' and  isnotnull(properties.additionalLocations)) | distinct id, compliant"
+  },
+  {
+   "guid": "9c8d1664-dd9a-49d4-bd83-950af0af4044",
+   "text": "Deploy at least one unit in two or more availability zones for an increased SLA of 99.99%",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "category": "Management",
+   "subcategory": "Business continuity and disaster recovery",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/high-availability",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = ( sku.name == 'Premium' and  isnotnull(zones) and sku.capacity >= 2 ) | distinct id, compliant"
+  },
+  {
+   "guid": "bb5f356b-3daf-47a2-a9ee-867a8100bbd5",
+   "text": "Configure autoscaling to scale out the number of instances when the load increases",
+   "severity": "Medium",
+   "waf": "Performance",
+   "category": "Management",
+   "subcategory": "Performance and scalability",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/api-management-howto-autoscale",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | join kind = leftouter (resources | where type == 'microsoft.insights/autoscalesettings' | extend targetResourceUri = tostring(properties.targetResourceUri)) on $left.id == $right.targetResourceUri | extend compliant = (sku.name == 'Premium' and isnotempty(targetResourceUri) and properties1.enabled == true) | distinct id, compliant"
+  },
+  {
+   "guid": "46f07d33-ef9a-44e8-8f98-67c097c5d8ce",
+   "text": "Upgrade the platform version and follow lifecyle. stv1 is retirng on 31 August 2024",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Management",
+   "subcategory": "Platform Version",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/en-us/azure/api-management/migrate-stv1-to-stv2",
+   "graph": "resources | where type =~ 'microsoft.apimanagement/service' | extend compliant = (properties.platformVersion != 'stv1') | project id, compliant"
+  },
+  {
+   "guid": "cd45c90e-7690-4753-930b-bf290c69c074",
+   "text": "Deploy the service within a Virtual Network (VNet)",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#virtual-network-integration",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (isnotnull(properties.virtualNetworkConfiguration)) | distinct id, compliant"
+  },
+  {
+   "guid": "67437a28-2721-4a2c-becd-caa54c8237a5",
+   "text": "Deploy Private Endpoints to filter incoming traffic when APIM is not deployed to a VNet.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#azure-private-link",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (properties.virtualNetworkType == 'None' and isnotnull(properties.privateEndpointConnections)) | distinct id, compliant"
+  },
+  {
+   "guid": "d698adbd-3288-44cb-b10a-9b572da395ae",
+   "text": "Disable Public Network Access",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#disable-public-network-access",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (properties.virtualNetworkType == 'Internal') | distinct id, compliant"
+  },
+  {
+   "guid": "791abd8b-7706-4e31-9569-afefde724be3",
+   "text": "Use managed identities to authenticate to other Azure resources whenever possible",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identities",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#managed-identities",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (isnotnull(identity)) | distinct id, compliant"
+  }
+ ]
+}

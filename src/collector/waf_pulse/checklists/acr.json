@@ -1,0 +1,77 @@
+{
+ "name": "Azure Container Registry Security Review",
+ "items": [
+  {
+   "guid": "0bd05dc2-efd5-4d76-8d41-d2500cc47b49",
+   "id": "A01.04",
+   "text": "Encrypt registry with a customer managed key",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Data Protection",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/tutorial-customer-managed-keys",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | extend acrName = name, acrId = id | extend encryptionStatus = properties.encryption.status  | extend compliant = iif(encryptionStatus == 'disabled', false, true) | project acrName, acrId, encryptionStatus, compliant"
+  },
+  {
+   "guid": "be0e38ce-e297-411b-b363-caaab79b198d",
+   "id": "A02.02",
+   "text": "Disable local authentication for management plane access",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identity and Access Control",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-authentication-managed-identity",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend localAdminDisabled = properties.adminUserEnabled // Adjust this property as needed | extend compliant = iif(localAdminDisabled == 'false', true, false) // Check if local admin is disabled | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "387e5ced-126c-4d13-8af5-b20c6998a646",
+   "id": "A02.03",
+   "text": "Assign AcrPull & AcrPush RBAC roles rather than granting Administrative access to identity principals",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identity and Access Control",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-roles?tabs=azure-cli",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend localAdminDisabled = properties.adminUserEnabled // Adjust this property as needed | extend compliant = iif(localAdminDisabled == 'false', true, false) // Check if local admin is disabled | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "e338997e-41c7-47d7-acf6-a62a1194956d",
+   "id": "A02.04",
+   "text": "Disable Anonymous pull access",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Identity and Access Control",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/anonymous-pull-access#configure-anonymous-pull-access",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend compliant = iif(properties.anonymousPullEnabled == false, true, false) | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "cd289ced-6b17-4db8-8554-62f2aee4553a",
+   "id": "A04.02",
+   "text": "Disable Public Network access",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Network Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-access-selected-networks#disable-public-network-access",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | where sku.name =~ 'Premium' // Check for Premium SKU | extend publicAccessEnabled = properties.publicNetworkAccess | extend defaultAction = tostring(properties.networkRuleSet.defaultAction) // Extract defaultAction | extend compliant = iif(publicAccessEnabled != 'Enabled' or defaultAction == 'Deny', true, false) | project name, id, publicAccessEnabled, defaultAction, compliant"
+  },
+  {
+   "guid": "fc833934-8b26-42d6-ac5f-512925498f6d",
+   "id": "A04.03",
+   "text": "Use an Azure Container Registry SKU that supports Private Link (Premium SKU)",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Security",
+   "subcategory": "Network Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-skus",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | extend skuName = sku.name // Extract the SKU name | extend compliant = iif(skuName == 'Premium', true, false) // Check if SKU is Premium | project name, id, skuName, compliant"
+  }
+ ]
+}

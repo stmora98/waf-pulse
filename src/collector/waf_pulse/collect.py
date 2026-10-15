@@ -1,49 +1,29 @@
-"""Assessment logic: turn Resource Graph results into findings, summaries and scores."""
-import hashlib
-import os
+"""Assessment logic: built-in rules per subscription, and the aggregation of every source into the run summary.
+
+Every source (built-in rules, checklists, Advisor, Defender) produces findings plus statistics rows:
+
+    {ruleId, source, pillar, severity, subscriptionId, affected, applicable}
+
+The summary and the pillar scores are computed from those rows only.
+"""
+from collections import defaultdict
 
 from . import graph, scoring
-from .rules import INVENTORY_QUERY, RESOURCE_GROUP_INVENTORY_QUERY, RULES, SEVERITIES
+from .findings import finding_key, make_finding, retention_seconds  # noqa: F401  (re-exported)
+from .rules import (
+    ALL_RESOURCES, INVENTORY_QUERY, RESOURCE_GROUP_INVENTORY_QUERY, RESOURCE_GROUP_TYPE, RULES, SEVERITIES,
+)
 
 MAX_FINDINGS_PER_RULE = 1000
-DEFAULT_RETENTION_DAYS = 90
-
-
-def retention_seconds():
-    """Findings expire after FINDINGS_RETENTION_DAYS (default 90). 0 keeps them forever."""
-    try:
-        days = int(os.environ.get("FINDINGS_RETENTION_DAYS", DEFAULT_RETENTION_DAYS))
-    except ValueError:
-        days = DEFAULT_RETENTION_DAYS
-    return days * 86400 if days > 0 else None
-
-
-def finding_key(rule_id, resource_id):
-    """Stable across runs, so two runs can be compared finding by finding."""
-    return hashlib.sha1(f"{rule_id}|{str(resource_id).lower()}".encode("utf-8")).hexdigest()
 
 
 def build_finding(run_id, rule, row):
-    resource_id = str(row.get("id", ""))
-    digest = hashlib.sha1(f"{run_id}|{rule.id}|{resource_id.lower()}".encode("utf-8")).hexdigest()
-    finding = {
-        "id": digest,
-        "key": finding_key(rule.id, resource_id),
-        "runId": run_id,
-        "subscriptionId": row.get("subscriptionId", ""),
-        "ruleId": rule.id,
-        "pillar": rule.pillar,
-        "severity": rule.severity,
-        "title": rule.title,
-        "recommendation": rule.recommendation,
-        "resourceId": resource_id,
-        "resourceName": row.get("name", ""),
-        "resourceType": row.get("type", ""),
-    }
-    ttl = retention_seconds()
-    if ttl:
-        finding["ttl"] = ttl
-    return finding
+    return make_finding(
+        run_id, rule_id=rule.id, source=rule.source, pillar=rule.pillar, severity=rule.severity,
+        title=rule.title, recommendation=rule.recommendation, resource_id=row.get("id", ""),
+        resource_name=row.get("name", ""), resource_type=row.get("type", ""),
+        subscription_id=row.get("subscriptionId", ""),
+    )
 
 
 def _inventory(credential, subscription_id):
@@ -58,104 +38,161 @@ def _inventory(credential, subscription_id):
     return counts, total
 
 
-def collect_subscription(credential, run_id, subscription):
-    """Runs the inventory and every rule for one subscription. Returns findings and a small result record."""
-    sub_id = subscription["id"]
-    inventory, resource_count = _inventory(credential, sub_id)
-    top_types = [
-        {"type": rtype, "count": count}
-        for rtype, count in sorted(inventory.items(), key=lambda item: item[1], reverse=True)[:10]
-    ]
+def _applicable(rule, inventory, total):
+    if ALL_RESOURCES in rule.applies_to:
+        return total
+    return sum(inventory.get(resource_type, 0) for resource_type in rule.applies_to)
 
-    findings, counts, rule_stats, errors = [], {}, [], []
+
+def collect_subscription(credential, run_id, subscription):
+    """Runs the inventory and every built-in rule for one subscription. Returns (findings, stats document)."""
+    sub_id = subscription["id"].lower()
+    inventory, total = _inventory(credential, sub_id)
+
+    findings, stats, errors = [], [], []
     for rule in RULES:
         try:
             rows = graph.query(credential, sub_id, rule.query, max_rows=MAX_FINDINGS_PER_RULE)
         except Exception as exc:  # one failing rule must not fail the whole subscription
             errors.append({"ruleId": rule.id, "error": str(exc)[:300]})
             continue
-        for row in rows:
-            findings.append(build_finding(run_id, rule, row))
-        bucket = counts.setdefault(rule.pillar, {})
-        bucket[rule.severity] = bucket.get(rule.severity, 0) + len(rows)
-        rule_stats.append(
+        findings.extend(build_finding(run_id, rule, row) for row in rows)
+        stats.append(
             {
-                "ruleId": rule.id,
-                "pillar": rule.pillar,
-                "severity": rule.severity,
-                "affected": len(rows),
-                "applicable": sum(inventory.get(rtype, 0) for rtype in rule.applies_to),
+                "ruleId": rule.id, "source": rule.source, "pillar": rule.pillar, "severity": rule.severity,
+                "subscriptionId": sub_id, "affected": len(rows), "applicable": _applicable(rule, inventory, total),
             }
         )
-
-    result = {
-        "subscriptionId": sub_id,
-        "name": subscription.get("name", ""),
-        "resourceCount": resource_count,
-        "findingCount": len(findings),
-        "topTypes": top_types,
-        "counts": counts,
-        "ruleStats": rule_stats,
-        "errors": errors,
-    }
-    return findings, result
+    return findings, {"stats": stats, "inventory": {sub_id: inventory}, "errors": errors}
 
 
-def build_summary(run_id, started_utc, completed_utc, trigger, results):
-    """Aggregates per-subscription results into the tenant summary and per-subscription score documents."""
-    tenant_counts, type_totals, errors = {}, {}, []
-    resource_total = finding_total = 0
-    subscriptions, score_docs = [], []
+def _merge_inventory(documents):
+    merged = defaultdict(dict)
+    for document in documents:
+        for sub, counts in (document.get("inventory") or {}).items():
+            bucket = merged[sub]
+            for resource_type, count in counts.items():
+                bucket[resource_type] = bucket.get(resource_type, 0) + count
+    return merged
 
-    for result in results:
-        scoring.merge_counts(tenant_counts, result["counts"])
-        resource_total += result["resourceCount"]
-        finding_total += result["findingCount"]
-        errors.extend({"subscriptionId": result["subscriptionId"], **error} for error in result["errors"])
-        for item in result["topTypes"]:
-            type_totals[item["type"]] = type_totals.get(item["type"], 0) + item["count"]
 
-        sub_scores = scoring.score_pillars(result["ruleStats"])
-        subscriptions.append(
+def _dataset(datasets, name):
+    return [item["data"] for item in datasets if item.get("name") == name]
+
+
+def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, stats_documents, datasets=()):
+    """Aggregates every statistics document into the tenant summary and per subscription score documents."""
+    names = {sub["id"].lower(): sub["name"] for sub in subscriptions}
+    inventory = _merge_inventory(stats_documents)
+
+    all_stats, errors = [], []
+    for document in stats_documents:
+        all_stats.extend(dict(stat) for stat in document.get("stats", []))
+        errors.extend(document.get("errors", []))
+
+    # Sources that cannot count the evaluated resources (Advisor) leave `applicable` empty: use the inventory.
+    for stat in all_stats:
+        stat["subscriptionId"] = (stat.get("subscriptionId") or "unknown").lower()
+        if stat.get("applicable") is None:
+            counted = inventory.get(stat["subscriptionId"], {}).get(stat.get("applicableType", ""), 0)
+            stat["applicable"] = max(counted, stat["affected"])
+
+    by_subscription = defaultdict(list)
+    for stat in all_stats:
+        by_subscription[stat["subscriptionId"]].append(stat)
+
+    type_totals = defaultdict(int)
+    resources_by_sub = {}
+    for sub, counts in inventory.items():
+        resources_by_sub[sub] = sum(count for rtype, count in counts.items() if rtype != RESOURCE_GROUP_TYPE)
+        for rtype, count in counts.items():
+            type_totals[rtype] += count
+
+    tenant_stats = scoring.merge_rule_stats([all_stats])
+    counts = {}
+    severity_totals = {severity: 0 for severity in SEVERITIES}
+    sources = {}
+    for stat in tenant_stats:
+        bucket = counts.setdefault(stat["pillar"], {})
+        bucket[stat["severity"]] = bucket.get(stat["severity"], 0) + stat["affected"]
+        severity_totals[stat["severity"]] += stat["affected"]
+    for stat in all_stats:
+        info = sources.setdefault(stat["source"], {"rules": set(), "findings": 0})
+        if stat["applicable"] > 0:
+            info["rules"].add(stat["ruleId"])
+        info["findings"] += stat["affected"]
+    sources = {name: {"rules": len(info["rules"]), "findings": info["findings"]} for name, info in sources.items()}
+
+    subscription_rows, score_docs = [], []
+    for sub in sorted(set(names) | set(by_subscription) | set(inventory)):
+        if sub == "unknown":
+            continue
+        scores = scoring.score_pillars(by_subscription.get(sub, []))
+        subscription_rows.append(
             {
-                "id": result["subscriptionId"],
-                "name": result["name"],
-                "resourceCount": result["resourceCount"],
-                "findingCount": result["findingCount"],
-                "scores": sub_scores,
+                "id": sub, "name": names.get(sub, sub), "resourceCount": resources_by_sub.get(sub, 0),
+                "findingCount": sum(stat["affected"] for stat in by_subscription.get(sub, [])), "scores": scores,
             }
         )
         score_docs.append(
-            {
-                "id": f"{run_id}:{result['subscriptionId']}",
-                "subscriptionId": result["subscriptionId"],
-                "runId": run_id,
-                "completedUtc": completed_utc,
-                "scores": sub_scores,
-            }
+            {"id": f"{run_id}:{sub}", "subscriptionId": sub, "runId": run_id, "completedUtc": completed_utc,
+             "scores": scores}
         )
 
-    severity_totals = {s: 0 for s in SEVERITIES}
-    for by_severity in tenant_counts.values():
-        for severity, count in by_severity.items():
-            severity_totals[severity] += count
-
-    tenant_stats = scoring.merge_rule_stats(result["ruleStats"] for result in results)
-    top_types = sorted(type_totals.items(), key=lambda item: item[1], reverse=True)[:10]
     summary = {
         "id": run_id,
         "runId": run_id,
         "startedUtc": started_utc,
         "completedUtc": completed_utc,
         "trigger": trigger,
-        "subscriptionCount": len(results),
-        "resourceCount": resource_total,
-        "findingCount": finding_total,
+        "subscriptionCount": len(subscriptions),
+        "resourceCount": sum(resources_by_sub.values()),
+        "findingCount": sum(stat["affected"] for stat in all_stats),
         "scores": scoring.score_pillars(tenant_stats),
-        "counts": tenant_counts,
+        "counts": counts,
         "severityTotals": severity_totals,
-        "subscriptions": sorted(subscriptions, key=lambda item: item["findingCount"], reverse=True),
-        "topTypes": [{"type": name, "count": count} for name, count in top_types],
+        "sources": sources,
+        "subscriptions": sorted(subscription_rows, key=lambda item: item["findingCount"], reverse=True),
+        "topTypes": [
+            {"type": name, "count": count}
+            for name, count in sorted(type_totals.items(), key=lambda item: item[1], reverse=True)
+            if name != RESOURCE_GROUP_TYPE
+        ][:10],
         "errors": errors,
     }
+    summary.update(_defender_insights(datasets, names))
+    savings = _advisor_savings(datasets)
+    if savings:
+        summary["advisorSavings"] = savings
     return summary, score_docs
+
+
+def _defender_insights(datasets, names):
+    secure_scores, controls = [], {}
+    for data in _dataset(datasets, "defender"):
+        secure_scores.extend(data.get("secureScores", []))
+        for item in data.get("topControls", []):
+            total = controls.setdefault(item["control"], {"control": item["control"], "unhealthy": 0, "healthy": 0})
+            total["unhealthy"] += item["unhealthy"]
+            total["healthy"] += item["healthy"]
+    if not secure_scores and not controls:
+        return {}
+    measured = [item["percentage"] for item in secure_scores if item.get("percentage") is not None]
+    return {
+        "secureScore": {
+            "average": round(sum(measured) / len(measured), 1) if measured else None,
+            "subscriptions": sorted(
+                ({**item, "name": names.get(item["subscriptionId"], item["subscriptionId"])} for item in secure_scores),
+                key=lambda item: item["percentage"] if item.get("percentage") is not None else 101,
+            ),
+            "topControls": sorted(controls.values(), key=lambda item: item["unhealthy"], reverse=True)[:15],
+        }
+    }
+
+
+def _advisor_savings(datasets):
+    totals = defaultdict(float)
+    for data in _dataset(datasets, "advisor"):
+        for currency, value in (data.get("savings") or {}).items():
+            totals[currency] += value.get("annual", 0)
+    return {currency: round(amount, 2) for currency, amount in totals.items()}

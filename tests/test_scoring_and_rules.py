@@ -80,4 +80,4 @@ def test_rule_catalog_is_valid():
         assert rule.pillar in PILLARS
         assert rule.severity in SEVERITIES
         assert "project id, name, type, subscriptionId" in rule.query
-        assert rule.applies_to and all(t == t.lower() and "/" in t for t in rule.applies_to)
+        assert rule.applies_to and all(t == "*" or (t == t.lower() and "/" in t) for t in rule.applies_to)

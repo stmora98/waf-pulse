@@ -7,6 +7,7 @@ from azure.cosmos import CosmosClient
 from azure.storage.blob import BlobServiceClient
 
 from .credentials import storage_credential
+from .findings import retention_seconds
 
 TENANT_PARTITION = "tenant"
 _database = None
@@ -50,6 +51,32 @@ def save_findings(findings, workers=8):
 
 def save_summary(summary):
     container("summaries").upsert_item(summary)
+
+
+def save_stats(run_id, key, document):
+    """Statistics of one activity. They live in the summaries container (partition = run) next to the summary."""
+    _save_run_document(run_id, "stats", key, document)
+
+
+def save_dataset(run_id, name, data, key="0"):
+    _save_run_document(run_id, "dataset", f"{name}:{key}", {"name": name, "data": data})
+
+
+def _save_run_document(run_id, kind, key, payload):
+    document = {"id": f"{run_id}:{kind}:{key}", "runId": run_id, "kind": kind, **payload}
+    ttl = retention_seconds()
+    if ttl:
+        document["ttl"] = ttl
+    container("summaries").upsert_item(document)
+
+
+def load_run_documents(run_id, kind):
+    items = container("summaries").query_items(
+        "SELECT * FROM c WHERE c.runId = @run AND c.kind = @kind",
+        parameters=[{"name": "@run", "value": run_id}, {"name": "@kind", "value": kind}],
+        partition_key=run_id,
+    )
+    return list(items)
 
 
 def save_scores(score_docs):

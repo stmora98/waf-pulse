@@ -1,0 +1,173 @@
+{
+ "name": "Azure Application Delivery Networking",
+ "items": [
+  {
+   "guid": "f00a69de-7076-4734-a734-6e4552cad9e1",
+   "id": "A01.01",
+   "text": "If you use customer-managed TLS certificates with Azure Front Door, use the 'Latest' certificate version. Reduce the risk of outages caused by manual certificate renewal.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-latest-version-for-customer-managed-certificates",
+   "graph": "cdnresources | where type =~ 'microsoft.Cdn/profiles/secrets' | extend frontDoorId = substring(id, 0, indexof(id, '/secrets')) | where properties.parameters.type =~ 'CustomerCertificate' | extend compliant = properties.parameters.useLatestVersion == true | project compliant, id=frontDoorId, certificateName = name | distinct id, certificateName, compliant"
+  },
+  {
+   "guid": "e79d17b7-3b22-4a5a-97e7-a8ed4b30e38c",
+   "id": "A01.11",
+   "text": "Use Azure Front Door with WAF policies to deliver and help protect global HTTP/S apps that span multiple Azure regions.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/ag-overview",
+   "graph": "resources | where type =~ 'microsoft.cdn/profiles' and sku has 'AzureFrontDoor' | project name, cdnprofileid=tolower(id), tostring(tags), resourceGroup, subscriptionId,skuname=tostring(sku.name) | join kind= fullouter ( cdnresources | where type == 'microsoft.cdn/profiles/securitypolicies' | extend wafpolicyid=tostring(properties['parameters']['wafPolicy']['id']) | extend splitid=split(id, '/') | extend cdnprofileid=tolower(strcat_array(array_slice(splitid, 0, 8), '/')) | project secpolname=name, cdnprofileid, wafpolicyid ) on cdnprofileid | project name, cdnprofileid, secpolname, wafpolicyid,skuname | join kind = fullouter ( resources | where type == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | extend managedrulesenabled=iff(tostring(properties.managedRules.managedRuleSets) != '[]', true, false), enabledState = tostring(properties.policySettings.enabledState) | project afdwafname=name, managedrulesenabled, wafpolicyid=id, enabledState, tostring(tags) ) on wafpolicyid | where name != '' | summarize associatedsecuritypolicies=countif(secpolname != ''), wafswithmanagedrules=countif(managedrulesenabled == 1) by name, id=cdnprofileid, tags,skuname | extend compliant = (associatedsecuritypolicies > 0 and wafswithmanagedrules > 0) | project id, compliant"
+  },
+  {
+   "guid": "ae248989-b306-4591-9186-de482e3f0f0e",
+   "id": "A01.16",
+   "text": "Deploy your WAF policy for Front Door in 'Prevention' mode' so that Web Application Firewall takes appropriate action to allow or deny traffic.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/afds/waf-front-door-policy-settings",
+   "graph": "resources | where type == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | project policyName=name, policyId=id,policySku=sku.name, links=properties.securityPolicyLinks, enabledState=properties.policySettings.enabledState, mode=properties.policySettings.mode | mvexpand links | extend securityPolicy=links.id | extend securityPolicyParts=split(securityPolicy, '/') | extend profileId=strcat_array(array_slice(securityPolicyParts, 0, -3), '/') | project id=profileId, compliant=((enabledState=='Enabled') and (mode=='Prevention')), enabledState, mode"
+  },
+  {
+   "guid": "062d5839-4d36-402f-bfa4-02811eb936e9",
+   "id": "A01.17",
+   "text": "Avoid placing Traffic Manager behind Front Door.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#avoid-combining-traffic-manager-and-front-door",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend compliant = properties['hostName'] !endswith '.trafficmanager.net' | project compliant, id=frontDoorId"
+  },
+  {
+   "guid": "5efeb96a-003f-4b18-8fcd-b4d84459c2b2",
+   "id": "A01.18",
+   "text": "Use the same domain name on Azure Front Door and your origin. Mismatched host names can cause subtle bugs.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-the-same-domain-name-on-front-door-and-your-origin",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origins')) | extend compliant = isempty(properties.originHostHeader) or (tostring(properties.hostName) =~ tostring(properties.originHostHeader)) | project id=frontDoorId, originName = name, compliant"
+  },
+  {
+   "guid": "0b5a380c-4bfb-47bc-b1d7-dcfef363a61b",
+   "id": "A01.19",
+   "text": "Disable health probes when there is only one origin in an Azure Front Door origin group.",
+   "severity": "Low",
+   "waf": "Performance",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#disable-health-probes-when-theres-only-one-origin-in-an-origin-group",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend originGroupId = substring(id, 0, indexof(id, '/origins')) | join kind=inner (cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend originGroupName = name | extend hasHealthProbe = isnotnull(properties.healthProbeSettings)) on $left.originGroupId == $right.id | summarize numberOrigins = count() by originGroupId, subscriptionId, frontDoorId, hasHealthProbe, originGroupName | extend compliant = not(numberOrigins == 1 and hasHealthProbe) | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "a13f72f3-8f5c-4864-95e5-75bf37fbbeb1",
+   "id": "A01.21",
+   "text": "Use HEAD health probes with Azure Front Door, to reduce the traffic that Front Door sends to your application.",
+   "severity": "Low",
+   "waf": "Performance",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-head-health-probes",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups/')) | extend compliant = (isnull(properties['healthProbeSettings']['probeRequestType']) or toupper(properties['healthProbeSettings']['probeRequestType']) == 'HEAD') | project compliant, id=frontDoorId"
+  },
+  {
+   "guid": "af95c92d-d723-4f4a-98d7-8722324efd4d",
+   "id": "A01.23",
+   "text": "Use managed TLS certificates with Azure Front Door. Reduce operational cost and risk of outages due to certificate renewals.",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-managed-tls-certificates",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/customdomains' | extend frontDoorId = substring(id, 0, indexof(id, '/customdomains')) | extend compliant = (isnull(properties['tlsSettings']['certificateType']) or tolower(properties['tlsSettings']['certificateType']) =~ 'customercertificate') | project compliant, id = frontDoorId"
+  },
+  {
+   "guid": "2e30abab-5478-417c-81bf-bf1ad4ed1ed4",
+   "id": "A01.25",
+   "text": "Use end-to-end TLS with Azure Front Door. Use TLS for connections from your clients to Front Door, and from Front Door to your origin.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-end-to-end-tls",
+   "graph": "cdnresources | where type == 'microsoft.cdn/profiles/afdendpoints/routes' | extend frontDoorId = substring(id, 0, indexof(id, '/afdendpoints')) | extend forwardingProtocol=tostring(properties.forwardingProtocol),supportedProtocols=properties.supportedProtocols,httpsRedirect=properties.httpsRedirect | extend compliant = forwardingProtocol =~ 'httpsonly' and (supportedProtocols has 'https' or httpsRedirect =~ 'enabled') | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "10aa45af-166f-44c4-9f36-b6d592dac2ca",
+   "id": "A01.26",
+   "text": "Use HTTP to HTTPS redirection with Azure Front Door. Support older clients by redirecting them to an HTTPS request automatically.",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-http-to-https-redirection",
+   "graph": "cdnresources | where type == 'microsoft.cdn/profiles/afdendpoints/routes' | extend frontDoorId = substring(id, 0, indexof(id, '/afdendpoints')) | extend forwardingProtocol=tostring(properties.forwardingProtocol),supportedProtocols=properties.supportedProtocols,httpsRedirect=properties.httpsRedirect | extend compliant = httpsRedirect =~ 'enabled' | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "28b9ee82-b2c7-45aa-bc98-6de6f59a095d",
+   "id": "A01.27",
+   "text": "Enable the Azure Front Door WAF. Protect your application from a range of attacks.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#enable-the-waf",
+   "graph": "resources | where type =~ 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | project policyName=name, policyId=id,policySku=sku.name, links=properties.securityPolicyLinks, enabledState=properties.policySettings.enabledState, mode=properties.policySettings.mode | mvexpand links | extend securityPolicy=links.id | extend securityPolicyParts=split(securityPolicy, '/') | extend profileId=strcat_array(array_slice(securityPolicyParts, 0, -3), '/') | project id=profileId, compliant=((enabledState=~'Enabled') and (mode=~'Prevention')), enabledState, mode"
+  },
+  {
+   "guid": "c3a769e4-cc78-40a9-b36a-f9bcab19ec2d",
+   "id": "A01.51",
+   "text": "Support redundancy by having multiple origins in one or more back-end pools. Always have redundant instances of your application and make sure each instance exposes an endpoint or origin. You can place those origins in one or more back-end pools.",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/quickstart-create-front-door",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend healthprobe=tostring(properties.healthProbeSettings) | project origingroupname=name, id, tags, resourceGroup, subscriptionId, healthprobe, frontDoorId | join ( cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/Origins' | extend origingroupname = tostring(properties.originGroupName) ) on origingroupname | summarize origincount=count(), enabledhealthprobecount=countif(healthprobe != '') by origingroupname, id, tostring(tags), resourceGroup, subscriptionId, frontDoorId | extend compliant = origincount > 1 | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "34069d73-e4de-46c5-a36f-625f87575a56",
+   "id": "A01.60",
+   "text": "Disable health checks in single back-end pools. If you have only one origin configured in your Azure Front Door origin group, these calls are unnecessary. This is only recommended if you can't have multiple origins in your endpoint.",
+   "severity": "Low",
+   "waf": "Cost",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#disable-health-probes-when-theres-only-one-origin-in-an-origin-group",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend healthprobe=tostring(properties.healthProbeSettings) | project origingroupname=name, id, tags, resourceGroup, subscriptionId, healthprobe, frontDoorId | join ( cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/Origins' | extend origingroupname = tostring(properties.originGroupName) ) on origingroupname | summarize origincount=count(), enabledhealthprobecount=countif(healthprobe != '') by origingroupname, id, tostring(tags), resourceGroup, subscriptionId, frontDoorId | extend compliant = origincount > 1 or (origincount == 1 and enabledhealthprobecount == 0) | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "cb8eb8c0-aa73-4a26-a495-6eba8dc4a243",
+   "id": "A01.66",
+   "text": "Consider migrating to Standard or Premium SKU if you are using Classic Azure Front Door currently as Classic Azure Front Door will be deprecated by March 2027.",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Network Topology and Connectivity",
+   "subcategory": "Front Door",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/cdn/tier-migration",
+   "graph": "resources | where type =~ 'microsoft.network/frontdoors' and properties['resourceState'] !~ 'migrated' | extend compliant = false | project id, compliant"
+  }
+ ]
+}

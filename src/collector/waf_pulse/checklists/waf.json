@@ -1,0 +1,1341 @@
+{
+ "name": "WAF checklist",
+ "items": [
+  {
+   "guid": "0bd05dc2-efd5-4d76-8d41-d2500cc47b49",
+   "text": "Encrypt registry with a customer managed key",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/tutorial-customer-managed-keys",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | extend acrName = name, acrId = id | extend encryptionStatus = properties.encryption.status  | extend compliant = iif(encryptionStatus == 'disabled', false, true) | project acrName, acrId, encryptionStatus, compliant"
+  },
+  {
+   "guid": "be0e38ce-e297-411b-b363-caaab79b198d",
+   "text": "Disable local authentication for management plane access",
+   "severity": "High",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-authentication-managed-identity",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend localAdminDisabled = properties.adminUserEnabled // Adjust this property as needed | extend compliant = iif(localAdminDisabled == 'false', true, false) // Check if local admin is disabled | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "387e5ced-126c-4d13-8af5-b20c6998a646",
+   "text": "Assign AcrPull & AcrPush RBAC roles rather than granting Administrative access to identity principals",
+   "severity": "High",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-roles?tabs=azure-cli",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend localAdminDisabled = properties.adminUserEnabled // Adjust this property as needed | extend compliant = iif(localAdminDisabled == 'false', true, false) // Check if local admin is disabled | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "e338997e-41c7-47d7-acf6-a62a1194956d",
+   "text": "Disable Anonymous pull access",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/anonymous-pull-access#configure-anonymous-pull-access",
+   "graph": "resources | where type =~ 'microsoft.containerregistry/registries' | extend compliant = iif(properties.anonymousPullEnabled == false, true, false) | project compliant, name, id, tags | distinct id, compliant"
+  },
+  {
+   "guid": "cd289ced-6b17-4db8-8554-62f2aee4553a",
+   "text": "Disable Public Network access",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-access-selected-networks#disable-public-network-access",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | where sku.name =~ 'Premium' // Check for Premium SKU | extend publicAccessEnabled = properties.publicNetworkAccess | extend defaultAction = tostring(properties.networkRuleSet.defaultAction) // Extract defaultAction | extend compliant = iif(publicAccessEnabled != 'Enabled' or defaultAction == 'Deny', true, false) | project name, id, publicAccessEnabled, defaultAction, compliant"
+  },
+  {
+   "guid": "fc833934-8b26-42d6-ac5f-512925498f6d",
+   "text": "Use an Azure Container Registry SKU that supports Private Link (Premium SKU)",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "ACR",
+   "link": "https://learn.microsoft.com/azure/container-registry/container-registry-skus",
+   "graph": "resources | where type =~ 'Microsoft.ContainerRegistry/registries' | extend skuName = sku.name // Extract the SKU name | extend compliant = iif(skuName == 'Premium', true, false) // Check if SKU is Premium | project name, id, skuName, compliant"
+  },
+  {
+   "guid": "71d41e36-10cc-457b-9a4b-1410d4395898",
+   "text": "Use the SLA-backed AKS offering",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/uptime-sla",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (sku.tier=='Paid') | distinct id,compliant"
+  },
+  {
+   "guid": "9ca48e4a-85e2-4223-bce8-bb12307ca5f1",
+   "text": "Use Azure Policy for Kubernetes to ensure cluster compliance",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/governance/policy/concepts/policy-for-kubernetes",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnotnull(properties.addonProfiles.azurepolicy) and properties.addonProfiles.azurepolicy.enabled==true) | distinct id,compliant"
+  },
+  {
+   "guid": "6f158e3e-a3a9-42c2-be7e-2165c3a87af4",
+   "text": "Separate applications from the control plane with user/system node pools",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/use-system-pools",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | project id,resourceGroup,name,pools=properties.agentPoolProfiles | project id,name,resourceGroup,poolcount=array_length(pools) | extend compliant = (poolcount > 1)"
+  },
+  {
+   "guid": "ed127dd1-42b0-46b2-8c69-99a646f3389a",
+   "text": "Use managed identities instead of Service Principals",
+   "severity": "High",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/use-managed-identity",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (properties.servicePrincipalProfile.clientId=='msi') | distinct id,compliant"
+  },
+  {
+   "guid": "7e42c78e-78c0-46a6-8a21-94956e698dc4",
+   "text": "Integrate authentication with AAD (using the managed integration)",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/managed-aad",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = isnotnull(properties.aadProfile) | distinct id,compliant"
+  },
+  {
+   "guid": "b085b1f2-3119-4771-8c9a-bbf4411810ec",
+   "text": "Disable AKS local accounts",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/managed-aad#disable-local-accounts",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (properties.disableLocalAccounts==true) | distinct id,compliant"
+  },
+  {
+   "guid": "8008ae7d-7e4b-4475-a6c8-bdbf59bce65d",
+   "text": "Do not use AKS HTTP Routing Add-On, use instead the managed NGINX ingress with the application routing add-on.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/http-application-routing",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnull(properties.addonProfiles.httpApplicationRouting) or properties.addonProfiles.httpApplicationRouting.enabled==false) | distinct id,compliant"
+  },
+  {
+   "guid": "ba7da7be-9952-4914-a384-5d997cb39132",
+   "text": "Use the standard ALB (as opposed to the basic one)",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/load-balancer-standard",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (tolower(properties.networkProfile.loadBalancerSku)=='standard') | distinct id,compliant"
+  },
+  {
+   "guid": "a0f61565-9de5-458f-a372-49c831112dbd",
+   "text": "Choose the best CNI network plugin for your requirements (Azure CNI recommended)",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/operator-best-practices-network",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (properties.networkProfile.networkPlugin=='azure') | distinct id,compliant"
+  },
+  {
+   "guid": "3b365a91-7ecb-4e48-bbe5-4cd7df2e8bba",
+   "text": "Filter egress traffic with AzFW/NVA if your security requirements mandate it",
+   "severity": "High",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/limit-egress-traffic",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (properties.networkProfile.outboundType=='userDefinedRouting') | distinct id,compliant"
+  },
+  {
+   "guid": "c4581559-bb91-463e-a908-aed8c44ce3b2",
+   "text": "If using a public API endpoint, restrict the IP addresses that can access it",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/api-server-authorized-ip-ranges",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = ((isnull(properties.apiServerAccessProfile.enablePrivateCluster) or properties.apiServerAccessProfile.enablePrivateCluster==false) and isnotnull(properties.apiServerAccessProfile.authorizedIPRanges)) | distinct id,compliant"
+  },
+  {
+   "guid": "ecccd979-3b6b-4cda-9b50-eb2eb03dda6d",
+   "text": "Use private clusters if your requirements mandate it",
+   "severity": "High",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/private-clusters",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | where isnotnull(properties.apiServerAccessProfile.enablePrivateCluster) | extend compliant = (properties.apiServerAccessProfile.enablePrivateCluster==true) | distinct id, compliant"
+  },
+  {
+   "guid": "ce7f2a7c-297c-47c6-adea-a6ff838db665",
+   "text": "For Windows 2019 and 2022 AKS nodes Calico Network Policies can be used ",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/use-network-policies",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | where isnotnull(properties.apiServerAccessProfile.enablePrivateCluster) | extend compliant = (properties.apiServerAccessProfile.enablePrivateCluster==true) | distinct id, compliant"
+  },
+  {
+   "guid": "58d7c892-ddb1-407d-9769-ae669ca48e4a",
+   "text": "Enable a Kubernetes Network Policy option (Calico/Azure)",
+   "severity": "High",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/use-network-policies",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = isnotnull(properties.networkProfile.networkPolicy) | distinct id,compliant"
+  },
+  {
+   "guid": "9bda4776-8f24-4c11-9775-c2ea55b46a94",
+   "text": "Use DDoS Standard in the AKS Virtual Network",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/virtual-network/ddos-protection-overview",
+   "graph": "Resources | where type=~'microsoft.containerservice/managedclusters' | project resourceGroup,name,pools=properties.agentPoolProfiles | mv-expand pools | project subnetId=tostring(pools.vnetSubnetID) | where isnotempty(subnetId) | join (Resources | where type=='microsoft.network/virtualnetworks' | project id,resourceGroup,name,enableDdosProtection=tostring(properties.enableDdosProtection),subnets=properties.subnets | mv-expand subnets | project id,resourceGroup,name,enableDdosProtection,subnetId=tostring(subnets.id)) on subnetId | distinct id,resourceGroup,name,enableDdosProtection | extend compliant = (enableDdosProtection == 'true')"
+  },
+  {
+   "guid": "6c46b91a-1107-4485-ad66-3183e2a8c266",
+   "text": "If required add company HTTP Proxy",
+   "severity": "Low",
+   "waf": "Security",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/http-proxy",
+   "graph": "Resources | where type=~'microsoft.containerservice/managedclusters' | project resourceGroup,name,pools=properties.agentPoolProfiles | mv-expand pools | project subnetId=tostring(pools.vnetSubnetID) | where isnotempty(subnetId) | join (Resources | where type=='microsoft.network/virtualnetworks' | project id,resourceGroup,name,enableDdosProtection=tostring(properties.enableDdosProtection),subnets=properties.subnets | mv-expand subnets | project id,resourceGroup,name,enableDdosProtection,subnetId=tostring(subnets.id)) on subnetId | distinct id,resourceGroup,name,enableDdosProtection | extend compliant = (enableDdosProtection == 'true')"
+  },
+  {
+   "guid": "73b32a5a-67f7-4a9e-b5b3-1f38c3f39812",
+   "text": "Use custom Node RG (aka 'Infra RG') name",
+   "severity": "Low",
+   "waf": "Operations",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/cluster-configuration",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (properties.nodeResourceGroup !startswith 'MC_') | distinct id,compliant"
+  },
+  {
+   "guid": "c755562f-2b4e-4456-9b4d-874a748b662e",
+   "text": "Consider AKS virtual node for quick bursting",
+   "severity": "Low",
+   "waf": "Operations",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/concepts-scale",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnotnull(properties.addonProfiles.aciConnectorLinux) and properties.addonProfiles.aciConnectorLinux.enabled==true) | distinct id,compliant"
+  },
+  {
+   "guid": "eaa8dc4a-2436-47b3-9697-15b1752beee0",
+   "text": "Store and analyze your cluster logs with Container Insights (or other tools like Telegraf/ElasticSearch)",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/azure-monitor/insights/container-insights-overview",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnotnull(properties.addonProfiles.omsagent) and properties.addonProfiles.omsagent.enabled==true) | distinct id,compliant"
+  },
+  {
+   "guid": "90ce65de-8e13-4f9c-abd4-69266abca264",
+   "text": "Use the Cluster Autoscaler",
+   "severity": "Medium",
+   "waf": "Performance",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/concepts-scale",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnotnull(properties.autoScalerProfile)) | distinct id,compliant"
+  },
+  {
+   "guid": "831c2872-c693-4b39-a887-a561bada49bc",
+   "text": "Customize node configuration for AKS node pools",
+   "severity": "Low",
+   "waf": "Performance",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/custom-node-configuration",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | extend compliant = (isnotnull(properties.austoscalerProfile)) | distinct id,compliant"
+  },
+  {
+   "guid": "24367b33-6971-45b1-952b-eee0b9b588de",
+   "text": "Use ephemeral OS disks",
+   "severity": "High",
+   "waf": "Performance",
+   "service": "AKS",
+   "link": "https://learn.microsoft.com/azure/aks/cluster-configuration",
+   "graph": "where type=='microsoft.containerservice/managedclusters' | project id,resourceGroup,name,pools=properties.agentPoolProfiles | mvexpand pools | extend compliant = (pools.osDiskType=='Ephemeral') | project id,name=strcat(name,'-',pools.name), resourceGroup, compliant"
+  },
+  {
+   "guid": "d0642c1c-312b-4116-94ab-439e1c836819",
+   "text": "RBAC is recommended to control access to your key vault. Familiarize yourself with the Key Vault's access control guidance.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Key Vault",
+   "link": "https://learn.microsoft.com/azure/key-vault/general/rbac-guide?tabs=azure-cli",
+   "graph": "resources| where type =~ 'microsoft.keyvault/vaults' | extend compliant = (properties.enableRbacAuthorization == true) | distinct id, compliant"
+  },
+  {
+   "guid": "553585a6-abe0-11ed-afa1-0242ac120002",
+   "text": "Ensure you are using Application Gateway v2 SKU",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/overview-v2",
+   "graph": "resources | where type == 'microsoft.network/applicationgateways' | project id, compliant = properties.sku.name in ('Standard_v2', 'WAF_v2') | project id,compliant"
+  },
+  {
+   "guid": "4e35fbf5-0ae2-48b2-97ce-753353edbd1a",
+   "text": "Ensure you are using the Standard SKU for your Azure Load Balancers",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/load-balancer/load-balancer-overview",
+   "graph": "resources | where type == 'microsoft.network/loadbalancers' | project id, compliant=(tolower(sku.name) == 'standard')"
+  },
+  {
+   "guid": "dfc50f87-3800-424c-937b-ed5f186e7c15",
+   "text": "Your Application Gateways v2 should be deployed in subnets with IP prefixes equal or larger than /24",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/configuration-infrastructure#size-of-the-subnet",
+   "graph": "resources | where type=='microsoft.network/applicationgateways' | extend subnetId = tostring(properties.gatewayIPConfigurations[0].properties.subnet.id) | project id, subnetId | join (resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | mv-expand subnets.properties.addressPrefixes | project id, subnetId = tostring(subnets.id), prefix1 = subnets.properties.addressPrefix, prefix2 = subnets.properties.addressPrefixes | mv-expand prefix2 | extend prefix = iff(isnotnull(prefix1), prefix1, prefix2) | extend subnetPrefixLength = split(prefix, '/')[1])on subnetId | extend compliant = (subnetPrefixLength <= 24 or subnetPrefixLength == 64) | distinct id,compliant"
+  },
+  {
+   "guid": "135bf4ac-f9db-461f-b76b-2ee9e30b12c0",
+   "text": "Configure autoscaling with a minimum amount of instances of two.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/application-gateway-autoscaling-zone-redundant",
+   "graph": "resources | where type =~ 'microsoft.network/applicationGateways' | extend compliant = (isnotnull(properties.autoscaleConfiguration) and properties.autoscaleConfiguration.minCapacity >= 2) | distinct id,compliant"
+  },
+  {
+   "guid": "060c6964-52b5-48db-af8b-83e4b2d85349",
+   "text": "Deploy Application Gateway across Availability Zones",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/reliability/migrate-app-gateway-v2",
+   "graph": "resources | where type =~ 'microsoft.network/applicationGateways' | extend compliant = (isnotnull(zones) and array_length(zones) > 1) | distinct id,compliant"
+  },
+  {
+   "guid": "97a2fd46-64b0-1dfa-b72d-9c8869496d75",
+   "text": "Use Azure NAT Gateway instead of Load Balancer outbound rules for better SNAT scalability",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/nat-gateway/nat-overview#outbound-connectivity",
+   "graph": "resources | where type=='microsoft.network/loadbalancers' | extend countOutRules=array_length(properties.outboundRules) | extend compliant = (countOutRules == 0) | distinct id,compliant"
+  },
+  {
+   "guid": "2f8e81eb-8e68-4026-8b1f-70f9b05f7cf9",
+   "text": "Enable the Azure Application Gateway WAF bot protection rule set. The bot rules detect good and bad bots.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/bot-protection",
+   "graph": "resources | where type == 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | mv-expand properties.managedRules.managedRuleSets | project id, rulesettype = properties_managedRules_managedRuleSets.ruleSetType | extend compliant1 = (rulesettype == 'Microsoft_BotManagerRuleSet') | project id, compliant1 | summarize compliant = max(compliant1) by id"
+  },
+  {
+   "guid": "8ea8e0d4-84e8-4b33-aeab-493f6391b4d6",
+   "text": "Ensure if request body inspection feature is enabled in Azure Application Gateway WAF policy.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/application-gateway-waf-request-size-limits#request-body-inspection",
+   "graph": "resources | where type =~ 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | extend compliant = (properties['policySettings']['requestBodyCheck'] == 'true' and properties['policySettings']['state'] =~ 'Enabled') | distinct id, name, compliant"
+  },
+  {
+   "guid": "baf8e317-2397-4d49-b3d1-0dcc16d8778d",
+   "text": "Deploy your WAF policy for Application Gateway in 'Prevention' mode.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/policy-overview?source=recommendations",
+   "graph": "resources | where type =~ 'microsoft.network/applicationgatewaywebapplicationfirewallpolicies' | extend compliant = (properties['policySettings']['mode'] =~ 'Prevention')| where properties['policySettings']['mode'] =~ 'Prevention' | distinct id, name, compliant"
+  },
+  {
+   "guid": "a66f0fd8-2ca4-422e-8df3-235148127ca2",
+   "text": "You should encrypt traffic to the backend servers.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Gateway",
+   "link": "https://learn.microsoft.com/azure/application-gateway/ssl-overview",
+   "graph": "resources | where type == 'microsoft.network/applicationgateways'| extend compliant = (properties['backendHttpSettingsCollection'][0]['properties']['port'] =~ '443') |where properties['backendHttpSettingsCollection'][0]['properties']['port'] =~ '443'|distinct id,name,compliant"
+  },
+  {
+   "guid": "182840d2-9ef8-4238-8fd6-0d76186830ac",
+   "text": "Use Standard SKU for production scenarios.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/overview-managed-cluster#service-fabric-managed-cluster-skus",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/managedClusters' | extend compliant = (sku=~'{\"name\":\"Standard\"}') | distinct id,compliant"
+  },
+  {
+   "guid": "182840d2-9ef8-4238-8fd6-0d76186830ac",
+   "text": "Use durability level Silver (5 VMs) or greater for production scenarios",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/service-fabric-cluster-capacity#durability-characteristics-of-the-cluster",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/clusters' | extend nodeTypes= array_concat(properties.nodeTypes) | mv-expand nodeTypes | summarize BronzeDurabilityCount = countif(nodeTypes.durabilityLevel == 'Bronze') by id | extend compliant = (BronzeDurabilityCount == 0) | distinct id,compliant"
+  },
+  {
+   "guid": "2363878d-55c4-4cbd-9bc2-94523c85f12e",
+   "text": "Consider using Availability Zones for your Service Fabric clusters. Service Fabric managed cluster supports deployments that span across multiple Availability Zones to provide zone resiliency. This configuration will ensure high-availability of the critical system services and your applications to protect from single-points-of-failure.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/how-to-managed-cluster-availability-zones",
+   "graph": "resources | where type=~'Microsoft.ServiceFabric/managedClusters' | extend compliant= ( properties.zonalResiliency =~ 'true') | distinct id,compliant"
+  },
+  {
+   "guid": "4da21268-f775-4c89-a271-eb80543c8df7",
+   "text": "Avoid VM SKUs with temp disk offerings. Service Fabric uses managed disks by default, so avoiding temp disk offerings ensures you don't pay for unneeded resources.",
+   "severity": "Medium",
+   "waf": "Cost",
+   "service": "Azure Service Fabric",
+   "graph": "resources | where type=~'Microsoft.Compute/virtualMachineScaleSets' | extend vmssExtension= array_concat(properties.virtualMachineProfile.extensionProfile.extensions) | mv-expand vmssExtension | where vmssExtension.properties.publisher matches regex '^Microsoft.Azure.ServiceFabric.*' | summarize arg_max(id, *) | summarize compliant = countif(sku.name matches regex '^Standard_[^d]*$' ) by id"
+  },
+  {
+   "guid": "4e98c903-14cf-4c72-9c45-b8b23bc4cbd8",
+   "text": "Deploy Key Vault certificates to Service Fabric cluster virtual machine scale sets. Centralizing storage of application secrets in Azure Key Vault allows you to control their distribution. Key Vault greatly reduces the chances that secrets may be accidentally leaked.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Azure Service Fabric",
+   "link": "https://learn.microsoft.com/azure/service-fabric/service-fabric-best-practices-security#deploy-key-vault-certificates-to-service-fabric-cluster-virtual-machine-scale-sets",
+   "graph": "resources | where type=~'Microsoft.Compute/virtualMachineScaleSets' | extend vmssExtension= array_concat(properties.virtualMachineProfile.extensionProfile.extensions) | mv-expand vmssExtension | where vmssExtension.properties.publisher matches regex '^Microsoft.Azure.ServiceFabric.*' | summarize arg_max(id, *) | extend compliant = (isnotnull(properties.virtualMachineProfile.osProfile.secrets))"
+  },
+  {
+   "guid": "ba07c007-1f90-43e9-aa4f-601346b80352",
+   "text": "Set up ExpressRoute connections from on-premises to the primary and secondary Azure disaster recovery regions. Also, as an alternative to using ExpressRoute, consider setting up VPN connections from on-premises to the primary and secondary Azure disaster recovery regions.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/expressroute/designing-for-disaster-recovery-with-expressroute-privatepeering",
+   "graph": "resources| where type =~ 'microsoft.network/virtualnetworkgateways'| where properties.gatewayType =~ 'vpn' or properties.gatewayType =~ 'ExpressRoute'| extend SKUName = properties.sku.name, SKUTier = properties.sku.tier, Type = properties.gatewayType| extend compliant = SKUTier contains 'AZ'| project name, id, subscriptionId, resourceGroup, Type, compliant"
+  },
+  {
+   "guid": "6561f847-3db5-4ff8-9200-5ad3c3b436ad",
+   "text": "The CIDR for the primary virtual network (VNet) shouldn't conflict or overlap with the CIDR of the DR site's VNet",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/ja-jp/azure/virtual-network/virtual-networks-faq",
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | extend addressSpace = todynamic(properties.addressSpace) | extend addressPrefix = todynamic(properties.addressSpace.addressPrefixes) | mvexpand addressSpace | mvexpand addressPrefix | project name, id, location, resourceGroup, subscriptionId, cidr = addressPrefix | extend compliant = (cidr matches regex @'^(10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)')  | project id, compliant, cidr"
+  },
+  {
+   "guid": "a78b3d31-3170-44f2-b5d7-651a29f4ccf5",
+   "text": "Most failover clusters for SAP application layer components (ASCS) and the DBMS layer require a virtual IP address for a failover cluster.  Azure Load Balancer should handle the virtual IP address for all other cases. One design principle is to use one load balancer per cluster configuration. We recommend that you use the standard version of the load balancer (Standard Load Balancer SKU).",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/sap/workloads/high-availability-guide-standard-load-balancer-outbound-connections",
+   "graph": "resources | where type =~ 'Microsoft.Network/loadBalancers' | extend bep = properties.backendAddressPools | extend BackEndPools = array_length(bep) | where BackEndPools =~ 0 | project name, id, Param1='backendPools', Param2=toint(0), tags | union (resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Standard' | extend bep = properties.backendAddressPools | extend BackEndPools = toint(array_length(bep)) | mv-expand bip = properties.backendAddressPools | extend BackendAddresses = array_length(bip.properties.loadBalancerBackendAddresses) | where toint(BackendAddresses) <= 1 | project name, id, tags, Param1='backendAddresses', Param2=toint(BackendAddresses)) | union ( resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Basic' | mv-expand properties.backendAddressPools | extend backendPoolId = properties_backendAddressPools.id | project id, name, tags, tostring(backendPoolId), Param1='BackEndPools' | join kind = leftouter ( resources | where type =~ 'Microsoft.Network/networkInterfaces' | mv-expand properties.ipConfigurations | mv-expand properties_ipConfigurations.properties.loadBalancerBackendAddressPools | extend backendPoolId = tostring(properties_ipConfigurations_properties_loadBalancerBackendAddressPools.id) | summarize poolMembers = count() by backendPoolId | project tostring(backendPoolId), poolMembers ) on backendPoolId | where toint(poolMembers) <= 1 | extend BackendAddresses = poolMembers | project id, name, tags, Param1='backendAddresses', Param2=toint(BackendAddresses))"
+  },
+  {
+   "guid": "f656e745-0cfb-453e-8008-0528fa21c933",
+   "text": "Deploy both VMs in the high-availability pair in an availability set or in availability zones. These VMs should be the same size and have the same storage configuration.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/sap/eslz-business-continuity-and-disaster-recovery",
+   "graph": "Resources | where type =~ 'Microsoft.Storage/storageAccounts' | where sku.name in~ ('Standard_LRS', 'Premium_LRS') | project name, id, tags, param1 = strcat('sku: ', sku.name)"
+  },
+  {
+   "guid": "fda1dbf3-dc95-4d48-a7c7-91dca0f6c565",
+   "text": "Enforce a RBAC model for management groups, subscriptions, resource groups and resources",
+   "severity": "High",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/well-architected/sap/design-areas/security",
+   "graph": "resources | where type =~ 'microsoft.aad/domainservices' | extend replicaSets = properties.replicaSets | where array_length(replicaSets) < 2 | project name=name, id=id, tags=tags, param1=strcat('replicaSetLocation:', replicaSets[0].location)"
+  },
+  {
+   "guid": "6ba28021-4591-4147-9e39-e5309cccd979",
+   "text": "enforce existing Management Group policies to SAP Subscriptions",
+   "severity": "Medium",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/design-area/resource-org-management-groups",
+   "graph": "resourcecontainers| where type =~ 'microsoft.resources/subscriptions'| extend ManagementGroup = tostring(tags),mgmtChain = properties.managementGroupAncestorsChain| extend compliant =( array_length(mgmtChain) <= 4 and array_length(mgmtChain) > 1)"
+  },
+  {
+   "guid": "366bcda2-750a-4b1a-a039-d95d54c7c892",
+   "text": "Integrate tightly coupled applications into the same SAP subscription to avoid additional routing and management complexity",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/architecture/guide/sap/sap-whole-landscape",
+   "graph": "Resources | summarize count()"
+  },
+  {
+   "guid": "9cb107d5-325a-4e52-9ba3-4d4685e2213a",
+   "text": "Leverage Subscription as scale unit and scaling our resources, consider deploying subscription per environment eg. Sandbox, non-prod, prod ",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/architecture/guide/sap/sap-whole-landscape",
+   "graph": "Resources | where type contains 'publicIPAddresses' and isnotempty(properties.ipAddress) | summarize count () by subscriptionId"
+  },
+  {
+   "guid": "ce7bb122-f7c9-45f0-9e15-4e3aa3592829",
+   "text": "Ensure quota increase as a part of subscription provisioning (e.g. total available VM cores within a subscription)",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/quotas/quotas-overview",
+   "graph": "QuotaResources | where type =~ 'microsoft.compute/locations/usages' | where subscriptionId in~ ('<Subscription1>','<Subscription2>') | mv-expand json = properties.value limit 400 | extend usagevCPUs = json.currentValue, QuotaLimit = json['limit'], quotaName = tostring(json['name'].localizedValue) | extend usagePercent = toint(usagevCPUs)*100 / toint(QuotaLimit) |where quotaName =~ 'Total Regional vCPUs' or quotaName =~ 'Total Regional Low-priority vCPUs' |project subscriptionId,quotaName,usagevCPUs,QuotaLimit,usagePercent,location,['json'] | order by ['usagePercent'] desc"
+  },
+  {
+   "guid": "4e138115-2318-41aa-9174-26943ff8ae7d",
+   "text": "Leverage Azure resource tag for cost categorization and resource grouping (: BillTo, Department (or Business Unit), Environment (Production, Stage, Development), Tier (Web Tier, Application Tier), Application Owner, ProjectName)",
+   "severity": "Medium",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/sap/eslz-resource-organization",
+   "graph": "resources | extend compliant = isnotnull(['tags']) | project name, id, subscriptionId, resourceGroup, tags, compliant"
+  },
+  {
+   "guid": "579266bc-ca27-45fa-a1ab-fe9d55d04c3c",
+   "text": "Azure tagging can be leveraged to logically group and track resources, automate their deployments, and most importantly, provide visibility on the incurred costs.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cost-management-billing/costs/enable-tag-inheritance",
+   "graph": "resources | extend compliant = isnotnull(['tags']) | project name, id, subscriptionId, resourceGroup, tags, compliant"
+  },
+  {
+   "guid": "a3592829-e6e2-4061-9368-6af46791f893",
+   "text": "Local and global VNet peering provide connectivity and are the preferred approaches to ensure connectivity between landing zones for SAP deployments across multiple Azure regions",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/virtual-network-peering-overview",
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | project id, peeringName=properties_virtualNetworkPeerings.name, compliant = (properties_virtualNetworkPeerings.properties.allowVirtualNetworkAccess =~ True)"
+  },
+  {
+   "guid": "7d4bc7d2-c34a-452e-8f1d-6ae3c8eafcc3",
+   "text": "Use Virtual WAN for Azure deployments in new, large, or global networks where you need global transit connectivity across Azure regions and on-premises locations. With this approach, you won't need to manually set up transitive routing for Azure networking, and you can follow a standard for SAP on Azure deployments.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/training/modules/introduction-azure-virtual-wan/?source=recommendations",
+   "graph": "resources| where type =~ 'microsoft.network/virtualwans' | extend compliant= (properties.allowBranchToBranchTraffic =~ 'true') | distinct id,compliant"
+  },
+  {
+   "guid": "82734c88-6ba2-4802-8459-11475e39e530",
+   "text": "Public IP assignment to VM running SAP Workload is not recommended.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/plan-for-ip-addressing",
+   "graph": "Resources | where type =~ 'Microsoft.Network/publicIPAddresses' and sku.tier =~ 'Regional' | where isempty(zones) or array_length(zones) <= 1 | extend az = case(isempty(zones), 'Non-zonal', array_length(zones) <= 1, strcat('Zonal (', strcat_array(zones, ','), ')'), zones) | project name, id, tags, param1 = strcat('sku: ', sku.name), param2 = strcat('availabilityZone: ', az)"
+  },
+  {
+   "guid": "9cccd979-366b-4cda-8750-ab1ab039d95d",
+   "text": "Consider reserving IP address on DR side when configuring ASR",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/training/modules/protect-on-premises-infrastructure-with-azure-site-recovery/?source=recommendations",
+   "graph": "Resources | where type contains 'publicIPAddresses' and isnotempty(properties.ipAddress) | summarize count () by subscriptionId"
+  },
+  {
+   "guid": "d8a03e97-7784-424d-9167-85d6fa96c96a",
+   "text": "Use Azure Firewall to govern Azure outbound traffic to the internet, non-HTTP/S inbound connections, and East/West traffic filtering (if the organization requires it)",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/well-architected/services/networking/azure-firewall?toc=%2Fazure%2Ffirewall%2Ftoc.json&bc=%2Fazure%2Ffirewall%2Fbreadcrumb%2Ftoc.json",
+   "graph": "resources | where type=~'microsoft.network/virtualhubs' | extend compliant = isnotnull(properties.azureFirewall.id) | project id, compliant"
+  },
+  {
+   "guid": "85e2213a-ce7b-4b12-8f7c-95f06e154e3a",
+   "text": "Make sure that Azure accelerated networking is enabled on the VMs used in the SAP application and DBMS layers.",
+   "severity": "High",
+   "waf": "Performance",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/accelerated-networking-overview?tabs=redhat",
+   "graph": "Resources | where type =~ 'Microsoft.Network/NetworkInterfaces' | where properties.enableAcceleratedNetworking =~ 'false' | project name, subscriptionId, properties.enableAcceleratedNetworking"
+  },
+  {
+   "guid": "6791f893-5ada-4433-84e1-3811523181aa",
+   "text": "You can use application security group (ASG) and NSG rules to define network security access-control lists between the SAP application and DBMS layers. ASGs group virtual machines to help manage their security.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/virtual-network/network-security-group-how-it-works",
+   "graph": "Resources | where type =~ 'microsoft.network/networksecuritygroups' and isnull(properties.networkInterfaces) and isnull(properties.subnets) | project name, resourceGroup | sort by name asc"
+  },
+  {
+   "guid": "ce9bd3bb-0cdb-43b5-9eb2-ec14eeaa3592",
+   "text": "Use Azure Key Vault to store your secrets and credentials",
+   "severity": "High",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/azure/key-vault/general/overview",
+   "graph": "Resources | join kind=leftouter (ResourceContainers | where type=~'microsoft.resources/subscriptions' | project SubName=name, subscriptionId) on subscriptionId | where type =~ 'microsoft.keyvault/vaults' | project type, name, SubName"
+  },
+  {
+   "guid": "4935ada4-2223-4ece-a1b1-23181a541741",
+   "text": "Use an Azure Key Vault per application per environment per region.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "SAP",
+   "link": "https://learn.microsoft.com/ja-jp/azure/key-vault/general/best-practices",
+   "graph": "Resources | join kind=leftouter (ResourceContainers | where type=~'microsoft.resources/subscriptions' | project SubName=name, subscriptionId) on subscriptionId | where type =~ 'microsoft.keyvault/vaults' | project type, name, SubName"
+  },
+  {
+   "guid": "11cc57b4-a4b1-4410-b439-58a8c2289b3d",
+   "text": "Key access (local authentication) is recommended to be disabled for security.  After disabling key based access, Microsoft Entra ID becomes the only access method, which allows maintaining minimum privilege principle and granular control. ",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/authentication",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (properties.disableLocalAuth == true)"
+  },
+  {
+   "guid": "95b96ad8-844c-4e3b-8b38-b876ba2cf204",
+   "text": "Azure AI search service tiers should be choosen to have a SLA ",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/search/search-reliability",
+   "graph": "resources | where type == 'microsoft.search/searchservices' | extend compliant = (sku.name != 'free' and properties.replicaCount >= 3) | project id, compliant"
+  },
+  {
+   "guid": "697cb391-ed16-4b2d-886f-0a0241addde6",
+   "text": "Create alerts to notify teams of events such as an entry in the activity log created by an action performed on the resource, such as regenerating its subscription keys or a metric threshold such as the number of errors exceeding 10 in an hour",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/openai/how-to/monitoring#set-up-alerts",
+   "graph": "resources | where type == 'microsoft.insights/metricalerts' | extend compliant = (properties.targetResourceType =~ 'Microsoft.CognitiveServices/accounts') | project id, compliant"
+  },
+  {
+   "guid": "27f7b9e9-1be1-4f38-aef3-9812bd463cbb",
+   "text": "Configure private endpoint for AI services to restrict service access within your network",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Azure OpenAI",
+   "link": "https://techcommunity.microsoft.com/t5/azure-architecture-blog/azure-openai-private-endpoints-connecting-across-vnet-s/ba-p/3913325",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (properties.privateEndpointConnections != '[]' and properties.publicNetworkAccess !~ 'enabled')"
+  },
+  {
+   "guid": "1102cac6-eae0-41e6-b842-e52f4721d928",
+   "text": "Ensure that APIs and endpoints used by the LLM application are properly secured with authentication and authorization mechanisms, such as Managed identities,  API keys or OAuth, to prevent unauthorized access.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (isnotnull(identity))"
+  },
+  {
+   "guid": "e1d7aaab-3571-4449-ab80-53d89f89dc7b",
+   "text": "Azure AI Services are properly tagged for better management",
+   "severity": "Low",
+   "waf": "Operations",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/azure-resource-manager/management/tag-resources?tabs=json",
+   "graph": "resources | where type == 'microsoft.cognitiveservices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (tags != '{}')"
+  },
+  {
+   "guid": "9de0d5d7-31d4-41e3-911c-817bfafbc416",
+   "text": "Implement jailbreak risk detection to safeguard your language model deployments against prompt injection attacks",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/content-safety/concepts/jailbreak-detection",
+   "graph": "resources | where type == 'microsoft.cognitiveservices/accounts' and kind =~ 'contentsafety' | project id, compliant = 1"
+  },
+  {
+   "guid": "e4b31c6a-2e3f-4df1-8e8b-9c3aa5a27820",
+   "text": "Use Premium and Standard tiers for staging slots and automated backups. Align your backup retention period with disaster recovery needs.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/overview-hosting-plans",
+   "graph": "resources | where type =~ 'microsoft.web/serverfarms' | extend compliant = (sku.tier == 'Premium' or sku.tier == 'Standard') | distinct id,compliant"
+  },
+  {
+   "guid": "1275e4a9-7b6a-43c3-a9cd-5ee18d8995ad",
+   "text": "Implement health checks to monitor and detect issues with App Service instances. Health checks enable automatic instance replacement on failure.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/monitor-instances-health-check",
+   "graph": "appserviceresources  | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.HealthCheckPath != '') | distinct id,compliant"
+  },
+  {
+   "guid": "c115775c-2ea5-45b4-9ad4-8408ee72734b",
+   "text": "Set minimum TLS policy to 1.2 or higher, preferably 1.3, in App Service configuration.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-ssl-bindings#enforce-tls-versions",
+   "graph": "appserviceresources | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.MinTlsVersion>=1.2) | distinct id,compliant"
+  },
+  {
+   "guid": "475ba18f-dbf5-490c-b65d-e8e03f9bcbd4",
+   "text": "Use HTTPS only and consider enabling HTTP Strict Transport Security (HSTS).",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-ssl-bindings#enforce-https",
+   "graph": "where (type=='microsoft.web/sites' and (kind == 'app' or kind == 'app,linux' )) | extend compliant = (properties.httpsOnly==true) | distinct id,compliant"
+  },
+  {
+   "guid": "d9bd3baf-cda3-4b54-bb2e-b03dd9a25827",
+   "text": "Turn off remote debugging in production environments.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "App Services",
+   "link": "https://learn.microsoft.com/azure/app-service/configure-common#configure-general-settings",
+   "graph": "appserviceresources | where type =~ 'microsoft.web/sites/config' | extend compliant = (properties.RemoteDebuggingEnabled == false) | distinct id,compliant"
+  },
+  {
+   "guid": "f00a69de-7076-4734-a734-6e4552cad9e1",
+   "text": "If you use customer-managed TLS certificates with Azure Front Door, use the 'Latest' certificate version. Reduce the risk of outages caused by manual certificate renewal.",
+   "severity": "Medium",
+   "waf": "Operations",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-latest-version-for-customer-managed-certificates",
+   "graph": "cdnresources | where type =~ 'microsoft.Cdn/profiles/secrets' | extend frontDoorId = substring(id, 0, indexof(id, '/secrets')) | where properties.parameters.type =~ 'CustomerCertificate' | extend compliant = properties.parameters.useLatestVersion == true | project compliant, id=frontDoorId, certificateName = name | distinct id, certificateName, compliant"
+  },
+  {
+   "guid": "e79d17b7-3b22-4a5a-97e7-a8ed4b30e38c",
+   "text": "Use Azure Front Door with WAF policies to deliver and help protect global HTTP/S apps that span multiple Azure regions.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/ag/ag-overview",
+   "graph": "resources | where type =~ 'microsoft.cdn/profiles' and sku has 'AzureFrontDoor' | project name, cdnprofileid=tolower(id), tostring(tags), resourceGroup, subscriptionId,skuname=tostring(sku.name) | join kind= fullouter ( cdnresources | where type == 'microsoft.cdn/profiles/securitypolicies' | extend wafpolicyid=tostring(properties['parameters']['wafPolicy']['id']) | extend splitid=split(id, '/') | extend cdnprofileid=tolower(strcat_array(array_slice(splitid, 0, 8), '/')) | project secpolname=name, cdnprofileid, wafpolicyid ) on cdnprofileid | project name, cdnprofileid, secpolname, wafpolicyid,skuname | join kind = fullouter ( resources | where type == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | extend managedrulesenabled=iff(tostring(properties.managedRules.managedRuleSets) != '[]', true, false), enabledState = tostring(properties.policySettings.enabledState) | project afdwafname=name, managedrulesenabled, wafpolicyid=id, enabledState, tostring(tags) ) on wafpolicyid | where name != '' | summarize associatedsecuritypolicies=countif(secpolname != ''), wafswithmanagedrules=countif(managedrulesenabled == 1) by name, id=cdnprofileid, tags,skuname | extend compliant = (associatedsecuritypolicies > 0 and wafswithmanagedrules > 0) | project id, compliant"
+  },
+  {
+   "guid": "ae248989-b306-4591-9186-de482e3f0f0e",
+   "text": "Deploy your WAF policy for Front Door in 'Prevention' mode' so that Web Application Firewall takes appropriate action to allow or deny traffic.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/web-application-firewall/afds/waf-front-door-policy-settings",
+   "graph": "resources | where type == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | project policyName=name, policyId=id,policySku=sku.name, links=properties.securityPolicyLinks, enabledState=properties.policySettings.enabledState, mode=properties.policySettings.mode | mvexpand links | extend securityPolicy=links.id | extend securityPolicyParts=split(securityPolicy, '/') | extend profileId=strcat_array(array_slice(securityPolicyParts, 0, -3), '/') | project id=profileId, compliant=((enabledState=='Enabled') and (mode=='Prevention')), enabledState, mode"
+  },
+  {
+   "guid": "062d5839-4d36-402f-bfa4-02811eb936e9",
+   "text": "Avoid placing Traffic Manager behind Front Door.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#avoid-combining-traffic-manager-and-front-door",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend compliant = properties['hostName'] !endswith '.trafficmanager.net' | project compliant, id=frontDoorId"
+  },
+  {
+   "guid": "5efeb96a-003f-4b18-8fcd-b4d84459c2b2",
+   "text": "Use the same domain name on Azure Front Door and your origin. Mismatched host names can cause subtle bugs.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-the-same-domain-name-on-front-door-and-your-origin",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origins')) | extend compliant = isempty(properties.originHostHeader) or (tostring(properties.hostName) =~ tostring(properties.originHostHeader)) | project id=frontDoorId, originName = name, compliant"
+  },
+  {
+   "guid": "0b5a380c-4bfb-47bc-b1d7-dcfef363a61b",
+   "text": "Disable health probes when there is only one origin in an Azure Front Door origin group.",
+   "severity": "Low",
+   "waf": "Performance",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#disable-health-probes-when-theres-only-one-origin-in-an-origin-group",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/origins' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend originGroupId = substring(id, 0, indexof(id, '/origins')) | join kind=inner (cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend originGroupName = name | extend hasHealthProbe = isnotnull(properties.healthProbeSettings)) on $left.originGroupId == $right.id | summarize numberOrigins = count() by originGroupId, subscriptionId, frontDoorId, hasHealthProbe, originGroupName | extend compliant = not(numberOrigins == 1 and hasHealthProbe) | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "a13f72f3-8f5c-4864-95e5-75bf37fbbeb1",
+   "text": "Use HEAD health probes with Azure Front Door, to reduce the traffic that Front Door sends to your application.",
+   "severity": "Low",
+   "waf": "Performance",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-head-health-probes",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups/')) | extend compliant = (isnull(properties['healthProbeSettings']['probeRequestType']) or toupper(properties['healthProbeSettings']['probeRequestType']) == 'HEAD') | project compliant, id=frontDoorId"
+  },
+  {
+   "guid": "af95c92d-d723-4f4a-98d7-8722324efd4d",
+   "text": "Use managed TLS certificates with Azure Front Door. Reduce operational cost and risk of outages due to certificate renewals.",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-managed-tls-certificates",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/customdomains' | extend frontDoorId = substring(id, 0, indexof(id, '/customdomains')) | extend compliant = (isnull(properties['tlsSettings']['certificateType']) or tolower(properties['tlsSettings']['certificateType']) =~ 'customercertificate') | project compliant, id = frontDoorId"
+  },
+  {
+   "guid": "2e30abab-5478-417c-81bf-bf1ad4ed1ed4",
+   "text": "Use end-to-end TLS with Azure Front Door. Use TLS for connections from your clients to Front Door, and from Front Door to your origin.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-end-to-end-tls",
+   "graph": "cdnresources | where type == 'microsoft.cdn/profiles/afdendpoints/routes' | extend frontDoorId = substring(id, 0, indexof(id, '/afdendpoints')) | extend forwardingProtocol=tostring(properties.forwardingProtocol),supportedProtocols=properties.supportedProtocols,httpsRedirect=properties.httpsRedirect | extend compliant = forwardingProtocol =~ 'httpsonly' and (supportedProtocols has 'https' or httpsRedirect =~ 'enabled') | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "10aa45af-166f-44c4-9f36-b6d592dac2ca",
+   "text": "Use HTTP to HTTPS redirection with Azure Front Door. Support older clients by redirecting them to an HTTPS request automatically.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#use-http-to-https-redirection",
+   "graph": "cdnresources | where type == 'microsoft.cdn/profiles/afdendpoints/routes' | extend frontDoorId = substring(id, 0, indexof(id, '/afdendpoints')) | extend forwardingProtocol=tostring(properties.forwardingProtocol),supportedProtocols=properties.supportedProtocols,httpsRedirect=properties.httpsRedirect | extend compliant = httpsRedirect =~ 'enabled' | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "28b9ee82-b2c7-45aa-bc98-6de6f59a095d",
+   "text": "Enable the Azure Front Door WAF. Protect your application from a range of attacks.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#enable-the-waf",
+   "graph": "resources | where type =~ 'microsoft.network/frontdoorwebapplicationfirewallpolicies' | project policyName=name, policyId=id,policySku=sku.name, links=properties.securityPolicyLinks, enabledState=properties.policySettings.enabledState, mode=properties.policySettings.mode | mvexpand links | extend securityPolicy=links.id | extend securityPolicyParts=split(securityPolicy, '/') | extend profileId=strcat_array(array_slice(securityPolicyParts, 0, -3), '/') | project id=profileId, compliant=((enabledState=~'Enabled') and (mode=~'Prevention')), enabledState, mode"
+  },
+  {
+   "guid": "c3a769e4-cc78-40a9-b36a-f9bcab19ec2d",
+   "text": "Support redundancy by having multiple origins in one or more back-end pools. Always have redundant instances of your application and make sure each instance exposes an endpoint or origin. You can place those origins in one or more back-end pools.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/quickstart-create-front-door",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend healthprobe=tostring(properties.healthProbeSettings) | project origingroupname=name, id, tags, resourceGroup, subscriptionId, healthprobe, frontDoorId | join ( cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/Origins' | extend origingroupname = tostring(properties.originGroupName) ) on origingroupname | summarize origincount=count(), enabledhealthprobecount=countif(healthprobe != '') by origingroupname, id, tostring(tags), resourceGroup, subscriptionId, frontDoorId | extend compliant = origincount > 1 | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "34069d73-e4de-46c5-a36f-625f87575a56",
+   "text": "Disable health checks in single back-end pools. If you have only one origin configured in your Azure Front Door origin group, these calls are unnecessary. This is only recommended if you can't have multiple origins in your endpoint.",
+   "severity": "Low",
+   "waf": "Cost",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/frontdoor/best-practices#disable-health-probes-when-theres-only-one-origin-in-an-origin-group",
+   "graph": "cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups' | extend frontDoorId = substring(id, 0, indexof(id, '/origingroups')) | extend healthprobe=tostring(properties.healthProbeSettings) | project origingroupname=name, id, tags, resourceGroup, subscriptionId, healthprobe, frontDoorId | join ( cdnresources | where type =~ 'microsoft.cdn/profiles/origingroups/Origins' | extend origingroupname = tostring(properties.originGroupName) ) on origingroupname | summarize origincount=count(), enabledhealthprobecount=countif(healthprobe != '') by origingroupname, id, tostring(tags), resourceGroup, subscriptionId, frontDoorId | extend compliant = origincount > 1 or (origincount == 1 and enabledhealthprobecount == 0) | project id = frontDoorId, compliant"
+  },
+  {
+   "guid": "cb8eb8c0-aa73-4a26-a495-6eba8dc4a243",
+   "text": "Consider migrating to Standard or Premium SKU if you are using Classic Azure Front Door currently as Classic Azure Front Door will be deprecated by March 2027.",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "Front Door",
+   "link": "https://learn.microsoft.com/azure/cdn/tier-migration",
+   "graph": "resources | where type =~ 'microsoft.network/frontdoors' and properties['resourceState'] !~ 'migrated' | extend compliant = false | project id, compliant"
+  },
+  {
+   "guid": "0dd4e625-9c4b-4a56-b54a-4357bac12761",
+   "text": "When using Microsoft Entra Domain Services, use replica sets. Replica sets will improve the resiliency of your managed domain and allow you to deploy to additional regions. ",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "Entra",
+   "link": "https://learn.microsoft.com/entra/identity/domain-services/overview",
+   "graph": "resources | where type == 'microsoft.aad/domainservices' | extend replicaSets = properties.replicaSets | where array_length(replicaSets) < 2 | project name=name, id=id, tags=tags, param1=strcat('replicaSetLocation:', replicaSets[0].location)"
+  },
+  {
+   "guid": "91b9d7d5-91e1-4dcb-8f1f-fa7e465646cc",
+   "text": "If using Route Server, use a /27 prefix for the Route Server subnet.",
+   "severity": "Low",
+   "waf": "Security",
+   "service": "ARS",
+   "link": "https://learn.microsoft.com/azure/route-server/quickstart-configure-route-server-portal#create-a-route-server-1",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | project id, subnetName = subnets.name, subnetPrefix = subnets.properties.addressPrefix | extend subnetPrefixLength = split(subnetPrefix, '/')[1] | where subnetName == 'RouteServerSubnet' | extend compliant = (subnetPrefixLength <= 27) | distinct id, compliant"
+  },
+  {
+   "guid": "0e7c28ec-9366-4572-83b0-f4664b1d944a",
+   "text": "If you have more than 400 spoke networks in a region, deploy an additional hub to bypass VNet peering limits (500) and the maximum number of prefixes that can be advertised via ExpressRoute (1000).",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/azure-resource-manager/management/azure-subscription-service-limits?toc=/azure/virtual-network/toc.json#azure-resource-manager-virtual-networking-limits",
+   "graph": "resources | where type == 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | summarize peeringcount = count() by id | extend compliant = (peeringcount < 450) | distinct id,compliant"
+  },
+  {
+   "guid": "3d457936-e9b7-41eb-bdff-314b26450b12",
+   "text": "Limit the number of routes per route table to 400.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/azure-resource-manager/management/azure-subscription-service-limits?toc=/azure/virtual-network/toc.json#azure-resource-manager-virtual-networking-limits",
+   "graph": "resources | where type=='microsoft.network/routetables' | mvexpand properties.routes | summarize routeCount = count() by id | extend compliant = (routeCount < 360) | distinct id,compliant"
+  },
+  {
+   "guid": "c76cb5a2-abe2-11ed-afa1-0242ac120002",
+   "text": "Use the setting 'Allow traffic to remote virtual network' when configuring VNet peerings.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/virtual-network/virtual-network-manage-peering",
+   "graph": "resources | where type == 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | project id, peeringName=properties_virtualNetworkPeerings.name, compliant = (properties_virtualNetworkPeerings.properties.allowVirtualNetworkAccess == True)"
+  },
+  {
+   "guid": "9dcd6250-9c4a-4382-aa9b-5b84c64fc1fe",
+   "text": "Use Standard Load Balancer SKU with a zone-redundant deployment, Selecting Standard SKU Load Balancer enhances reliability through availability zones and zone resiliency, ensuring deployments withstand zone and region failures. Unlike Basic, it supports global load balancing and offers an SLA.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/reliability/reliability-load-balancer?tabs=graph#zone-redundant",
+   "graph": "resources | where type == 'microsoft.network/loadbalancers' | where tolower(sku.name) != 'basic' | mv-expand feIPconfigs = properties.frontendIPConfigurations | extend feConfigName = (feIPconfigs.name), PrivateSubnetId = toupper(feIPconfigs.properties.subnet.id), PrivateIPZones = feIPconfigs.zones, PIPid = toupper(feIPconfigs.properties.publicIPAddress.id), JoinID = toupper(id) | where isnotempty(PrivateSubnetId) | where isnull(PrivateIPZones) or array_length(PrivateIPZones) < 2 | project name, feConfigName, id | union (resources | where type == 'microsoft.network/loadbalancers' | where tolower(sku.name) != 'basic' | mv-expand feIPconfigs = properties.frontendIPConfigurations | extend feConfigName = (feIPconfigs.name), PIPid = toupper(feIPconfigs.properties.publicIPAddress.id), JoinID = toupper(id) | where isnotempty(PIPid) | join kind=innerunique ( resources | where type == 'microsoft.network/publicipaddresses' | where isnull(zones) or array_length(zones) < 2 | extend LBid = toupper(substring(properties.ipConfiguration.id, 0, indexof(properties.ipConfiguration.id, '/frontendIPConfigurations'))), InnerID = toupper(id) ) on $left.PIPid == $right.InnerID) | project name, id, tags, param1='Zones: No Zone or Zonal', param2=strcat('Frontend IP Configuration:', ' ', feConfigName)"
+  },
+  {
+   "guid": "48682fb1-1e86-4458-a686-518ebd47393d",
+   "text": "Ensure load balancer backend pool(s) contains at least two instances, Deploying Azure Load Balancers with at least two instances in the backend prevents a single point of failure and supports scalability.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Load Balancer",
+   "link": "https://learn.microsoft.com/azure/reliability/reliability-load-balancer?tabs=graph#zone-redundant",
+   "graph": "resources | where type =~ 'Microsoft.Network/loadBalancers' | extend bep = properties.backendAddressPools | extend BackEndPools = array_length(bep) | where BackEndPools == 0 | project name, id, Param1='backendPools', Param2=toint(0), tags | union (resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name == 'Standard' | extend bep = properties.backendAddressPools | extend BackEndPools = toint(array_length(bep)) | mv-expand bip = properties.backendAddressPools | extend BackendAddresses = array_length(bip.properties.loadBalancerBackendAddresses) | where toint(BackendAddresses) <= 1 | project name, id, tags, Param1='backendAddresses', Param2=toint(BackendAddresses)) | union ( resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name == 'Basic' | mv-expand properties.backendAddressPools | extend backendPoolId = properties_backendAddressPools.id | project id, name, tags, tostring(backendPoolId), Param1='BackEndPools' | join kind = leftouter ( resources | where type =~ 'Microsoft.Network/networkInterfaces' | mv-expand properties.ipConfigurations | mv-expand properties_ipConfigurations.properties.loadBalancerBackendAddressPools | extend backendPoolId = tostring(properties_ipConfigurations_properties_loadBalancerBackendAddressPools.id) | summarize poolMembers = count() by backendPoolId | project tostring(backendPoolId), poolMembers ) on backendPoolId | where toint(poolMembers) <= 1 | extend BackendAddresses = poolMembers | project id, name, tags, Param1='backendAddresses', Param2=toint(BackendAddresses))"
+  },
+  {
+   "guid": "3f630472-2dd6-49c5-a5c2-622f54b69bad",
+   "text": "Use IP addresses from the address allocation ranges for private internets (RFC 1918).",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/plan-for-ip-addressing",
+   "graph": "resources | where type == 'microsoft.network/virtualnetworks' | extend addressSpace = todynamic(properties.addressSpace) | extend addressPrefix = todynamic(properties.addressSpace.addressPrefixes) | mvexpand addressSpace | mvexpand addressPrefix | project name, id, location, resourceGroup, subscriptionId, cidr = addressPrefix | extend compliant = (cidr matches regex @'^(10\\\\.|172\\\\.(1[6-9]|2[0-9]|3[01])\\\\.|192\\\\.168\\\\.)')  | project id, compliant, cidr"
+  },
+  {
+   "guid": "33aad5e8-c68e-41d7-9667-313b4f5664b5",
+   "text": "Ensure that IP address space isn't wasted, don't create unnecessarily large virtual networks (for example /16).",
+   "severity": "High",
+   "waf": "Performance",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/plan-for-ip-addressing",
+   "graph": "resources | where type == 'microsoft.network/virtualnetworks' | extend addressSpace = todynamic(properties.addressSpace) | extend addressPrefix = todynamic(properties.addressSpace.addressPrefixes) | mvexpand addressSpace | mvexpand addressPrefix | extend addressMask = split(addressPrefix,'/')[1] | extend compliant = addressMask > 16 | project name, id, subscriptionId, resourceGroup, addressPrefix, compliant"
+  },
+  {
+   "guid": "0c47f486-656d-4699-8c30-edef5b8a93c4",
+   "text": "Use Standard SKU and Zone-Redundant IPs when applicable, Public IP addresses in Azure can be of standard SKU, available as non-zonal, zonal, or zone-redundant. Zone-redundant IPs are accessible across all zones, resisting any single zone failure, thereby providing higher resilience. ",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Public IP Addresses",
+   "link": "https://learn.microsoft.com/azure/virtual-network/ip-services/public-ip-addresses#availability-zone",
+   "graph": "Resources | where type =~ 'Microsoft.Network/publicIPAddresses' and sku.tier =~ 'Regional' | where isempty(zones) or array_length(zones) <= 1 | extend az = case(isempty(zones), 'Non-zonal', array_length(zones) <= 1, strcat('Zonal (', strcat_array(zones, ','), ')'), zones) | project name, id, tags, param1 = strcat('sku: ', sku.name), param2 = strcat('availabilityZone: ', az)"
+  },
+  {
+   "guid": "6eab9eb6-762b-485e-8ea8-15aa5dba0bd0",
+   "text": "Use Azure Bastion in a subnet /26 or larger.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Bastion",
+   "link": "https://learn.microsoft.com/azure/bastion/bastion-faq#subnet",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | project id, subnetName = subnets.name, subnetPrefix = subnets.properties.addressPrefix | extend subnetPrefixLength = split(subnetPrefix, '/')[1] | where subnetName == 'AzureBastionSubnet' | extend compliant = (subnetPrefixLength <= 26) | distinct id, compliant"
+  },
+  {
+   "guid": "d4cd21b0-8813-47f5-b6c4-cfd3e504547c",
+   "text": "Select the right SKU for the ExpressRoute/VPN gateways based on bandwidth and performance requirements.",
+   "severity": "Medium",
+   "waf": "Performance",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/expressroute-about-virtual-network-gateways?source=recommendations#gwsku",
+   "graph": "resources| where type == 'microsoft.network/virtualnetworkgateways'| where properties.gatewayType =~ 'vpn' or properties.gatewayType == 'ExpressRoute'| extend SKUName = properties.sku.name, SKUTier = properties.sku.tier, Type = properties.gatewayType| extend compliant = SKUTier !in ('Basic', 'Standard')| project name, id, subscriptionId, resourceGroup, compliant"
+  },
+  {
+   "guid": "7025b442-f6e9-4af6-b11f-c9574916016f",
+   "text": "Ensure that you're using unlimited-data ExpressRoute circuits only if you reach the bandwidth that justifies their cost.",
+   "severity": "High",
+   "waf": "Cost",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/plan-manage-cost",
+   "graph": "resources | where type=='microsoft.network/expressroutecircuits' | extend compliant = (tolower(sku.family) == 'metereddata' or tolower(sku.tier) == 'local') | distinct id,compliant"
+  },
+  {
+   "guid": "f4e7926a-ec35-476e-a412-5dd17136bd62",
+   "text": "Leverage the Local SKU of ExpressRoute to reduce the cost of your circuits, if your circuit peering location supports your Azure regions for the Local SKU.",
+   "severity": "High",
+   "waf": "Cost",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/expressroute-faqs#expressroute-local",
+   "graph": "resources | where type=='microsoft.network/connections' | where properties.connectionType == 'ExpressRoute' | project id, gwid=tostring(properties.virtualNetworkGateway1.id), circuitid=tostring(properties.peer.id) | join (resources | where type=='microsoft.network/expressroutecircuits' | project circuitid=tostring(id), circuitsku=sku.tier) on circuitid | project id=gwid, compliant = (circuitsku == 'Local') | summarize compliant=max(compliant) by id"
+  },
+  {
+   "guid": "2447ec66-138a-4720-8f1c-e16ed301d6e8",
+   "text": "Deploy a zone-redundant ExpressRoute gateway in the supported Azure regions.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/expressroute-about-virtual-network-gateways",
+   "graph": "resources| where type == 'microsoft.network/virtualnetworkgateways'| where properties.gatewayType =~ 'vpn' or properties.gatewayType == 'ExpressRoute'| extend SKUName = properties.sku.name, SKUTier = properties.sku.tier, Type = properties.gatewayType| extend compliant = SKUTier contains 'AZ'| project name, id, subscriptionId, resourceGroup, Type, compliant"
+  },
+  {
+   "guid": "4d873974-8b66-42d6-b15f-512a65498f6d",
+   "text": "Use zone-redundant VPN gateways to connect branches or remote locations to Azure (where available).",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "VPN",
+   "link": "https://learn.microsoft.com/azure/vpn-gateway/create-zone-redundant-vnet-gateway",
+   "graph": "resources | where type=='microsoft.network/virtualnetworkgateways' | where properties.gatewayType == 'Vpn' | extend compliant = (tolower(properties.sku.name) contains 'az') | distinct id, compliant"
+  },
+  {
+   "guid": "e0d5973c-d4cd-421b-8881-37f5e6c4cfd3",
+   "text": "Use ExpressRoute circuits from different peering locations for redundancy.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/designing-for-disaster-recovery-with-expressroute-privatepeering#need-for-redundant-connectivity-solution",
+   "graph": "resources | where type=='microsoft.network/connections' | where properties.connectionType == 'ExpressRoute' | project cxId=id, gwId=tostring(properties.virtualNetworkGateway1.id), circuitId=tostring(properties.peer.id) | join (resources | where type=='microsoft.network/expressroutecircuits' | project circuitId=tostring(id), circuitLocation=tostring(properties.serviceProviderProperties.peeringLocation)) on circuitId | distinct gwId, circuitLocation | summarize countErLocations=count() by id=gwId | extend compliant = (countErLocations >= 2)"
+  },
+  {
+   "guid": "72105cc8-aaea-4ee1-8c7a-ad25977afcaf",
+   "text": "If you are using a route table in the GatewaySubnet, make sure that gateway routes are propagated.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/vpn-gateway/vpn-gateway-about-vpn-gateway-settings#gwsub",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,resourceGroup,name,subnets=properties.subnets | mv-expand subnets | project id,resourceGroup,name,subnetName=tostring(subnets.name),routeTableId=tostring(subnets.properties.routeTable.id) | where subnetName == 'GatewaySubnet' | join kind=leftouter (Resources | where type == 'microsoft.network/routetables' | project routeTableName=name,routeTableId=id, disableBgpRoutePropagation=properties.disableBgpRoutePropagation) on routeTableId | project id,compliant = (disableBgpRoutePropagation == False or isnull(disableBgpRoutePropagation))"
+  },
+  {
+   "guid": "14d99880-2f88-47e8-a134-62a7d85c94af",
+   "text": "Use application rules to filter outbound traffic on destination host name for supported protocols.  Use FQDN-based network rules and Azure Firewall with DNS proxy to filter egress traffic to the Internet over other protocols.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/fqdn-filtering-network-rules",
+   "graph": "resources | where type=='microsoft.network/firewallpolicies' | extend compliant = (properties.dnsSettings.enableProxy == true) | distinct id,compliant"
+  },
+  {
+   "guid": "c10d51ef-f999-455d-bba0-5c90ece07447",
+   "text": "Use Azure Firewall Premium to enable additional security features.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/premium-features",
+   "graph": "resources | where type=='microsoft.network/firewallpolicies' | extend compliant = (properties.sku.tier == 'Premium') | distinct id,compliant"
+  },
+  {
+   "guid": "e9c8f584-6d5e-473b-8dc5-acc9fbaab4e3",
+   "text": "Configure Azure Firewall Threat Intelligence mode to Alert and Deny for additional protection.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/premium-features#idps-signature-rules",
+   "graph": "resources | where type=='microsoft.network/firewallpolicies' | extend compliant = (properties.threatIntelMode == 'Deny') | distinct id,compliant"
+  },
+  {
+   "guid": "b9d0dff5-bdd4-4cd8-88ed-5811610b2b2c",
+   "text": "Configure Azure Firewall IDPS mode to Deny for additional protection.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/premium-features#idps",
+   "graph": "resources | where type=='microsoft.network/firewallpolicies' | extend compliant = (properties.intrusionDetection.mode == 'Deny') | project id, compliant"
+  },
+  {
+   "guid": "a3784907-9836-4271-aafc-93535f8ec08b",
+   "text": "For subnets in VNets not connected to Virtual WAN, attach a route table so that Internet traffic is redirected to Azure Firewall or a Network Virtual Appliance.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/virtual-network/virtual-networks-udr-overview",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,resourceGroup,name,subnets=properties.subnets | mv-expand subnets | project id,name,subnetId=tostring(subnets.id), subnetName=tostring(subnets.name),subnetRT=subnets.properties.routeTable.id | where not (subnetName in ('GatewaySubnet', 'AzureFirewallSubnet', 'RouteServerSubnet', 'AzureBastionSubnet')) | extend hasRT = isnotnull(subnetRT) | distinct id, hasRT, subnetId | join kind=fullouter (resources | where type == 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | extend isVWAN=(tolower(split(properties_virtualNetworkPeerings.name, '_')[0]) == 'remotevnettohubpeering') | mv-expand properties.subnets | project id, isVWAN, name, subnetId=tostring(properties_subnets.id), subnetName=tostring(properties_subnets.name) | summarize PeeredToVWAN=max(isVWAN) by id, subnetId | project id, subnetId, isVWANpeer = (PeeredToVWAN == true)) on subnetId | project id=iff(isnotempty(id), id, id1), subnetId=iff(isnotempty(subnetId), subnetId, subnetId1), hasRT, isVWANpeer | extend compliant = (hasRT==true or isVWANpeer==true) | distinct id, subnetId, compliant"
+  },
+  {
+   "guid": "22d6419e-b627-4d95-9e7d-019fa759387f",
+   "text": "Use a /26 prefix for your Azure Firewall subnets.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/firewall-faq#why-does-azure-firewall-need-a--26-subnet-size",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | project id, subnetName = subnets.name, subnetPrefix = subnets.properties.addressPrefix | extend subnetPrefixLength = split(subnetPrefix, '/')[1] | where subnetName == 'AzureFirewallSubnet' | extend compliant = (subnetPrefixLength == 26) | distinct id, compliant"
+  },
+  {
+   "guid": "94f3eede-9aa3-4088-92a3-bb9a56509fad",
+   "text": "Enable Azure Firewall DNS proxy configuration.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/dns-details",
+   "graph": "resources | where type =~ 'Microsoft.Network/firewallPolicies' | where array_length(properties.firewalls) > 0 | extend compliant = (properties.dnsSettings.enableProxy =~ 'true') | distinct id, compliant"
+  },
+  {
+   "guid": "d38ad60c-bc9e-4d49-b699-97e5d4dcf707",
+   "text": "Deploy Azure Firewall across multiple availability zones. Azure Firewall offers different SLAs depending on its deployment; in a single availability zone or across multiple, potentially improving reliability and performance.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/azure/firewall/deploy-availability-zone-powershell",
+   "graph": "resources | where type == 'microsoft.network/azurefirewalls' | where array_length(zones) <= 1 or isnull(zones) | where isempty(properties.virtualHub.id) or isnull(properties.virtualHub.id) | project name, id, tags, param1='multipleZones:false'"
+  },
+  {
+   "guid": "e8143efa-0301-4d62-be54-ca7b5ce566dc",
+   "text": "Configure DDoS Protection on the Azure Firewall VNet, Associate a DDoS protection plan with the virtual network hosting Azure Firewall to provide enhanced mitigation against DDoS attacks. Azure Firewall Manager integrates the creation of firewall infrastructure and DDoS protection plans. ",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Firewall",
+   "link": "https://learn.microsoft.com/en-gb/azure/ddos-protection/ddos-protection-overview",
+   "graph": "resources | where type =~ 'Microsoft.Network/azureFirewalls' | where isempty(properties.virtualHub.id) or isnull(properties.virtualHub.id) | mv-expand ipConfig = properties.ipConfigurations | project name, firewallId = id, tags, vNetName = split(ipConfig.properties.subnet.id, '/', 8)[0], vNetId = tolower(substring(ipConfig.properties.subnet.id, 0, indexof(ipConfig.properties.subnet.id, '/subnet'))) | join kind=fullouter ( resources | where type =~ 'Microsoft.Network/ddosProtectionPlans' | mv-expand vNet = properties.virtualNetworks | project ddosProtectionPlanId = id, vNetId = tolower(vNet.id) ) on vNetId | extend compliant = iif(isempty(ddosProtectionPlanId), false, true) | project name, compliant, id = firewallId, tags, network = strcat('vNet: ', vNetName)"
+  },
+  {
+   "guid": "4704489a-8042-4d88-b79d-17b73b22a5a6",
+   "text": "Don't enable virtual network service endpoints by default on all subnets.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "VNet",
+   "link": "https://learn.microsoft.com/azure/virtual-network/virtual-network-service-endpoints-overview",
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | project id,resourceGroup,name,subnets = properties.subnets | mv-expand subnets | project id = subnets.id, resourceGroup, VNet = name, serviceEndpoints = subnets.properties.serviceEndpoints, compliant = (isnull(subnets.properties.serviceEndpoints) or array_length(subnets.properties.serviceEndpoints) == 0) | order by compliant asc"
+  },
+  {
+   "guid": "f2aad7e3-bb03-4adc-8606-4123d342a917",
+   "text": "Use at least a /27 prefix for your Gateway subnets.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "ExpressRoute",
+   "link": "https://learn.microsoft.com/azure/expressroute/expressroute-howto-add-gateway-resource-manager#add-a-gateway",
+   "graph": "resources | where type=='microsoft.network/virtualnetworks' | project id,subnets=properties.subnets | mv-expand subnets | project id, subnetName = subnets.name, subnetPrefix = subnets.properties.addressPrefix | extend subnetPrefixLength = split(subnetPrefix, '/')[1] | where subnetName == 'GatewaySubnet' | extend compliant = (subnetPrefixLength <= 27) | distinct id, compliant"
+  },
+  {
+   "guid": "11deb39d-8299-4e47-bbe0-0fb5a36318a8",
+   "text": "Don't rely on the NSG inbound default rules using the VirtualNetwork service tag to limit connectivity.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "NSG",
+   "link": "https://learn.microsoft.com/azure/virtual-network/service-tags-overview#available-service-tags",
+   "graph": "resources | where type=='microsoft.network/networksecuritygroups' | mvexpand properties.securityRules | project id,name,ruleAction=properties_securityRules.properties.access,rulePriority=properties_securityRules.properties.priority,ruleDst=properties_securityRules.properties.destinationAddressPrefix,ruleSrc=properties_securityRules.properties.sourceAddressPrefix,ruleProt=properties_securityRules.properties.protocol,ruleDirection=properties_securityRules.properties.direction,rulePort=properties_securityRules.properties.destinationPortRange | summarize StarDenies=countif(ruleAction=='Deny' and ruleDst=='*' and ruleSrc=='*' and ruleProt=='*' and rulePort=='*') by id,tostring(ruleDirection) | where ruleDirection == 'Inbound' | project id,compliant=(StarDenies>0) | union (resources | where type=='microsoft.network/networksecuritygroups' | where array_length(properties.securityRules)==0 | extend compliant=false | project id,compliant)"
+  },
+  {
+   "guid": "872e52e3-611c-4c58-a5a4-b1511e43a58a",
+   "text": "Use NSGs to help protect traffic across subnets, as well as east/west traffic across the platform (traffic between landing zones).",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "NSG",
+   "link": "https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/plan-for-landing-zone-network-segmentation",
+   "graph": "resources | where type == 'microsoft.network/virtualnetworks' | mv-expand subnet = properties.subnets | where subnet.name !in~ ('GatewaySubnet', 'AzureFirewallSubnet', 'AzureFirewallManagementSubnet', 'RouteServerSubnet') | extend compliant = iff(isnotnull(subnet.properties.networkSecurityGroup.id), true, false) | project id, subnetName = subnet.name, vnetName = name, NSG = subnet.properties.networkSecurityGroup.id, compliant"
+  },
+  {
+   "guid": "dfe237de-143b-416c-91d7-aa9b64704489",
+   "text": "Enable VNet Flow Logs and feed them into Traffic Analytics to gain insights into internal and external traffic flows.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "NSG",
+   "link": "https://learn.microsoft.com/azure/network-watcher/vnet-flow-logs-overview",
+   "graph": "resources | where type =~ 'Microsoft.Network/virtualnetworks' | project subscriptionId, lowerCaseVNetId = tolower(id) | join kind = leftouter (    resources    | where type =~ 'microsoft.network/networkwatchers/flowlogs' and properties.enabled == true and properties.provisioningState =~ 'succeeded'    | where properties.targetResourceId contains '/Microsoft.Network/virtualNetworks/'    | project flowlogId = id, trafficAnalyticsEnabled = properties.flowAnalyticsConfiguration.networkWatcherFlowAnalyticsConfiguration.enabled, lowerCaseTargetVNetId = tolower(properties.targetResourceId)    )    on $left.lowerCaseVNetId == $right.lowerCaseTargetVNetId | extend compliant = iff(isnotempty(lowerCaseTargetVNetId), true, false) | project id = lowerCaseVNetId, flowlogId, trafficAnalyticsEnabled, compliant"
+  },
+  {
+   "guid": "0390417d-53dc-44d9-b3f4-c8832f359b41",
+   "text": "Do not implement more than 900 NSG rules per NSG, due to the limit of 1000 rules.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "NSG",
+   "link": "https://learn.microsoft.com/azure/azure-resource-manager/management/azure-subscription-service-limits",
+   "graph": "resources | where type == 'microsoft.network/networksecuritygroups' | project id, rules = array_length(properties.securityRules) | project id, compliant = (rules < 900)"
+  },
+  {
+   "guid": "7d5d1e4e-6146-458d-9558-fd77249b8211",
+   "text": "For outbound Internet traffic protection and filtering, deploy Azure Firewall in secured hubs.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "VWAN",
+   "link": "https://learn.microsoft.com/azure/virtual-wan/howto-firewall",
+   "graph": "resources | where type=='microsoft.network/virtualhubs' | extend compliant = isnotnull(properties.azureFirewall.id) | project id, compliant"
+  },
+  {
+   "guid": "727c77e1-b9aa-4a37-a024-129d042422c1",
+   "text": "Do not disable branch-to-branch traffic in Virtual WAN, unless these flows should be explicitly blocked.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "VWAN",
+   "link": "https://learn.microsoft.com/azure/virtual-wan/virtual-wan-faq#is-branch-to-branch-connectivity-allowed-in-virtual-wan",
+   "graph": "resources| where type =~ 'microsoft.network/virtualwans' | extend compliant= (properties.allowBranchToBranchTraffic == 'true') | distinct id,compliant"
+  },
+  {
+   "guid": "d49ac006-6670-4bc9-9948-d3e0a3a94f4d",
+   "text": "Use AS-Path as hub routing preference, since it is more flexible than ExpressRoute or VPN.",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "VWAN",
+   "link": "https://learn.microsoft.com/azure/virtual-wan/about-virtual-hub-routing-preference",
+   "graph": "resources | where type =~ 'microsoft.network/virtualhubs'| extend compliant= (properties.hubRoutingPreference =~ 'ASPath') | distinct id,compliant"
+  },
+  {
+   "guid": "9c75dfef-573c-461c-a698-68598595581a",
+   "text": "Assign at least a /23 prefix to virtual hubs to ensure enough IP space is available.",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "VWAN",
+   "link": "https://learn.microsoft.com/azure/virtual-wan/virtual-wan-faq#what-is-the-recommended-hub-address-space-during-hub-creation",
+   "graph": "resources | where type =~ 'microsoft.network/virtualhubs' | extend addressSpace = properties.addressPrefix | extend compliant= (toint(substring(addressSpace, indexof(addressSpace, '/') + 1)) < 23) | distinct name, id, compliant"
+  },
+  {
+   "guid": "a0477a20-9945-4bda-9333-4f2491163418",
+   "text": "Use different Azure Key Vaults for different applications, environments and regions to avoid transaction scale limits and restrict access to secrets.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Key Vault",
+   "link": "https://learn.microsoft.com/azure/key-vault/general/overview-throttling",
+   "graph": "ResourceContainers | where type=='microsoft.resources/subscriptions'| parse id with '/subscriptions/' SubscriptionID| project subscriptionId, SubscriptionName = name| join kind=leftouter (Resources| where type == 'microsoft.keyvault/vaults'| project id, name, subscriptionId) on subscriptionId| join kind= leftouter (Resources| where type == 'microsoft.keyvault/vaults'| summarize ResourceCount = count() by subscriptionId) on subscriptionId| extend RCount = iff(isnull(ResourceCount), 0, ResourceCount)| project-away ResourceCount| extend compliant = (RCount <> 1)"
+  },
+  {
+   "guid": "a56888b2-7e83-4404-bd31-b886528502d1",
+   "text": "Centralized threat detection with correlated logs -  consolidate security data in a central location where it can be correlated across various services via SIEM (security information and event management)",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Entra",
+   "link": "https://learn.microsoft.com/azure/well-architected/security/monitor-threats#centralized-threat-detection-with-correlated-logs",
+   "graph": "resources| where type == 'microsoft.operationalinsights/workspaces'| extend wsid = properties.customerId| project workspaceResourceId = tolower(id), name, wsid| join (resources| where type == 'microsoft.operationsmanagement/solutions'| where name has 'SecurityInsights'| extend workspaceResourceId = tostring(tolower(properties.workspaceResourceId))| project workspaceResourceId | summarize ResourceCount = count() by workspaceResourceId) on workspaceResourceId| extend RCount = iff(isnull(ResourceCount), 0, ResourceCount)| project-away ResourceCount| extend compliant = (RCount <> 0)"
+  },
+  {
+   "guid": "786d60f9-6c96-4ad8-a55d-04c2b39c986b",
+   "text": "When possible, disable SAS key authentication (or local authentication) and use only Microsoft Entra ID for authentication",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "Service Bus",
+   "link": "https://learn.microsoft.com/en-us/azure/service-bus-messaging/disable-local-authentication",
+   "graph": "Resources | where type =~ 'microsoft.servicebus/namespaces' | extend compliant = iif(properties.disableLocalAuth == 'false', 'No', 'Yes') | project id, compliant"
+  },
+  {
+   "guid": "beae759e-4ddb-4326-bf26-47f87d3454b6",
+   "text": "For DR, leverage the premium tier with deployments scaled across two or more regions for 99.99% SLA",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/api-management-howto-deploy-multi-region",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = ( sku.name == 'Premium' and  isnotnull(properties.additionalLocations)) | distinct id, compliant"
+  },
+  {
+   "guid": "9c8d1664-dd9a-49d4-bd83-950af0af4044",
+   "text": "Deploy at least one unit in two or more availability zones for an increased SLA of 99.99%",
+   "severity": "Medium",
+   "waf": "Reliability",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/high-availability",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = ( sku.name == 'Premium' and  isnotnull(zones) and sku.capacity >= 2 ) | distinct id, compliant"
+  },
+  {
+   "guid": "bb5f356b-3daf-47a2-a9ee-867a8100bbd5",
+   "text": "Configure autoscaling to scale out the number of instances when the load increases",
+   "severity": "Medium",
+   "waf": "Performance",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/azure/api-management/api-management-howto-autoscale",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | join kind = leftouter (resources | where type == 'microsoft.insights/autoscalesettings' | extend targetResourceUri = tostring(properties.targetResourceUri)) on $left.id == $right.targetResourceUri | extend compliant = (sku.name == 'Premium' and isnotempty(targetResourceUri) and properties1.enabled == true) | distinct id, compliant"
+  },
+  {
+   "guid": "46f07d33-ef9a-44e8-8f98-67c097c5d8ce",
+   "text": "Upgrade the platform version and follow lifecyle. stv1 is retirng on 31 August 2024",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/en-us/azure/api-management/migrate-stv1-to-stv2",
+   "graph": "resources | where type =~ 'microsoft.apimanagement/service' | extend compliant = (properties.platformVersion != 'stv1') | project id, compliant"
+  },
+  {
+   "guid": "cd45c90e-7690-4753-930b-bf290c69c074",
+   "text": "Deploy the service within a Virtual Network (VNet)",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#virtual-network-integration",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (isnotnull(properties.virtualNetworkConfiguration)) | distinct id, compliant"
+  },
+  {
+   "guid": "67437a28-2721-4a2c-becd-caa54c8237a5",
+   "text": "Deploy Private Endpoints to filter incoming traffic when APIM is not deployed to a VNet.",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#azure-private-link",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (properties.virtualNetworkType == 'None' and isnotnull(properties.privateEndpointConnections)) | distinct id, compliant"
+  },
+  {
+   "guid": "d698adbd-3288-44cb-b10a-9b572da395ae",
+   "text": "Disable Public Network Access",
+   "severity": "High",
+   "waf": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#disable-public-network-access",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (properties.virtualNetworkType == 'Internal') | distinct id, compliant"
+  },
+  {
+   "guid": "791abd8b-7706-4e31-9569-afefde724be3",
+   "text": "Use managed identities to authenticate to other Azure resources whenever possible",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "APIM",
+   "link": "https://learn.microsoft.com/security/benchmark/azure/baselines/api-management-security-baseline?toc=%2Fazure%2Fapi-management%2F&bc=%2Fazure%2Fapi-management%2Fbreadcrumb%2Ftoc.json#managed-identities",
+   "graph": "resources | where type == 'microsoft.apimanagement/service' | extend compliant = (isnotnull(identity)) | distinct id, compliant"
+  },
+  {
+   "guid": "f42d78e7-9d17-4a73-a22a-5a67e7a8ed4b",
+   "text": "Consider using private endpoints for Azure Storage",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/common/storage-private-endpoints",
+   "graph": "resources | where type =~ 'Microsoft.Storage/StorageAccounts' | where isnull(properties.privateEndpointConnections) or properties.privateEndpointConnections[0].properties.provisioningState != ('Succeeded') or (isnull(properties.networkAcls) and properties.publicNetworkAccess == 'Enabled') | extend compliant = (isnotnull(properties.privateEndpointConnections) and properties.privateEndpointConnections[0].properties.provisioningState == 'Succeeded' and properties.publicNetworkAccess == 'Disabled') | distinct id, compliant"
+  },
+  {
+   "guid": "fc5972cd-4cd2-41b0-a803-7f5e6b4bfd3d",
+   "text": "Enable Microsoft Defender for all of your storage accounts",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/common/azure-defender-storage-configure",
+   "graph": "resources | where type =~ 'Microsoft.Storage/StorageAccounts' | project storageAccountId = id | join kind=leftouter (resourceContainers | where type == 'microsoft.security/pricings' | where name == 'StorageAccounts' | project resourceId = id, pricingTier = properties.pricingTier) on $left.storageAccountId == $right.resourceId | where isnull(pricingTier) or pricingTier != 'Standard' | extend compliant = false | distinct storageAccountId, compliant"
+  },
+  {
+   "guid": "e7a8dc4a-20e2-47c3-b297-11b1352beee0",
+   "text": "Require HTTPS, i.e. disable port 80 on the storage account",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/common/storage-require-secure-transfer",
+   "graph": "resources | where type =~ 'Microsoft.Storage/StorageAccounts' | extend compliant = (properties.supportsHttpsTrafficOnly == false) | distinct id, compliant"
+  },
+  {
+   "guid": "e12be569-a18f-4562-8d5d-ce151b9e7d55",
+   "text": "Enforce the latest TLS version for a storage account",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/common/transport-layer-security-configure-minimum-version",
+   "graph": "resources | where type == 'microsoft.storage/storageaccounts' | extend compliant = (isnull(properties.minimumTlsVersion) == false and properties.minimumTlsVersion in ('TLS1_2', 'TLS1_3')) | distinct id, compliant"
+  },
+  {
+   "guid": "15f51296-5398-4e6d-bd22-7dd142b06c21",
+   "text": "Consider disabling storage account keys, so that only Microsoft Entra ID access (and user delegation SAS) is supported.",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/rest/api/storageservices/authorize-with-shared-key",
+   "graph": "resources | where type == 'microsoft.storage/storageaccounts' | extend allowSharedKeyAccess = tostring(properties.allowSharedKeyAccess) | extend compliant = (isnotempty(allowSharedKeyAccess) and allowSharedKeyAccess == 'false') | distinct id, compliant"
+  },
+  {
+   "guid": "659ae558-b937-4d49-a5e1-112dbd7ba012",
+   "text": "Consider whether public blob anonymous access is needed, or whether it can be disabled for certain storage accounts. ",
+   "severity": "High",
+   "waf": "Security",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/blobs/anonymous-read-access-configure?tabs=portal#allow-or-disallow-public-read-access-for-a-storage-account",
+   "graph": "resources | where type == 'microsoft.storage/storageaccounts' | extend compliant = (properties.allowBlobPublicAccess == 'false') | distinct id, compliant"
+  },
+  {
+   "guid": "e05bbe20-9d49-4fda-9777-8424d116785c",
+   "text": "Leverage GRS, ZRS or GZRS storage for the highest availability",
+   "severity": "High",
+   "waf": "Reliability",
+   "service": "Storage",
+   "link": "https://learn.microsoft.com/azure/storage/common/storage-redundancy",
+   "graph": "resources | where type =~ 'Microsoft.Storage/StorageAccounts' | extend compliant = (sku.name != 'Standard_LRS' and sku.name != 'Premium_LRS') | distinct id, compliant"
+  },
+  {
+   "guid": "334fdf91-c234-4182-a652-75269440b4be",
+   "text": "Is DDoS standard protection enabled on ExR/VPN Gateway subnet in Azure",
+   "severity": "Medium",
+   "waf": "Security",
+   "service": "AVS",
+   "graph": "resources| where type =~ 'Microsoft.Network/virtualNetworkGateways'| mv-expand ipConfigurations=properties.ipConfigurations| project subnetId=tostring(ipConfigurations.properties.subnet.id)| where isnotempty(subnetId)| join (resources | where type=='microsoft.network/virtualnetworks' | project id,resourceGroup,name,enableDdosProtection=tostring(properties.enableDdosProtection),subnets=properties.subnets | mv-expand subnets | project id,resourceGroup,name,enableDdosProtection,subnetId=tostring(subnets.id)) on subnetId | distinct id,resourceGroup,name,enableDdosProtection | project id, compliant = (enableDdosProtection == 'true')"
+  },
+  {
+   "guid": "6b84ee5d-f47d-42d9-8881-b1cd5d1e54a2",
+   "text": "Create warning alerts for critical thresholds for automatic alerting on Azure VMware Solution performance (CPU >80%, Avg Memory >80%, vSAN >70%)",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "AVS",
+   "graph": "resources| where type =~ 'Microsoft.AVS/privateClouds'| join kind=leftouter(resources| where type =~ 'Microsoft.Insights/metricalerts'| mv-expand scopes=properties.scopes| mv-expand criteria=properties.criteria.allOf| extend metricName=criteria.metricName| distinct tostring(scopes), tostring(metricName))on $left.id == $right.scopes| extend compliant=toint(metricName in ('UsageAverage', 'EffectiveCpuAverage', 'DiskUsedPercentage'))| summarize compliant=min(compliant) by id"
+  },
+  {
+   "guid": "9659e396-80e7-4828-ac93-5657d02bff45",
+   "text": "Ensure critical alert is created to monitor if vSAN consumption is below 75% as this is a support threshold from VMware",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "AVS",
+   "graph": "resources| where type =~ 'Microsoft.AVS/privateClouds'| join kind=leftouter(resources| where type =~ 'Microsoft.Insights/metricalerts'| mv-expand scopes=properties.scopes| mv-expand criteria=properties.criteria.allOf| extend metricName=criteria.metricName| distinct tostring(scopes), tostring(metricName))on $left.id == $right.scopes| extend compliant=toint(metricName in ('UsageAverage', 'EffectiveCpuAverage', 'DiskUsedPercentage'))| summarize compliant=min(compliant) by id"
+  },
+  {
+   "guid": "64b0d934-a348-4726-be79-d6b5c3a36495",
+   "text": "Ensure alerts are configured for Azure Service Health alerts and notifications",
+   "severity": "High",
+   "waf": "Operations",
+   "service": "AVS",
+   "graph": "resources| distinct subscriptionId| join kind=leftouter(    resources    | where type =~ 'microsoft.insights/activitylogalerts'    | mv-expand condition1 = properties.condition.allOf    | mv-expand condition2 = condition1.anyOf    | extend alertEnabled = tostring(properties.enabled)    | summarize set_condition1=make_set(condition1.equals), set_condition2=make_set(condition2.equals) by id, name,type,tenantId,resourceGroup,subscriptionId, alertEnabled    | where set_has_element(set_condition1, 'ServiceHealth')    | extend category = 'ServiceHealth'    | extend all = iff(set_has_element(set_condition1, 'ServiceHealth') and array_length(set_condition2) == 0, true, false)    | extend incident = iff(all, true, iff(set_has_element(set_condition1, 'Incident'), true, set_has_element(set_condition2, 'Incident')))    | extend maintenance = iff(all, true, iff(set_has_element(set_condition1, 'Maintenance'), true, set_has_element(set_condition2, 'Maintenance')))    | extend informational = iff(all, true, iff(set_has_element(set_condition1, 'Informational') or set_has_element(set_condition1, 'ActionRequired'), true, set_has_element(set_condition2, 'Informational') or set_has_element(set_condition2, 'ActionRequired')))    | extend security = iff(all, true, iff(set_has_element(set_condition1, 'Security'), true, set_has_element(set_condition2, 'Security')))    | project id, name, subscriptionId, category, tostring(alertEnabled), tostring(incident), tostring(maintenance), tostring(informational), tostring(security)    | summarize count_alertEnabled=countif(alertEnabled == 'true'), count_incident=countif(incident == 'True'), count_maintenance=countif(maintenance == 'True'), count_informational=countif(informational == 'True'), count_security=countif(security == 'True') by subscriptionId)     on subscriptionId| project subscriptionId, alertEnabled=iff(isnotnull(count_alertEnabled), count_alertEnabled, 0), incident=iff(isnotnull(count_incident), count_incident, 0), security=iff(isnotnull(count_security), count_security, 0), maintenance=iff(isnotnull(count_maintenance), count_maintenance, 0), informational=iff(isnotnull(count_informational), count_informational, 0)| order by incident, maintenance, informational, security desc| project id=subscriptionId, compliant=(alertEnabled > 0 and incident > 0 and security > 0 and maintenance > 0 and informational > 0)"
+  }
+ ]
+}

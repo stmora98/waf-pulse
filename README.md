@@ -123,25 +123,38 @@ To change the schedule later without redeploying, edit the `REFRESH_CRON` applic
 
 ## What it checks
 
-| Rule | Pillar | Severity |
-|---|---|---|
-| Storage account allows public blob access | Security | High |
-| SQL server allows public network access | Security | High |
-| Storage account accepts TLS older than 1.2 | Security | Medium |
-| Virtual machine is not in an availability zone or availability set | Reliability | Medium |
-| Public IP address is not attached to any resource | Cost Optimization | Medium |
-| Managed disk is not attached to a virtual machine | Cost Optimization | Medium |
-| Resource group has no tags | Operational Excellence | Low |
+Every source is read-only and needs only the **Reader** role. Everything runs tenant wide: one query covers all subscriptions, so adding a subscription needs no change.
 
-Each rule is scored against the resources it actually evaluates, so one finding is not diluted by unrelated resources:
+| Source | What it adds |
+|---|---|
+| **Built-in rules** (25) | Storage, Key Vault, App Service, SQL, network, backup, orphaned and idle resources, tags, Azure Hybrid Benefit. See [`rules.py`](src/collector/waf_pulse/rules.py). |
+| **Azure review checklists** (162 automated checks) | The community [Azure review checklists](https://github.com/Azure/review-checklists) that carry a Resource Graph query: general WAF, landing zone, AKS, storage, App Service, networking, APIM, Front Door, SAP and more. |
+| **Azure Advisor** | Every recommendation in the five categories, grouped by recommendation type, with the annual savings of the cost recommendations. |
+| **Defender for Cloud** | Unhealthy security recommendations and, where Defender provides it, the Secure Score and its controls. |
 
-- `prevalence = affected / applicable` for every rule that has at least one applicable resource.
+Each finding keeps its source, and the dashboard can filter by pillar, severity and source.
+
+### Scoring
+
+Each check is scored against the resources it actually evaluates, so one finding is not diluted by unrelated resources:
+
+- `prevalence = affected / applicable` for every check that has at least one applicable resource.
 - `score = 100 - (sum of weight x prevalence / sum of weights) x 100`, with weights critical 10, high 5, medium 2 and low 1.
 - The worst severity found caps the pillar: a critical finding limits it to 49, a high to 79 and a medium to 89.
 - A pillar with nothing to evaluate shows `n/a`.
 
-Rules live in [`rules.py`](src/collector/waf_pulse/rules.py), each with the resource types it applies to. Adding one needs no other change.
+### Not collected yet
 
+Cost Management (spend, budgets, reservations), Azure Monitor metrics for right-sizing, diagnostic settings coverage, management group and policy inventory, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
+
+### Updating the checklists
+
+```bash
+git clone https://github.com/Azure/review-checklists
+python tools/update_checklists.py --source review-checklists/checklists
+```
+
+Three upstream queries are not valid Resource Graph queries; they are reported as checks that could not run and do not affect the rest.
 ## Security notes
 
 - The collector secret lives only in Key Vault and is read through a Key Vault reference. It is not stored in app settings, outputs or this repository.

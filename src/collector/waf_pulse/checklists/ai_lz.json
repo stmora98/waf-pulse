@@ -1,0 +1,89 @@
+{
+ "name": "AI Landing Zone",
+ "items": [
+  {
+   "guid": "11cc57b4-a4b1-4410-b439-58a8c2289b3d",
+   "id": "AI.102",
+   "text": "Key access (local authentication) is recommended to be disabled for security.  After disabling key based access, Microsoft Entra ID becomes the only access method, which allows maintaining minimum privilege principle and granular control. ",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Identity and Access Management",
+   "subcategory": "Entra ID based access",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/authentication",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (properties.disableLocalAuth == true)"
+  },
+  {
+   "guid": "95b96ad8-844c-4e3b-8b38-b876ba2cf204",
+   "id": "AI.13",
+   "text": "Azure AI search service tiers should be choosen to have a SLA ",
+   "severity": "High",
+   "waf": "Reliability",
+   "category": "BC and DR",
+   "subcategory": "SLA considerations",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/search/search-reliability",
+   "graph": "resources | where type == 'microsoft.search/searchservices' | extend compliant = (sku.name != 'free' and properties.replicaCount >= 3) | project id, compliant"
+  },
+  {
+   "guid": "697cb391-ed16-4b2d-886f-0a0241addde6",
+   "id": "AI.131",
+   "text": "Create alerts to notify teams of events such as an entry in the activity log created by an action performed on the resource, such as regenerating its subscription keys or a metric threshold such as the number of errors exceeding 10 in an hour",
+   "severity": "High",
+   "waf": "Operations",
+   "category": "Operations",
+   "subcategory": "Alerts",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/openai/how-to/monitoring#set-up-alerts",
+   "graph": "resources | where type == 'microsoft.insights/metricalerts' | extend compliant = (properties.targetResourceType =~ 'Microsoft.CognitiveServices/accounts') | project id, compliant"
+  },
+  {
+   "guid": "27f7b9e9-1be1-4f38-aef3-9812bd463cbb",
+   "id": "AI.77",
+   "text": "Configure private endpoint for AI services to restrict service access within your network",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Governance and Security",
+   "subcategory": "Network security",
+   "service": "Azure OpenAI",
+   "link": "https://techcommunity.microsoft.com/t5/azure-architecture-blog/azure-openai-private-endpoints-connecting-across-vnet-s/ba-p/3913325",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (properties.privateEndpointConnections != '[]' and properties.publicNetworkAccess !~ 'enabled')"
+  },
+  {
+   "guid": "1102cac6-eae0-41e6-b842-e52f4721d928",
+   "id": "AI.80",
+   "text": "Ensure that APIs and endpoints used by the LLM application are properly secured with authentication and authorization mechanisms, such as Managed identities,  API keys or OAuth, to prevent unauthorized access.",
+   "severity": "High",
+   "waf": "Security",
+   "category": "Governance and Security",
+   "subcategory": "Secure APIs and Endpoints",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity",
+   "graph": "resources | where type =~ 'Microsoft.CognitiveServices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (isnotnull(identity))"
+  },
+  {
+   "guid": "e1d7aaab-3571-4449-ab80-53d89f89dc7b",
+   "id": "AI.84",
+   "text": "Azure AI Services are properly tagged for better management",
+   "severity": "Low",
+   "waf": "Operations",
+   "category": "Governance and Security",
+   "subcategory": "Infrastructure Deployment",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/azure-resource-manager/management/tag-resources?tabs=json",
+   "graph": "resources | where type == 'microsoft.cognitiveservices/accounts' or type == 'microsoft.search/searchservices' | project id, compliant = (tags != '{}')"
+  },
+  {
+   "guid": "9de0d5d7-31d4-41e3-911c-817bfafbc416",
+   "id": "AI.93",
+   "text": "Implement jailbreak risk detection to safeguard your language model deployments against prompt injection attacks",
+   "severity": "Medium",
+   "waf": "Security",
+   "category": "Governance and Security",
+   "subcategory": "Jailbreak protection",
+   "service": "Azure OpenAI",
+   "link": "https://learn.microsoft.com/azure/ai-services/content-safety/concepts/jailbreak-detection",
+   "graph": "resources | where type == 'microsoft.cognitiveservices/accounts' and kind =~ 'contentsafety' | project id, compliant = 1"
+  }
+ ]
+}
