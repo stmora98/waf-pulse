@@ -152,6 +152,21 @@ Rules live in [`rules.py`](src/collector/waf_pulse/rules.py), each with the reso
 | The dashboard says no assessment has completed | Select **Refresh now** and wait for the run. Check the Function App logs in Application Insights. |
 | The dashboard shows "data store is not reachable" | The managed identity may still be receiving its Cosmos DB role. Wait a few minutes and reload. |
 
+## Update to a new version
+
+Releases are published on the [Releases page](https://github.com/stmora98/waf-pulse/releases). Redeploying the template with the same resource group also works. To update an existing deployment by hand:
+
+```bash
+# Dashboard: point the package setting at the versioned URL.
+# Restarting the app is not enough, the package is only downloaded again when the URL changes.
+az webapp config appsettings set -g <rg> -n <app-service> \
+  --settings WEBSITE_RUN_FROM_PACKAGE=https://github.com/stmora98/waf-pulse/releases/download/<tag>/dashboard.zip
+
+# Collector: download collector.zip from the release, then publish it with a remote build.
+az functionapp deployment source config-zip --src collector.zip \
+  --name <function-app> --resource-group <rg> --build-remote true
+```
+
 ## Clean up
 
 Delete the resource group you deployed into. The service principal and its role assignments are yours and are not removed.
