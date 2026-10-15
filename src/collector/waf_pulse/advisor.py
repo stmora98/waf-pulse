@@ -79,7 +79,7 @@ def evaluate(run_id, rows):
         {
             "ruleId": rule, "source": "advisor", "pillar": meta[rule]["pillar"], "severity": meta[rule]["severity"],
             "subscriptionId": sub, "affected": len(resources), "applicable": None,
-            "applicableType": meta[rule]["type"],
+            "applicableTypes": [meta[rule]["type"]] if meta[rule]["type"] else [],
         }
         for (rule, sub), resources in groups.items()
     ]

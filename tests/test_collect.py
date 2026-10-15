@@ -1,5 +1,5 @@
 from waf_pulse import collect, graph
-from waf_pulse.rules import INVENTORY_QUERY, RESOURCE_GROUP_INVENTORY_QUERY, RULES
+from waf_pulse.rules import INVENTORY_QUERY, RESOURCE_GROUP_INVENTORY_QUERY, RESOURCE_GROUP_TYPE, RULES
 
 
 def rule(rule_id):
@@ -42,38 +42,67 @@ def test_findings_expire_after_the_retention_period(monkeypatch):
     assert collect.build_finding("r", RULES[0], row)["ttl"] == 90 * 86400
 
 
-def test_collect_subscription_counts_findings_and_survives_a_failing_rule(monkeypatch):
-    failing = rule("SEC-STG-002")
+def test_every_rule_runs_in_exactly_one_batch():
+    batched = [r.id for batch in collect.rule_batches() for r in batch]
+    assert sorted(batched) == sorted(r.id for r in RULES)
+    assert all(len(batch) <= collect.RULES_PER_ACTIVITY for batch in collect.rule_batches())
 
+
+# --- tenant wide collection -----------------------------------------------------------------------------
+
+def test_collect_inventory_merges_resources_and_resource_groups_per_subscription(monkeypatch):
     def fake_query(credential, subscriptions, kql, max_rows=0):
         if kql == INVENTORY_QUERY:
-            return [
-                {"type": "microsoft.storage/storageaccounts", "count_": 8},
-                {"type": "microsoft.sql/servers", "count_": 1},
-                {"type": "microsoft.web/sites", "count_": 3},
-            ]
+            return [{"subscriptionId": "SUB1", "type": "Microsoft.Web/Sites", "count_": 3},
+                    {"subscriptionId": "sub2", "type": "microsoft.web/sites", "count_": 1}]
         if kql == RESOURCE_GROUP_INVENTORY_QUERY:
-            return [{"type": "microsoft.resources/subscriptions/resourcegroups", "count_": 12}]
-        if kql == failing.query:
-            raise RuntimeError("Forbidden")
-        if kql == rule("SEC-SQL-001").query:
-            return [{"id": "/x/1", "name": "one", "type": "t", "subscriptionId": subscriptions}]
+            return [{"subscriptionId": "sub1", "type": RESOURCE_GROUP_TYPE, "count_": 12}]
         return []
 
     monkeypatch.setattr(graph, "query", fake_query)
-    findings, document = collect.collect_subscription(None, "run1", {"id": "SUB1", "name": "Sub 1"})
+    document = collect.collect_inventory(None, ["sub1", "sub2"])
+    assert document["inventory"] == {
+        "sub1": {"microsoft.web/sites": 3, RESOURCE_GROUP_TYPE: 12},
+        "sub2": {"microsoft.web/sites": 1},
+    }
 
-    assert len(findings) == 1 and findings[0]["subscriptionId"] == "sub1"
-    assert [error["ruleId"] for error in document["errors"]] == [failing.id]
-    assert document["inventory"]["sub1"]["microsoft.web/sites"] == 3
 
-    stats = {s["ruleId"]: s for s in document["stats"]}
-    assert failing.id not in stats  # a rule that could not run is not scored
-    assert stats["SEC-SQL-001"]["affected"] == 1 and stats["SEC-SQL-001"]["applicable"] == 1
-    assert stats["SEC-STG-001"]["applicable"] == 8
-    assert stats["OPS-TAG-001"]["applicable"] == 12
-    assert stats["OPS-TAG-002"]["applicable"] == 12  # "*" counts every resource, not resource groups
+def test_collect_rules_counts_per_subscription_and_survives_a_failing_rule(monkeypatch):
+    failing, working = rule("SEC-STG-002"), rule("SEC-SQL-001")
+    seen = []
 
+    def fake_query(credential, subscriptions, kql, max_rows=0):
+        seen.append(list(subscriptions))
+        if kql == failing.query:
+            raise RuntimeError("Forbidden\nsecond line")
+        if kql == working.query:
+            return [{"id": "/x/1", "name": "one", "type": "t", "subscriptionId": "SUB1"},
+                    {"id": "/x/2", "name": "two", "type": "t", "subscriptionId": "sub1"},
+                    {"id": "/x/3", "name": "three", "type": "t", "subscriptionId": "sub2"}]
+        return []
+
+    monkeypatch.setattr(graph, "query", fake_query)
+    findings, document = collect.collect_rules(None, "run1", ["sub1", "sub2"], [failing, working])
+
+    assert len(findings) == 3 and {f["subscriptionId"] for f in findings} == {"sub1", "sub2"}
+    assert document["evaluated"] == [working.id]
+    assert document["errors"] == [{"ruleId": failing.id, "error": "Forbidden"}]
+    by_sub = {s["subscriptionId"]: s for s in document["stats"]}
+    assert by_sub["sub1"]["affected"] == 2 and by_sub["sub2"]["affected"] == 1
+    assert by_sub["sub1"]["applicable"] is None and by_sub["sub1"]["applicableTypes"] == list(working.applies_to)
+    assert seen[0] == ["sub1", "sub2"]  # one tenant wide query, not one per subscription
+
+
+def test_findings_per_rule_are_capped_but_counts_are_not(monkeypatch):
+    working = rule("SEC-SQL-001")
+    rows = [{"id": f"/x/{i}", "name": "n", "type": "t", "subscriptionId": "s1"} for i in range(collect.MAX_FINDINGS_PER_RULE + 30)]
+    monkeypatch.setattr(graph, "query", lambda *a, **k: rows)
+    findings, document = collect.collect_rules(None, "r", ["s1"], [working])
+    assert len(findings) == collect.MAX_FINDINGS_PER_RULE
+    assert document["stats"][0]["affected"] == collect.MAX_FINDINGS_PER_RULE + 30
+
+
+# --- aggregation ----------------------------------------------------------------------------------------
 
 def test_build_summary_aggregates_every_source():
     subscriptions = [{"id": "s1", "name": "One"}, {"id": "s2", "name": "Two"}]
@@ -81,8 +110,7 @@ def test_build_summary_aggregates_every_source():
         {"stats": [stat("SEC-SQL-001", "Security", "high", 2, 2, "s1")], "errors": [],
          "inventory": {"s1": {"microsoft.sql/servers": 2, "a/b": 8}}},
         {"stats": [stat("REL-VM-001", "Reliability", "medium", 1, 4, "s2")], "errors": [{"ruleId": "X", "error": "boom"}],
-         "inventory": {"s2": {"microsoft.compute/virtualmachines": 4, "a/b": 26,
-                              "microsoft.resources/subscriptions/resourcegroups": 3}}},
+         "inventory": {"s2": {"microsoft.compute/virtualmachines": 4, "a/b": 26, RESOURCE_GROUP_TYPE: 3}}},
         {"stats": [stat("CHK-1", "Security", "medium", 1, 5, "s1", source="checklist")], "errors": []},
     ]
     summary, score_docs = collect.build_summary("run1", "t0", "t1", "manual", subscriptions, documents)
@@ -101,23 +129,55 @@ def test_build_summary_aggregates_every_source():
     assert by_sub["s2"]["scores"]["Reliability"] <= 89 and by_sub["s2"]["scores"]["Security"] is None
 
 
-def test_applicable_is_taken_from_the_inventory_when_a_source_cannot_count():
+def test_applicable_comes_from_the_inventory_for_sources_that_cannot_count():
     documents = [
         {"stats": [stat("ADV-1", "Reliability", "high", 1, None, "s1", source="advisor",
-                        applicableType="microsoft.compute/virtualmachines")], "errors": [],
+                        applicableTypes=["microsoft.compute/virtualmachines"])], "errors": [],
          "inventory": {"s1": {"microsoft.compute/virtualmachines": 4}}},
     ]
     summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}], documents)
-    assert summary["scores"]["Reliability"] == round(100 - 25)  # 1 of 4 VMs, capped at 79 by "high"? 75 < 79
+    assert summary["scores"]["Reliability"] == 75  # 1 of 4 virtual machines; "high" caps at 79, not reached
 
 
-def test_advisor_applicable_never_below_affected():
+def test_applicable_is_never_below_affected():
     documents = [
         {"stats": [stat("ADV-2", "Cost Optimization", "medium", 3, None, "s1", source="advisor",
-                        applicableType="unknown/type")], "errors": [], "inventory": {"s1": {}}},
+                        applicableTypes=["unknown/type"])], "errors": [], "inventory": {"s1": {}}},
     ]
     summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}], documents)
     assert summary["scores"]["Cost Optimization"] == 0  # 3 of at least 3
+
+
+def test_clean_rules_get_zero_rows_so_the_score_reflects_what_passed():
+    sql = rule("SEC-SQL-001")
+    documents = [
+        {"stats": [], "evaluated": [sql.id], "errors": [],
+         "inventory": {"s1": {"microsoft.sql/servers": 3}, "s2": {"microsoft.web/sites": 9}}},
+        {"stats": [{"ruleId": sql.id, "source": "builtin", "pillar": sql.pillar, "severity": sql.severity,
+                    "subscriptionId": "s1", "affected": 1, "applicable": None,
+                    "applicableTypes": list(sql.applies_to)}], "evaluated": [], "errors": []},
+    ]
+    summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}, {"id": "s2", "name": "Two"}], documents)
+
+    by_sub = {row["id"]: row for row in summary["subscriptions"]}
+    assert by_sub["s1"]["scores"]["Security"] < 100          # 1 of 3 SQL servers violates the rule
+    assert by_sub["s2"]["scores"]["Security"] is None        # no SQL servers: the rule does not apply there
+    assert summary["sources"]["builtin"]["rules"] == 1
+
+
+def test_a_rule_that_failed_to_run_is_not_scored_as_clean():
+    documents = [{"stats": [], "evaluated": [], "errors": [{"ruleId": "SEC-SQL-001", "error": "x"}],
+                  "inventory": {"s1": {"microsoft.sql/servers": 3}}}]
+    summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}], documents)
+    assert summary["scores"]["Security"] is None
+
+
+def test_all_resources_rules_use_the_resource_total_without_resource_groups():
+    tags = rule("OPS-TAG-002")
+    documents = [{"stats": [], "evaluated": [tags.id], "errors": [],
+                  "inventory": {"s1": {"a/b": 8, "c/d": 2, RESOURCE_GROUP_TYPE: 50}}}]
+    summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}], documents)
+    assert summary["scores"]["Operational Excellence"] == 100  # 0 of 10 resources
 
 
 def test_defender_and_advisor_datasets_reach_the_summary():

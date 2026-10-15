@@ -34,7 +34,7 @@ def make_finding(run_id, *, rule_id, source, pillar, severity, title, recommenda
         "id": digest,
         "key": finding_key(rule_id, resource_id),
         "runId": run_id,
-        "subscriptionId": subscription_id or subscription_of(resource_id),
+        "subscriptionId": (subscription_id or subscription_of(resource_id)).lower(),
         "ruleId": rule_id,
         "source": source,
         "pillar": pillar,

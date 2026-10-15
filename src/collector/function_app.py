@@ -60,11 +60,14 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
         subscriptions = yield context.call_activity("act_discover", None)
         subscription_ids = [sub["id"] for sub in subscriptions]
 
-        tasks = [
-            context.call_activity("act_collect", {"runId": run_id, "subscription": sub}) for sub in subscriptions
-        ]
+        tasks = []
         if subscription_ids:
             scope = {"runId": run_id, "subscriptions": subscription_ids}
+            tasks.append(context.call_activity("act_inventory", scope))
+            tasks += [
+                context.call_activity("act_rules", {**scope, "batch": index})
+                for index in range(len(collect.rule_batches()))
+            ]
             tasks += [
                 context.call_activity("act_checklist", {**scope, "batch": index})
                 for index in range(checklists.batch_count())
@@ -105,11 +108,24 @@ def act_discover(payload):
 
 
 @app.activity_trigger(input_name="payload")
-def act_collect(payload: dict):
-    run_id, subscription = payload["runId"], payload["subscription"]
-    key = f"rules:{subscription['id'].lower()}"
+def act_inventory(payload: dict):
+    run_id = payload["runId"]
     try:
-        findings, document = collect.collect_subscription(credentials.collector_credential(), run_id, subscription)
+        store.save_stats(run_id, "inventory", collect.collect_inventory(
+            credentials.collector_credential(), payload["subscriptions"]))
+        return {"key": "inventory"}
+    except Exception as exc:
+        return _record_failure(run_id, "inventory", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_rules(payload: dict):
+    run_id, batch = payload["runId"], payload["batch"]
+    key = f"rules:{batch}"
+    try:
+        findings, document = collect.collect_rules(
+            credentials.collector_credential(), run_id, payload["subscriptions"], collect.rule_batches()[batch]
+        )
         store.save_findings(findings)
         store.save_stats(run_id, key, document)
         return {"key": key, "findings": len(findings)}

@@ -136,20 +136,19 @@ resourcecontainers
     ),
 )
 
+# Resource counts per subscription and type, used as the denominator ("applicable") of every rule.
 INVENTORY_QUERY = """
 resources
-| summarize count() by type
-| order by count_ desc
+| summarize count_ = count() by type, subscriptionId
 """
 
-# Resource groups live in a different table, same output shape as INVENTORY_QUERY.
+# Resource groups live in another table, same output shape as INVENTORY_QUERY.
 RESOURCE_GROUP_INVENTORY_QUERY = """
 resourcecontainers
 | where type =~ 'microsoft.resources/subscriptions/resourcegroups'
-| summarize count_ = count()
+| summarize count_ = count() by subscriptionId
 | extend type = 'microsoft.resources/subscriptions/resourcegroups'
 """
-
 
 def pillars_with_rules():
     return {rule.pillar for rule in RULES}

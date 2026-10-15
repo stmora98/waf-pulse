@@ -139,7 +139,7 @@ def test_advisor_groups_by_recommendation_type_and_subscription():
 
     cost = next(s for s in stats if s["ruleId"] == "ADV-rec1")
     assert cost["affected"] == 2 and cost["applicable"] is None and cost["pillar"] == "Cost Optimization"
-    assert cost["applicableType"] == "microsoft.compute/virtualmachines" and cost["source"] == "advisor"
+    assert cost["applicableTypes"] == ["microsoft.compute/virtualmachines"] and cost["source"] == "advisor"
     reliability = next(s for s in stats if s["ruleId"] == "ADV-rec2")
     assert reliability["pillar"] == "Reliability" and reliability["severity"] == "low" and reliability["subscriptionId"] == "s2"
     assert findings[0]["source"] == "advisor" and findings[0]["title"] == "Right-size VM"
