@@ -149,6 +149,26 @@ def test_post_raises_other_errors(monkeypatch):
         metrics._post("u", {}, "t", ["id"])
 
 
+def test_post_retries_dropped_connections_and_then_gives_up(monkeypatch):
+    attempts = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise metrics.requests.ConnectionError("Remote end closed connection")
+        return FakeResponse(200, {"values": []})
+
+    slept = []
+    monkeypatch.setattr(metrics.requests, "post", flaky)
+    monkeypatch.setattr(metrics, "_sleep", slept.append)
+    assert metrics._post("u", {}, "t", ["id"]) == {"values": []}
+    assert attempts["n"] == 3 and slept == [1, 2]
+
+    monkeypatch.setattr(metrics.requests, "post", lambda *a, **k: (_ for _ in ()).throw(metrics.requests.Timeout("slow")))
+    with pytest.raises(metrics.requests.Timeout):
+        metrics._post("u", {}, "t", ["id"])
+
+
 def test_fetch_batch_calls_the_regional_endpoint(monkeypatch):
     captured = {}
 

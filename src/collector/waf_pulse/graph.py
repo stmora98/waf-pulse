@@ -10,7 +10,7 @@ import threading
 import time
 from collections import deque
 
-from azure.core.exceptions import HttpResponseError
+from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest, QueryRequestOptions
 from azure.mgmt.subscription import SubscriptionClient
@@ -88,15 +88,25 @@ def _client(credential):
     return _clients[key][1]
 
 
+def is_transient_network_error(exc):
+    """A dropped connection or a read timeout: the request can simply be sent again."""
+    return isinstance(exc, (ServiceRequestError, ServiceResponseError, ConnectionError, TimeoutError))
+
+
 def _execute(client, request):
     for attempt in range(MAX_ATTEMPTS):
         _limiter.acquire()
+        last = attempt == MAX_ATTEMPTS - 1
         try:
             return client.resources(request)
         except HttpResponseError as exc:
-            if not is_throttle(exc) or attempt == MAX_ATTEMPTS - 1:
+            if not is_throttle(exc) or last:
                 raise
             _sleep(retry_after_seconds(exc) + random.uniform(0, 1))
+        except Exception as exc:
+            if not is_transient_network_error(exc) or last:
+                raise
+            _sleep(min(2 ** attempt, 30) + random.uniform(0, 1))
 
 
 def parse_subscription_filter(value):

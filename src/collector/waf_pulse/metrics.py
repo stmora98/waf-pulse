@@ -232,9 +232,16 @@ def evaluate(run_id, resources, measurements):
 
 def _post(url, params, token, resource_ids):
     for attempt in range(MAX_ATTEMPTS):
-        response = requests.post(url, params=params, headers={"Authorization": f"Bearer {token}"},
-                                 json={"resourceids": resource_ids}, timeout=REQUEST_TIMEOUT)
-        if response.status_code == 429 and attempt < MAX_ATTEMPTS - 1:
+        last = attempt == MAX_ATTEMPTS - 1
+        try:
+            response = requests.post(url, params=params, headers={"Authorization": f"Bearer {token}"},
+                                     json={"resourceids": resource_ids}, timeout=REQUEST_TIMEOUT)
+        except (requests.ConnectionError, requests.Timeout):
+            if last:
+                raise
+            _sleep(min(2 ** attempt, 30))
+            continue
+        if response.status_code == 429 and not last:
             _sleep(min(float(response.headers.get("Retry-After", 5)), 60))
             continue
         response.raise_for_status()

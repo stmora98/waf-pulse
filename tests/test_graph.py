@@ -1,5 +1,5 @@
 import pytest
-from azure.core.exceptions import HttpResponseError
+from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
 
 from waf_pulse import graph
 
@@ -85,6 +85,26 @@ def test_non_throttle_errors_are_raised_immediately(clock):
     with pytest.raises(HttpResponseError):
         graph._execute(client, object())
     assert client.calls == 1
+
+
+def test_dropped_connections_are_retried(clock):
+    client = FakeClient([ServiceResponseError("Connection aborted. RemoteDisconnected"), ConnectionError("reset"), Page([1])])
+    assert graph._execute(client, object()).data == [1]
+    assert client.calls == 3 and len(clock.slept) == 2
+
+
+def test_other_exceptions_are_not_retried(clock):
+    client = FakeClient([ValueError("bug")])
+    with pytest.raises(ValueError):
+        graph._execute(client, object())
+    assert client.calls == 1
+
+
+def test_a_connection_that_never_recovers_eventually_fails(clock):
+    client = FakeClient([ServiceRequestError("down") for _ in range(graph.MAX_ATTEMPTS)])
+    with pytest.raises(ServiceRequestError):
+        graph._execute(client, object())
+    assert client.calls == graph.MAX_ATTEMPTS
 
 
 def test_gives_up_after_the_maximum_attempts(clock):
