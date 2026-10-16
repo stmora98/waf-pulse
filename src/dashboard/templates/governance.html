@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Governance · WAF Pulse{% endblock %}
+
+{% macro render_group(node) %}
+  <li>
+    <strong>{{ node.displayName }}</strong>
+    <span class="muted">{{ node.subscriptionNames | length }} subscription(s)</span>
+    {% if node.subscriptionNames %}
+      <ul class="tree-subs">{% for name in node.subscriptionNames %}<li>{{ name }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if node.children %}<ul>{% for child in node.children %}{{ render_group(child) }}{% endfor %}</ul>{% endif %}
+  </li>
+{% endmacro %}
+
+{% block content %}
+    <h2>Governance</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not governance %}
+      <section class="notice">No governance data yet. Select <strong>Refresh now</strong> to collect it.</section>
+    {% else %}
+      <section class="cards">
+        <div class="card na"><span class="card-title">Management groups</span><span class="card-score">{{ governance.managementGroups | length }}</span></div>
+        <div class="card na"><span class="card-title">Policy assignments</span><span class="card-score">{{ governance.policy.assignments }}</span>
+          {% if governance.policy.notEnforced %}<span class="muted">{{ governance.policy.notEnforced }} not enforced</span>{% endif %}</div>
+        <div class="card na"><span class="card-title">Role assignments</span><span class="card-score">{{ governance.rbac.assignments }}</span>
+          <span class="muted">{{ governance.rbac.customRoles }} custom role(s)</span></div>
+        <div class="card na"><span class="card-title">Resource locks</span><span class="card-score">{{ governance.locks.total }}</span>
+          <span class="muted">{{ governance.locks.subscriptionsWithoutLocks | length }} subscription(s) without locks</span></div>
+        <div class="card na"><span class="card-title">Defender plans on</span><span class="card-score">{{ governance.defender.enabled }}/{{ governance.defender.plans }}</span></div>
+      </section>
+
+      <section class="panel">
+        <h3>Management groups and subscriptions</h3>
+        {% if tree %}
+          <ul class="tree">{% for root in tree %}{{ render_group(root) }}{% endfor %}</ul>
+        {% else %}
+          <p class="muted">No management group hierarchy is visible to the service principal.</p>
+        {% endif %}
+        {% if unassigned %}
+          <h4>Subscriptions without a visible management group</h4>
+          <ul class="plain">{% for sub in unassigned %}<li>{{ sub.name }} <span class="muted">{{ sub.id }}</span></li>{% endfor %}</ul>
+        {% endif %}
+      </section>
+
+      <section class="insights">
+        <div class="panel">
+          <h3>Azure Policy</h3>
+          <ul class="plain">
+            <li>Custom definitions: <strong>{{ governance.policy.customDefinitions }}</strong></li>
+            <li>Exemptions: <strong>{{ governance.policy.exemptions }}</strong>
+              <span class="muted">· {{ governance.policy.expiredExemptions }} expired, {{ governance.policy.exemptionsWithoutExpiry }} without expiry</span></li>
+            <li>Non-compliant resources: <strong>{{ governance.policy.nonCompliantResources }}</strong></li>
+          </ul>
+          {% if governance.policy.topNonCompliant %}
+            <h4>Assignments with the most non-compliant resources</h4>
+            <ul class="plain">
+              {% for item in governance.policy.topNonCompliant %}<li>{{ item.assignment }} <span class="muted">· {{ item.nonCompliant }} of {{ item.total }}</span></li>{% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+        <div class="panel">
+          <h3>Access (RBAC)</h3>
+          <ul class="plain">
+            {% for kind, count in governance.rbac.byPrincipalType.items() %}<li>{{ kind }}: <strong>{{ count }}</strong></li>{% endfor %}
+          </ul>
+          {% if governance.rbac.owners %}
+            <h4>Owners at subscription scope</h4>
+            <ul class="plain">
+              {% for item in governance.rbac.owners %}<li><span class="muted">{{ item.subscriptionId }}</span> · <strong>{{ item.owners }}</strong></li>{% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+        <div class="panel">
+          <h3>Defender for Cloud</h3>
+          <p>{{ governance.defender.enabled }} of {{ governance.defender.plans }} plan(s) enabled.</p>
+          {% if governance.defender.notEnabled %}
+            <h4>Not enabled</h4>
+            <ul class="plain">{% for plan in governance.defender.notEnabled %}<li>{{ plan }}</li>{% endfor %}</ul>
+          {% endif %}
+        </div>
+      </section>
+      <p class="muted">Governance findings are listed on the <a href="{{ url_for('index', source='governance') }}">Overview</a>.</p>
+    {% endif %}
+{% endblock %}

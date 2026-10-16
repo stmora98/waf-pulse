@@ -42,6 +42,10 @@ table { width: 100%; border-collapse: collapse; background: var(--panel); border
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 0.9rem; }
 th { background: #fafbfc; color: var(--muted); font-weight: 600; }
 .table-wrap { overflow-x: auto; }
+.tree, .tree ul { list-style: none; padding-left: 18px; margin: 4px 0; border-left: 1px solid var(--line); }
+.tree { border-left: 0; padding-left: 0; }
+.tree li { padding: 3px 0; }
+.tree-subs { font-size: 0.85rem; color: var(--muted); }
 .table-wrap table { min-width: 640px; }
 @media (max-width: 640px) {
   main, .top { padding: 0 12px; }

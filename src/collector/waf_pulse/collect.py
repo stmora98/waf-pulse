@@ -199,6 +199,9 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
         "errors": errors,
     }
     summary.update(_defender_insights(datasets, names))
+    governance = _dataset(datasets, "governance")
+    if governance:
+        summary["governance"] = governance[0]
     savings = _advisor_savings(datasets)
     if savings:
         summary["advisorSavings"] = savings

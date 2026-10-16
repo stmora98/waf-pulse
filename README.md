@@ -131,6 +131,7 @@ Every source is read-only and needs only the **Reader** role. Everything runs te
 | **Azure review checklists** (162 automated checks) | The community [Azure review checklists](https://github.com/Azure/review-checklists) that carry a Resource Graph query: general WAF, landing zone, AKS, storage, App Service, networking, APIM, Front Door, SAP and more. |
 | **Azure Advisor** | Every recommendation in the five categories, grouped by recommendation type, with the annual savings of the cost recommendations. |
 | **Defender for Cloud** | Unhealthy security recommendations and, where Defender provides it, the Secure Score and its controls. |
+| **Governance** | Management group hierarchy, Azure Policy (assignments, compliance, exemptions), role assignments and owners, resource locks and Defender plans. Shown on the Governance page, with checks for too many owners, missing locks, non-compliance, risky exemptions and disabled Defender plans. |
 
 Each finding keeps its source, and the dashboard can filter by pillar, severity and source.
 
@@ -145,7 +146,7 @@ Each check is scored against the resources it actually evaluates, so one finding
 
 ### Not collected yet
 
-Cost Management (spend, budgets, reservations), Azure Monitor metrics for right-sizing, diagnostic settings coverage, management group and policy inventory, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
+Cost Management (spend, budgets, reservations), Azure Monitor metrics for right-sizing, diagnostic settings coverage, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
 
 ### Updating the checklists
 

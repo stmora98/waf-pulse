@@ -13,6 +13,7 @@ def test_functions_are_registered():
         "act_checklist",
         "act_advisor",
         "act_defender",
+        "act_governance",
         "act_finalize",
         "act_fail",
     } <= names

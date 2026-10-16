@@ -7,6 +7,7 @@ from flask import Flask, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
 import data
+import governance_view
 import history
 
 app = Flask(__name__)
@@ -73,6 +74,26 @@ def index():
         selected_source=source,
         user=request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""),
     )
+
+
+@app.get("/governance")
+def governance_page():
+    try:
+        latest = data.latest_run()
+        completed = latest if latest and latest.get("status") == "completed" else data.latest_run(True)
+        summary = data.summary(completed["id"]) if completed else None
+    except Exception:
+        logging.exception("Could not load governance data")
+        return render_template("governance.html", error="The data store is not reachable right now.",
+                               governance=None, tree=[], unassigned=[]), 503
+    governance = (summary or {}).get("governance")
+    tree, unassigned = [], []
+    if governance:
+        tree = governance_view.build_tree(governance.get("managementGroups", []), governance.get("subscriptions", []))
+        unassigned = governance_view.subscriptions_outside_groups(
+            governance.get("managementGroups", []), governance.get("subscriptions", []))
+    return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
+                           summary=summary)
 
 
 @app.get("/api/summary")

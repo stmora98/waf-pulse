@@ -14,12 +14,13 @@ PILLARS = (
     "Performance Efficiency",
 )
 SEVERITIES = ("critical", "high", "medium", "low")
-SOURCES = ("builtin", "checklist", "advisor", "defender")
+SOURCES = ("builtin", "checklist", "advisor", "defender", "governance")
 SOURCE_LABELS = {
     "builtin": "Built-in rules",
     "checklist": "Review checklists",
     "advisor": "Azure Advisor",
     "defender": "Defender for Cloud",
+    "governance": "Governance",
 }
 TENANT_PARTITION = "tenant"
 QUEUE_NAME = "refresh-requests"
