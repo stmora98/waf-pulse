@@ -5,3 +5,4 @@ azure-mgmt-resourcegraph>=8.0.0
 azure-mgmt-subscription>=3.1.1
 azure-cosmos>=4.7.0
 azure-storage-blob>=12.19.0
+requests>=2.31.0

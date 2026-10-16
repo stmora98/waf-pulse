@@ -1,0 +1,297 @@
+"""Right-sizing from Azure Monitor metrics (Reader is enough).
+
+Resources are listed with Resource Graph and their last 30 days are read with the Azure Monitor metrics batch
+API: up to 50 resources per call, grouped by subscription, region and resource type. Every measured resource is
+classified as idle, underutilized or saturated, and the classification feeds the Cost and Performance pillars.
+"""
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+
+import requests
+
+from . import graph
+from .findings import make_finding
+
+BATCH_SIZE = 50
+LOOKBACK_DAYS = 30
+MAX_RESOURCES = 5000
+REQUEST_TIMEOUT = 60
+MAX_ATTEMPTS = 5
+SCOPE = "https://metrics.monitor.azure.com/.default"
+API_VERSION = "2023-10-01"
+WORKERS = 4
+
+TARGETS = {
+    "vm": {
+        "namespace": "Microsoft.Compute/virtualMachines",
+        "metrics": "Percentage CPU",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| where tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/running'
+| project id, name, subscriptionId, location, detail = tostring(properties.hardwareProfile.vmSize)
+""",
+    },
+    "sql_dtu": {
+        "namespace": "Microsoft.Sql/servers/databases",
+        "metrics": "dtu_consumption_percent",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.sql/servers/databases' and name != 'master'
+| where tostring(sku.tier) in~ ('Basic', 'Standard', 'Premium')
+| project id, name, subscriptionId, location, detail = strcat(tostring(sku.tier), ' ', tostring(sku.name))
+""",
+    },
+    "sql_vcore": {
+        "namespace": "Microsoft.Sql/servers/databases",
+        "metrics": "cpu_percent",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.sql/servers/databases' and name != 'master'
+| where tostring(sku.tier) !in~ ('Basic', 'Standard', 'Premium', 'DataWarehouse', '')
+| project id, name, subscriptionId, location, detail = strcat(tostring(sku.tier), ' ', tostring(sku.name))
+""",
+    },
+    "plan": {
+        "namespace": "Microsoft.Web/serverfarms",
+        "metrics": "CpuPercentage,MemoryPercentage",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.web/serverfarms'
+| where tostring(sku.tier) !in~ ('Free', 'Shared', 'Dynamic', 'FlexConsumption', 'ElasticPremium', '')
+| project id, name, subscriptionId, location, detail = strcat(tostring(sku.name), ' x', tostring(sku.capacity))
+""",
+    },
+    "storage": {
+        "namespace": "Microsoft.Storage/storageAccounts",
+        "metrics": "Transactions",
+        "aggregation": "Total",
+        "query": """
+resources
+| where type =~ 'microsoft.storage/storageaccounts'
+| project id, name, subscriptionId, location, detail = tostring(sku.name)
+""",
+    },
+}
+
+# rule id -> (pillar, severity, title template, recommendation)
+RULES = {
+    "MET-VM-001": ("Cost Optimization", "high", "Virtual machine is idle: average CPU {value:.1f}% over {days} days",
+                   "Shut down or delete the virtual machine, or move the workload to a much smaller size."),
+    "MET-VM-002": ("Cost Optimization", "medium", "Virtual machine is underutilized: average CPU {value:.1f}% over {days} days",
+                   "Resize the virtual machine to a smaller size."),
+    "MET-VM-003": ("Performance Efficiency", "high", "Virtual machine is saturated: average CPU {value:.1f}% over {days} days",
+                   "Resize to a larger size or scale out the workload."),
+    "MET-SQL-001": ("Cost Optimization", "medium", "SQL database is oversized: average utilization {value:.1f}% over {days} days",
+                    "Move the database to a smaller service objective."),
+    "MET-SQL-002": ("Performance Efficiency", "high", "SQL database is saturated: average utilization {value:.1f}% over {days} days",
+                    "Move the database to a larger service objective."),
+    "MET-APP-001": ("Cost Optimization", "medium", "App Service plan is underutilized: average CPU {value:.1f}% over {days} days",
+                    "Move to a smaller plan or consolidate apps onto fewer plans."),
+    "MET-APP-002": ("Performance Efficiency", "high", "App Service plan is saturated: CPU {value:.1f}% over {days} days",
+                    "Scale up or out, or move busy apps to their own plan."),
+    "MET-STG-001": ("Cost Optimization", "low", "Storage account had no transactions in {days} days",
+                    "Delete the storage account if it is no longer used."),
+}
+APPLICABLE = {
+    "vm": ["MET-VM-001", "MET-VM-002", "MET-VM-003"],
+    "sql_dtu": ["MET-SQL-001", "MET-SQL-002"],
+    "sql_vcore": ["MET-SQL-001", "MET-SQL-002"],
+    "plan": ["MET-APP-001", "MET-APP-002"],
+    "storage": ["MET-STG-001"],
+}
+SQL_OVERSIZED, SQL_SATURATED = 10, 80
+VM_IDLE, VM_UNDER, VM_SATURATED = 5, 15, 80
+PLAN_UNDER, PLAN_SATURATED_CPU, PLAN_SATURATED_MEMORY = 20, 80, 85
+
+_sleep = time.sleep
+
+
+def summarize(points, field):
+    """Mean of the daily `average`, max of the daily `maximum` or the sum of the daily `total`. None without data."""
+    values = [p[field] for p in points if p.get(field) is not None]
+    if not values:
+        return None
+    if field == "average":
+        return sum(values) / len(values)
+    return sum(values) if field == "total" else max(values)
+
+
+def parse_batch(body):
+    """{resourceid (lower): {metric name: points}} from a metrics:getBatch response."""
+    result = {}
+    for item in (body or {}).get("values", []):
+        metrics = {}
+        for metric in item.get("value", []):
+            series = (metric.get("timeseries") or [{}])[0].get("data", [])
+            metrics[metric.get("name", {}).get("value", "")] = series
+        result[str(item.get("resourceid", "")).lower()] = metrics
+    return result
+
+
+def classify(kind, metrics):
+    """Returns (rule id, value) for a measured resource, or (None, value) when it is healthy or has no data."""
+    if kind == "vm":
+        value = summarize(metrics.get("Percentage CPU", []), "average")
+        if value is None:
+            return None, None
+        if value < VM_IDLE:
+            return "MET-VM-001", value
+        if value < VM_UNDER:
+            return "MET-VM-002", value
+        return ("MET-VM-003", value) if value >= VM_SATURATED else (None, value)
+    if kind in ("sql_dtu", "sql_vcore"):
+        name = "dtu_consumption_percent" if kind == "sql_dtu" else "cpu_percent"
+        value = summarize(metrics.get(name, []), "average")
+        if value is None:
+            return None, None
+        if value < SQL_OVERSIZED:
+            return "MET-SQL-001", value
+        return ("MET-SQL-002", value) if value >= SQL_SATURATED else (None, value)
+    if kind == "plan":
+        cpu = summarize(metrics.get("CpuPercentage", []), "average")
+        memory = summarize(metrics.get("MemoryPercentage", []), "average")
+        if cpu is None:
+            return None, None
+        if cpu >= PLAN_SATURATED_CPU:
+            return "MET-APP-002", cpu
+        if memory is not None and memory >= PLAN_SATURATED_MEMORY:
+            return "MET-APP-002", memory
+        return ("MET-APP-001", cpu) if cpu < PLAN_UNDER else (None, cpu)
+    if kind == "storage":
+        points = metrics.get("Transactions", [])
+        if not points:
+            return None, None
+        total = summarize(points, "total")
+        return ("MET-STG-001", total or 0) if (total or 0) == 0 else (None, total)
+    return None, None
+
+
+def evaluate(run_id, resources, measurements):
+    """resources: {kind: [ARG rows]}; measurements: {resourceid (lower): {metric: points}}.
+    Returns (findings, stats, dataset)."""
+    findings, counts, measured_totals = [], {}, {}
+    top = {"idle": [], "saturated": []}
+    for kind, rows in resources.items():
+        for row in rows:
+            metrics = measurements.get(str(row["id"]).lower())
+            if metrics is None:
+                continue
+            rule, value = classify(kind, metrics)
+            if value is None:
+                continue
+            sub = str(row.get("subscriptionId", "")).lower()
+            measured_totals[(kind, sub)] = measured_totals.get((kind, sub), 0) + 1
+            if rule is None:
+                continue
+            pillar, severity, title, recommendation = RULES[rule]
+            counts[(rule, kind, sub)] = counts.get((rule, kind, sub), 0) + 1
+            if len(findings) < 3000:
+                findings.append(
+                    make_finding(
+                        run_id, rule_id=rule, source="metrics", pillar=pillar, severity=severity,
+                        title=title.format(value=value, days=LOOKBACK_DAYS), recommendation=recommendation,
+                        resource_id=row["id"], resource_name=row.get("name", ""), subscription_id=sub,
+                    )
+                )
+            entry = {"name": row.get("name", ""), "detail": row.get("detail", ""), "rule": rule, "value": round(value, 1)}
+            bucket = "saturated" if pillar == "Performance Efficiency" else "idle"
+            if len(top[bucket]) < 10:
+                top[bucket].append(entry)
+
+    stats = []
+    for (kind, sub), measured in measured_totals.items():
+        for rule in APPLICABLE[kind]:
+            pillar, severity = RULES[rule][0], RULES[rule][1]
+            affected = sum(count for (r, k, s), count in counts.items() if r == rule and k == kind and s == sub)
+            stats.append({"ruleId": rule, "source": "metrics", "pillar": pillar, "severity": severity,
+                          "subscriptionId": sub, "affected": affected, "applicable": measured})
+    # sql_dtu and sql_vcore share rules: merge their rows so each rule has one row per subscription.
+    merged = {}
+    for item in stats:
+        key = (item["ruleId"], item["subscriptionId"])
+        if key in merged:
+            merged[key]["affected"] += item["affected"]
+            merged[key]["applicable"] += item["applicable"]
+        else:
+            merged[key] = dict(item)
+    dataset = {
+        "lookbackDays": LOOKBACK_DAYS,
+        "measured": {kind: sum(n for (k, _), n in measured_totals.items() if k == kind) for kind in resources},
+        "listed": {kind: len(rows) for kind, rows in resources.items()},
+        "topUnderutilized": top["idle"],
+        "topSaturated": top["saturated"],
+    }
+    return findings, list(merged.values()), dataset
+
+
+def _post(url, params, token, resource_ids):
+    for attempt in range(MAX_ATTEMPTS):
+        response = requests.post(url, params=params, headers={"Authorization": f"Bearer {token}"},
+                                 json={"resourceids": resource_ids}, timeout=REQUEST_TIMEOUT)
+        if response.status_code == 429 and attempt < MAX_ATTEMPTS - 1:
+            _sleep(min(float(response.headers.get("Retry-After", 5)), 60))
+            continue
+        response.raise_for_status()
+        return response.json()
+
+
+def fetch_batch(credential, kind, subscription, region, resource_ids, now=None):
+    target = TARGETS[kind]
+    end = now or datetime.now(timezone.utc)
+    start = end - timedelta(days=LOOKBACK_DAYS)
+    params = {
+        "api-version": API_VERSION, "metricnamespace": target["namespace"], "metricnames": target["metrics"],
+        "aggregation": target["aggregation"], "interval": "P1D",
+        "starttime": start.strftime("%Y-%m-%dT%H:%M:%SZ"), "endtime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    token = credential.get_token(SCOPE).token
+    url = f"https://{region}.metrics.monitor.azure.com/subscriptions/{subscription}/metrics:getBatch"
+    return parse_batch(_post(url, params, token, resource_ids))
+
+
+def plan_requests(resources):
+    """One request per (kind, subscription, region) chunk of at most BATCH_SIZE resources."""
+    groups = {}
+    for kind, rows in resources.items():
+        for row in rows:
+            key = (kind, str(row["subscriptionId"]).lower(), str(row["location"]).lower())
+            groups.setdefault(key, []).append(row["id"])
+    return [
+        (kind, sub, region, ids[i:i + BATCH_SIZE])
+        for (kind, sub, region), ids in groups.items()
+        for i in range(0, len(ids), BATCH_SIZE)
+    ]
+
+
+def collect(credential, run_id, subscription_ids):
+    resources, errors = {}, []
+    for kind, target in TARGETS.items():
+        rows = []
+        try:
+            for chunk in graph.chunks(subscription_ids):
+                rows.extend(graph.query(credential, chunk, target["query"], max_rows=MAX_RESOURCES))
+        except Exception as exc:
+            errors.append({"ruleId": f"metrics-{kind}", "error": str(exc).splitlines()[0][:200]})
+        resources[kind] = rows[:MAX_RESOURCES]
+
+    def run(request):
+        kind, sub, region, ids = request
+        try:
+            return fetch_batch(credential, kind, sub, region, ids), None
+        except Exception as exc:
+            return {}, {"ruleId": f"metrics-{kind}-{region}", "error": str(exc).splitlines()[0][:200]}
+
+    measurements = {}
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for result, error in pool.map(run, plan_requests(resources)):
+            measurements.update(result)
+            if error:
+                errors.append(error)
+    findings, stats, dataset = evaluate(run_id, resources, measurements)
+    return findings, stats, dataset, errors
