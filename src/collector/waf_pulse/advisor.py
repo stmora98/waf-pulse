@@ -19,9 +19,12 @@ advisorresources
          solution = tostring(properties.shortDescription.solution),
          resourceId = tostring(properties.resourceMetadata.resourceId),
          annualSavings = todouble(properties.extendedProperties.annualSavingsAmount),
-         currency = tostring(properties.extendedProperties.savingsCurrency)
+         currency = tostring(properties.extendedProperties.savingsCurrency),
+         term = tostring(properties.extendedProperties.term),
+         lookbackDays = toint(properties.extendedProperties.lookbackPeriod),
+         commitmentType = tostring(properties.extendedProperties.reservedResourceType)
 | project id, subscriptionId, category, impact, recommendationType, impactedType, impactedName,
-          problem, solution, resourceId, annualSavings, currency
+          problem, solution, resourceId, annualSavings, currency, term, lookbackDays, commitmentType
 """
 
 CATEGORY_TO_PILLAR = {

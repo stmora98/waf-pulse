@@ -168,6 +168,11 @@ def test_commitments_keep_the_longest_lookback_per_term_and_stay_out_of_usage_sa
     assert next(s for s in stats if s["ruleId"] == "ADV-ri")["affected"] == 2
 
 
+def test_the_advisor_query_asks_for_the_commitment_fields():
+    projection = advisor.ADVISOR_QUERY.split("| project")[-1]
+    assert all(field in projection for field in ("term", "lookbackDays", "commitmentType"))
+
+
 def test_commitment_rows_without_savings_are_ignored():
     _, _, dataset = advisor.evaluate("run1", [commitment_row("P1Y", 30, None)])
     assert dataset["commitments"] == []
