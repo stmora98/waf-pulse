@@ -205,6 +205,9 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
     measured = _dataset(datasets, "metrics")
     if measured:
         summary["metrics"] = measured[0]
+    finance = _dataset(datasets, "finops")
+    if finance:
+        summary["finops"] = finance[0]
     savings = _advisor_savings(datasets)
     if savings:
         summary["advisorSavings"] = savings

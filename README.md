@@ -77,7 +77,7 @@ Each one unlocks extra findings. Skipping any of them is fine.
 
 | Permission | How to grant | Unlocks |
 |---|---|---|
-| `Cost Management Reader` | `az role assignment create --assignee <appId> --role "Cost Management Reader" --scope /providers/Microsoft.Management/managementGroups/<tenant-id>` | Spend, budgets, savings recommendations |
+| `Cost Management Reader` | `az role assignment create --assignee <appId> --role "Cost Management Reader" --scope /providers/Microsoft.Management/managementGroups/<tenant-id>` | The Cost page: monthly spend, forecast and budgets |
 | `Security Reader` | Same command with `--role "Security Reader"` | Defender for Cloud posture |
 | Microsoft Graph application permissions `Application.Read.All`, `User.Read.All`, `SecurityIncident.Read.All`, `SecurityAlert.Read.All` | App registration > API permissions > Add > Microsoft Graph > Application permissions, then **Grant admin consent** | Expiring app credentials, guest users, Defender incidents |
 
@@ -132,6 +132,7 @@ Every source is read-only and needs only the **Reader** role. Everything runs te
 | **Azure Advisor** | Every recommendation in the five categories, grouped by recommendation type, with the annual savings of the cost recommendations. |
 | **Defender for Cloud** | Unhealthy security recommendations and, where Defender provides it, the Secure Score and its controls. |
 | **Azure Monitor metrics** | Right-sizing from the last 30 days: idle, underutilized and saturated virtual machines, SQL databases and App Service plans, and storage accounts without transactions. Read with the metrics batch API, 50 resources per call. |
+| **Cost Management** | Spend per month and per service for the last six months, month over month change, a simple forecast, budgets and their consumption. Needs the Cost Management Reader role; without it the Cost page explains what is missing and the rest keeps working. Checks: no budget, exhausted or forecast-to-exceed budget, and spend spikes. |
 | **Governance** | Management group hierarchy, Azure Policy (assignments, compliance, exemptions), role assignments and owners, resource locks and Defender plans. Shown on the Governance page, with checks for too many owners, missing locks, non-compliance, risky exemptions and disabled Defender plans. |
 
 Each finding keeps its source, and the dashboard can filter by pillar, severity and source.
@@ -147,7 +148,7 @@ Each check is scored against the resources it actually evaluates, so one finding
 
 ### Not collected yet
 
-Cost Management (spend, budgets, reservations), diagnostic settings coverage, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
+Reservation utilization, diagnostic settings coverage, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
 
 ### Updating the checklists
 

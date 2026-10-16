@@ -18,6 +18,7 @@
         <a href="{{ url_for('history_page') }}" {% if request.endpoint == 'history_page' %}class="active" aria-current="page"{% endif %}>History</a>
         <a href="{{ url_for('compare_page') }}" {% if request.endpoint == 'compare_page' %}class="active" aria-current="page"{% endif %}>Compare</a>
         <a href="{{ url_for('governance_page') }}" {% if request.endpoint == 'governance_page' %}class="active" aria-current="page"{% endif %}>Governance</a>
+        <a href="{{ url_for('cost_page') }}" {% if request.endpoint == 'cost_page' %}class="active" aria-current="page"{% endif %}>Cost</a>
       </nav>
       {% if user %}<span class="muted">{{ user }}</span>{% endif %}
       <button id="refresh" type="button">Refresh now</button>

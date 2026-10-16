@@ -6,6 +6,7 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from flask import Flask, abort, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
+import cost_view
 import data
 import governance_view
 import history
@@ -94,6 +95,21 @@ def governance_page():
             governance.get("managementGroups", []), governance.get("subscriptions", []))
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
                            summary=summary)
+
+
+@app.get("/cost")
+def cost_page():
+    try:
+        latest = data.latest_run()
+        completed = latest if latest and latest.get("status") == "completed" else data.latest_run(True)
+        summary = data.summary(completed["id"]) if completed else None
+    except Exception:
+        logging.exception("Could not load cost data")
+        return render_template("cost.html", error="The data store is not reachable right now.", finops=None,
+                               chart=None, summary=None), 503
+    finops = (summary or {}).get("finops")
+    return render_template("cost.html", error=None, finops=finops, summary=summary,
+                           chart=cost_view.chart(finops["months"]) if finops and finops.get("months") else None)
 
 
 @app.get("/api/summary")

@@ -15,6 +15,7 @@ def test_functions_are_registered():
         "act_defender",
         "act_governance",
         "act_metrics",
+        "act_finops",
         "act_finalize",
         "act_fail",
     } <= names
