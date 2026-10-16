@@ -1,6 +1,7 @@
 """WAF Pulse dashboard."""
 import logging
 import re
+from datetime import datetime, timezone
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from flask import Flask, abort, jsonify, render_template, request
@@ -12,6 +13,18 @@ import governance_view
 import history
 
 app = Flask(__name__)
+
+
+@app.template_filter("when")
+def when(value):
+    """A readable UTC timestamp; anything that is not an ISO date is shown as it is."""
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 REFRESH_HEADER = "X-WAF-Pulse"
 

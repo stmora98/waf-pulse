@@ -237,3 +237,7 @@ Inspired by the [Azure Optimization Engine](https://learn.microsoft.com/cloud-co
 ## License
 
 [MIT](LICENSE)
+
+## Design
+
+The dashboard follows the motion and polish guidelines from [emilkowalski/skills](https://github.com/emilkowalski/skills) (MIT): short ease-out transitions on transform, opacity and color only, press feedback on every pressable element, hover effects only on devices with a real pointer, a short staggered entrance, light and dark themes that follow the system, and full respect for reduced motion. There are no inline styles or scripts, so the content security policy stays strict.

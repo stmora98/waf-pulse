@@ -9,7 +9,7 @@
       </section>
     {% else %}
       <section class="meta">
-        <span>Last completed run: <strong>{{ summary.completedUtc }}</strong></span>
+        <span>Last completed run: <strong>{{ summary.completedUtc | when }}</strong></span>
         <span>Subscriptions: <strong>{{ summary.subscriptionCount }}</strong></span>
         <span>Resources: <strong>{{ summary.resourceCount }}</strong></span>
         <span>Findings: <strong>{{ summary.findingCount }}</strong></span>
