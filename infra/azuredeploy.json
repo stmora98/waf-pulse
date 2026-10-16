@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "17755820304195977422"
+      "templateHash": "1996008494411930161"
     }
   },
   "parameters": {
@@ -111,11 +111,22 @@
         "description": "App Service plan SKU for the dashboard."
       }
     },
-    "dashboardAuthClientId": {
+    "dashboardSignIn": {
+      "type": "string",
+      "defaultValue": "entra",
+      "allowedValues": [
+        "entra",
+        "none"
+      ],
+      "metadata": {
+        "description": "Require Microsoft Entra sign-in for the dashboard. It reuses the collector app registration, so add the redirect URI from the outputs after deployment."
+      }
+    },
+    "dashboardAllowedUserIds": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional Microsoft Entra app registration client ID used by App Service authentication. Empty skips authentication configuration."
+        "description": "Object IDs of the users or service principals allowed to open the dashboard, comma separated. Required when sign-in is on: without it every user of the tenant could sign in."
       }
     },
     "webPackageUrl": {
@@ -141,6 +152,8 @@
     }
   },
   "variables": {
+    "signInEnabled": "[equals(parameters('dashboardSignIn'), 'entra')]",
+    "allowedUserIds": "[filter(map(split(parameters('dashboardAllowedUserIds'), ','), lambda('id', trim(lambdaVariables('id')))), lambda('id', not(empty(lambdaVariables('id')))))]",
     "suffix": "[take(uniqueString(resourceGroup().id), 6)]",
     "baseName": "[format('{0}-{1}', parameters('toolName'), variables('suffix'))]",
     "tags": {
@@ -1111,8 +1124,20 @@
           "webPackageUrl": {
             "value": "[parameters('webPackageUrl')]"
           },
-          "dashboardAuthClientId": {
-            "value": "[parameters('dashboardAuthClientId')]"
+          "signInEnabled": {
+            "value": "[variables('signInEnabled')]"
+          },
+          "authClientId": {
+            "value": "[parameters('collectorClientId')]"
+          },
+          "authTenantId": {
+            "value": "[parameters('collectorTenantId')]"
+          },
+          "authSecretUri": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.collectorSecretUri.value]"
+          },
+          "allowedUserIds": {
+            "value": "[variables('allowedUserIds')]"
           },
           "workspaceId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.workspaceId.value]"
@@ -1125,7 +1150,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "14628770010075289847"
+              "templateHash": "13058673629101412809"
             }
           },
           "parameters": {
@@ -1165,8 +1190,20 @@
             "webPackageUrl": {
               "type": "string"
             },
-            "dashboardAuthClientId": {
+            "signInEnabled": {
+              "type": "bool"
+            },
+            "authClientId": {
               "type": "string"
+            },
+            "authTenantId": {
+              "type": "string"
+            },
+            "authSecretUri": {
+              "type": "string"
+            },
+            "allowedUserIds": {
+              "type": "array"
             },
             "workspaceId": {
               "type": "string"
@@ -1198,44 +1235,7 @@
                   "http20Enabled": true,
                   "healthCheckPath": "/api/health",
                   "appCommandLine": "PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app",
-                  "appSettings": [
-                    {
-                      "name": "WEBSITE_RUN_FROM_PACKAGE",
-                      "value": "[parameters('webPackageUrl')]"
-                    },
-                    {
-                      "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
-                      "value": "false"
-                    },
-                    {
-                      "name": "MANAGED_IDENTITY_CLIENT_ID",
-                      "value": "[parameters('managedIdentityClientId')]"
-                    },
-                    {
-                      "name": "COSMOS_ENDPOINT",
-                      "value": "[parameters('cosmosEndpoint')]"
-                    },
-                    {
-                      "name": "COSMOS_DATABASE",
-                      "value": "[parameters('cosmosDatabase')]"
-                    },
-                    {
-                      "name": "STORAGE_ACCOUNT_URL",
-                      "value": "[parameters('storageAccountUrl')]"
-                    },
-                    {
-                      "name": "STORAGE_QUEUE_URL",
-                      "value": "[parameters('storageQueueEndpoint')]"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "WEBSITE_HEALTHCHECK_MAXPINGFAILURES",
-                      "value": "10"
-                    }
-                  ]
+                  "appSettings": "[concat(createArray(createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', parameters('webPackageUrl')), createObject('name', 'SCM_DO_BUILD_DURING_DEPLOYMENT', 'value', 'false'), createObject('name', 'MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('managedIdentityClientId')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabase')), createObject('name', 'STORAGE_ACCOUNT_URL', 'value', parameters('storageAccountUrl')), createObject('name', 'STORAGE_QUEUE_URL', 'value', parameters('storageQueueEndpoint')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES', 'value', '10')), if(parameters('signInEnabled'), createArray(createObject('name', 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('authSecretUri')))), createArray()))]"
                 }
               }
             },
@@ -1262,7 +1262,7 @@
               ]
             },
             {
-              "condition": "[not(empty(parameters('dashboardAuthClientId')))]",
+              "condition": "[parameters('signInEnabled')]",
               "type": "Microsoft.Web/sites/config",
               "apiVersion": "2023-12-01",
               "name": "[format('{0}/{1}', parameters('appName'), 'authsettingsV2')]",
@@ -1273,7 +1273,8 @@
                 },
                 "globalValidation": {
                   "requireAuthentication": true,
-                  "unauthenticatedClientAction": "Return401",
+                  "unauthenticatedClientAction": "RedirectToLoginPage",
+                  "redirectToProvider": "azureactivedirectory",
                   "excludedPaths": [
                     "/api/health"
                   ]
@@ -1282,21 +1283,24 @@
                   "azureActiveDirectory": {
                     "enabled": true,
                     "registration": {
-                      "clientId": "[parameters('dashboardAuthClientId')]",
-                      "openIdIssuer": "[format('{0}{1}/v2.0', environment().authentication.loginEndpoint, subscription().tenantId)]"
+                      "clientId": "[parameters('authClientId')]",
+                      "clientSecretSettingName": "MICROSOFT_PROVIDER_AUTHENTICATION_SECRET",
+                      "openIdIssuer": "[format('{0}{1}/v2.0', environment().authentication.loginEndpoint, parameters('authTenantId'))]"
                     },
                     "validation": {
                       "allowedAudiences": [
-                        "[parameters('dashboardAuthClientId')]",
-                        "[format('api://{0}', parameters('dashboardAuthClientId'))]"
-                      ]
+                        "[parameters('authClientId')]"
+                      ],
+                      "defaultAuthorizationPolicy": {
+                        "allowedPrincipals": {
+                          "identities": "[parameters('allowedUserIds')]"
+                        }
+                      }
                     }
                   }
                 },
                 "login": {
-                  "tokenStore": {
-                    "enabled": true
-                  }
+                  "preserveUrlFragmentsForLogins": true
                 }
               },
               "dependsOn": [
@@ -1346,6 +1350,7 @@
         "[resourceId('Microsoft.Resources/deployments', 'app-insights')]",
         "[resourceId('Microsoft.Resources/deployments', 'app-service-plan')]",
         "[resourceId('Microsoft.Resources/deployments', 'cosmos-db')]",
+        "[resourceId('Microsoft.Resources/deployments', 'key-vault')]",
         "[resourceId('Microsoft.Resources/deployments', 'log-analytics')]",
         "[resourceId('Microsoft.Resources/deployments', 'managed-identity')]",
         "[resourceId('Microsoft.Resources/deployments', 'role-assignments')]",
@@ -1797,6 +1802,14 @@
     "dashboardUrl": {
       "type": "string",
       "value": "[format('https://{0}', reference(resourceId('Microsoft.Resources/deployments', 'dashboard-app'), '2025-04-01').outputs.defaultHostname.value)]"
+    },
+    "signInRedirectUri": {
+      "type": "string",
+      "value": "[if(variables('signInEnabled'), format('https://{0}/.auth/login/aad/callback', reference(resourceId('Microsoft.Resources/deployments', 'dashboard-app'), '2025-04-01').outputs.defaultHostname.value), '')]"
+    },
+    "signInSetupCommand": {
+      "type": "string",
+      "value": "[if(variables('signInEnabled'), format('az ad app update --id {0} --web-redirect-uris https://{1}/.auth/login/aad/callback --enable-id-token-issuance true', parameters('collectorClientId'), reference(resourceId('Microsoft.Resources/deployments', 'dashboard-app'), '2025-04-01').outputs.defaultHostname.value), '')]"
     },
     "functionAppName": {
       "type": "string",

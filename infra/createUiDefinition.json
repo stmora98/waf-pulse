@@ -166,27 +166,47 @@
             }
           },
           {
-            "name": "authInfo",
-            "type": "Microsoft.Common.InfoBox",
-            "visible": true,
-            "options": {
-              "icon": "Warning",
-              "text": "The dashboard has no sign-in until you enable it. After deployment, open the App Service > Authentication and add the Microsoft identity provider, or provide an app registration client ID below."
+            "name": "dashboardSignIn",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Dashboard sign-in",
+            "toolTip": "Require Microsoft Entra sign-in. It reuses the service principal above as the sign-in app, so after deployment you add one redirect URI to it (shown in the deployment outputs).",
+            "defaultValue": "Microsoft Entra (recommended)",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                {
+                  "label": "Microsoft Entra (recommended)",
+                  "value": "entra"
+                },
+                {
+                  "label": "None (anyone with the URL sees the data)",
+                  "value": "none"
+                }
+              ]
             }
           },
           {
-            "name": "dashboardAuthClientId",
+            "name": "signInInfo",
+            "type": "Microsoft.Common.InfoBox",
+            "visible": "[equals(steps('dashboard').dashboardSignIn, 'entra')]",
+            "options": {
+              "icon": "Info",
+              "text": "Only the users you list can open the dashboard. Find your own object ID with: az ad signed-in-user show --query id -o tsv"
+            }
+          },
+          {
+            "name": "dashboardAllowedUserIds",
             "type": "Microsoft.Common.TextBox",
-            "label": "Dashboard sign-in app registration client ID (optional)",
-            "toolTip": "Client ID of an app registration used for Microsoft Entra sign-in. If empty, configure authentication after deployment.",
+            "label": "Allowed users (object IDs, comma separated)",
+            "toolTip": "Object IDs of the users who can open the dashboard.",
+            "visible": "[equals(steps('dashboard').dashboardSignIn, 'entra')]",
             "defaultValue": "",
             "constraints": {
-              "required": false,
-              "regex": "^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$",
-              "validationMessage": "Enter a valid GUID or leave empty."
+              "required": "[equals(steps('dashboard').dashboardSignIn, 'entra')]",
+              "regex": "^\\s*[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}(\\s*,\\s*[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})*\\s*$|^$",
+              "validationMessage": "Enter one or more object IDs (GUIDs) separated by commas."
             }
-          }
-        ]
+          }        ]
       },
       {
         "name": "advanced",
@@ -229,7 +249,8 @@
       "refreshMode": "[steps('refresh').refreshMode]",
       "nearRealTimeIntervalMinutes": "[steps('refresh').nearRealTimeIntervalMinutes]",
       "appServiceSku": "[steps('dashboard').appServiceSku]",
-      "dashboardAuthClientId": "[steps('dashboard').dashboardAuthClientId]",
+      "dashboardSignIn": "[steps('dashboard').dashboardSignIn]",
+      "dashboardAllowedUserIds": "[steps('dashboard').dashboardAllowedUserIds]",
       "webPackageUrl": "[steps('advanced').webPackageUrl]",
       "collectorPackageUrl": "[steps('advanced').collectorPackageUrl]"
     }

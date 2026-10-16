@@ -54,8 +54,15 @@ param subscriptionFilter string = ''
 ])
 param appServiceSku string = 'B1'
 
-@description('Optional Microsoft Entra app registration client ID used by App Service authentication. Empty skips authentication configuration.')
-param dashboardAuthClientId string = ''
+@description('Require Microsoft Entra sign-in for the dashboard. It reuses the collector app registration, so add the redirect URI from the outputs after deployment.')
+@allowed([
+  'entra'
+  'none'
+])
+param dashboardSignIn string = 'entra'
+
+@description('Object IDs of the users or service principals allowed to open the dashboard, comma separated. Required when sign-in is on: without it every user of the tenant could sign in.')
+param dashboardAllowedUserIds string = ''
 
 @description('Dashboard package URL (run from package).')
 param webPackageUrl string = 'https://github.com/stmora98/waf-pulse/releases/latest/download/dashboard.zip'
@@ -66,6 +73,8 @@ param collectorPackageUrl string = 'https://github.com/stmora98/waf-pulse/releas
 @description('Optional object ID of a user who also needs to manage Key Vault secrets. Empty by default.')
 param deployerObjectId string = ''
 
+var signInEnabled = dashboardSignIn == 'entra'
+var allowedUserIds = filter(map(split(dashboardAllowedUserIds, ','), id => trim(id)), id => !empty(id))
 var suffix = take(uniqueString(resourceGroup().id), 6)
 var baseName = '${toolName}-${suffix}'
 var tags = {
@@ -171,7 +180,11 @@ module dashboardApp './modules/app-service.bicep' = {
     storageQueueEndpoint: storage.outputs.queueEndpoint
     appInsightsConnectionString: appInsights.outputs.connectionString
     webPackageUrl: webPackageUrl
-    dashboardAuthClientId: dashboardAuthClientId
+    signInEnabled: signInEnabled
+    authClientId: collectorClientId
+    authTenantId: collectorTenantId
+    authSecretUri: keyVault.outputs.collectorSecretUri
+    allowedUserIds: allowedUserIds
     workspaceId: logAnalytics.outputs.workspaceId
   }
   dependsOn: [
@@ -222,6 +235,8 @@ module collectorDeployment './modules/deployment-script.bicep' = {
 }
 
 output dashboardUrl string = 'https://${dashboardApp.outputs.defaultHostname}'
+output signInRedirectUri string = signInEnabled ? 'https://${dashboardApp.outputs.defaultHostname}/.auth/login/aad/callback' : ''
+output signInSetupCommand string = signInEnabled ? 'az ad app update --id ${collectorClientId} --web-redirect-uris https://${dashboardApp.outputs.defaultHostname}/.auth/login/aad/callback --enable-id-token-issuance true' : ''
 output functionAppName string = collectorFunction.outputs.functionName
 output cosmosEndpoint string = cosmosDb.outputs.endpoint
 output storageAccountName string = storage.outputs.storageAccountName

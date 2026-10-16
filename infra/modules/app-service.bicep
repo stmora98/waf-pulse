@@ -10,7 +10,11 @@ param storageAccountUrl string
 param storageQueueEndpoint string
 param appInsightsConnectionString string
 param webPackageUrl string
-param dashboardAuthClientId string
+param signInEnabled bool
+param authClientId string
+param authTenantId string
+param authSecretUri string
+param allowedUserIds array
 param workspaceId string
 
 resource appService 'Microsoft.Web/sites@2023-12-01' = {
@@ -37,7 +41,7 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
       healthCheckPath: '/api/health'
       // Dependencies are vendored in the package, so the app starts without a build step.
       appCommandLine: 'PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app'
-      appSettings: [
+      appSettings: concat([
         {
           name: 'WEBSITE_RUN_FROM_PACKAGE'
           value: webPackageUrl
@@ -74,7 +78,12 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
           name: 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES'
           value: '10'
         }
-      ]
+      ], signInEnabled ? [
+        {
+          name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          value: '@Microsoft.KeyVault(SecretUri=${authSecretUri})'
+        }
+      ] : [])
     }
   }
 }
@@ -95,8 +104,9 @@ resource ftpAuth 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12
   }
 }
 
-// App Service authentication with Microsoft Entra ID. The health probe path stays anonymous.
-resource easyAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(dashboardAuthClientId)) {
+// Sign-in with Microsoft Entra ID through App Service authentication. It reuses the app registration of the
+// collector, so the customer only adds the redirect URI after deployment. Only the listed users get in.
+resource easyAuth 'Microsoft.Web/sites/config@2023-12-01' = if (signInEnabled) {
   parent: appService
   name: 'authsettingsV2'
   properties: {
@@ -106,7 +116,8 @@ resource easyAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(dashboard
     }
     globalValidation: {
       requireAuthentication: true
-      unauthenticatedClientAction: 'Return401'
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+      redirectToProvider: 'azureactivedirectory'
       excludedPaths: [
         '/api/health'
       ]
@@ -115,25 +126,27 @@ resource easyAuth 'Microsoft.Web/sites/config@2023-12-01' = if (!empty(dashboard
       azureActiveDirectory: {
         enabled: true
         registration: {
-          clientId: dashboardAuthClientId
-          openIdIssuer: '${environment().authentication.loginEndpoint}${subscription().tenantId}/v2.0'
+          clientId: authClientId
+          clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          openIdIssuer: '${environment().authentication.loginEndpoint}${authTenantId}/v2.0'
         }
         validation: {
           allowedAudiences: [
-            dashboardAuthClientId
-            'api://${dashboardAuthClientId}'
+            authClientId
           ]
+          defaultAuthorizationPolicy: {
+            allowedPrincipals: {
+              identities: allowedUserIds
+            }
+          }
         }
       }
     }
     login: {
-      tokenStore: {
-        enabled: true
-      }
+      preserveUrlFragmentsForLogins: true
     }
   }
 }
-
 resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   scope: appService
   name: 'to-log-analytics'
