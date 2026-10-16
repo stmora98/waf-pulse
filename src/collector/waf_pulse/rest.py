@@ -9,12 +9,13 @@ TIMEOUT = 30
 _sleep = time.sleep
 
 
-def get(url, token, params=None):
+def get(url, token, params=None, headers=None):
     """Returns the final response. Only a persistent network failure raises."""
     for attempt in range(MAX_ATTEMPTS):
         last = attempt == MAX_ATTEMPTS - 1
         try:
-            response = requests.get(url, params=params, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
+            response = requests.get(url, params=params, headers={"Authorization": f"Bearer {token}", **(headers or {})},
+                                    timeout=TIMEOUT)
         except (requests.ConnectionError, requests.Timeout):
             if last:
                 raise

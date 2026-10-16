@@ -16,7 +16,8 @@ import azure.durable_functions as df
 import azure.functions as func
 
 from waf_pulse import (
-    advisor, checklists, collect, credentials, defender, diagnostics, finops, governance, graph, keyvault, metrics, store,
+    advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, metrics,
+    store,
 )
 
 app = df.DFApp()
@@ -81,6 +82,7 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_finops", scope))
             tasks.append(context.call_activity("act_diagnostics", scope))
             tasks.append(context.call_activity("act_keyvault", scope))
+            tasks.append(context.call_activity("act_entra", scope))
         yield context.task_all(tasks)
 
         summary = yield context.call_activity(
@@ -262,6 +264,19 @@ def act_keyvault(payload: dict):
         return {"key": "keyvault", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "keyvault", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_entra(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = entra.collect(credentials.collector_credential(), run_id)
+        store.save_findings(findings)
+        store.save_stats(run_id, "entra", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "entra", dataset)
+        return {"key": "entra", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "entra", exc)
 
 
 @app.activity_trigger(input_name="payload")
