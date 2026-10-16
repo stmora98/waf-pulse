@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 import azure.durable_functions as df
 import azure.functions as func
 
-from waf_pulse import advisor, checklists, collect, credentials, defender, finops, governance, graph, metrics, store
+from waf_pulse import (
+    advisor, checklists, collect, credentials, defender, diagnostics, finops, governance, graph, keyvault, metrics, store,
+)
 
 app = df.DFApp()
 
@@ -77,6 +79,8 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_governance", scope))
             tasks.append(context.call_activity("act_metrics", scope))
             tasks.append(context.call_activity("act_finops", scope))
+            tasks.append(context.call_activity("act_diagnostics", scope))
+            tasks.append(context.call_activity("act_keyvault", scope))
         yield context.task_all(tasks)
 
         summary = yield context.call_activity(
@@ -228,6 +232,36 @@ def act_finops(payload: dict):
         return {"key": "finops", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "finops", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_diagnostics(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = diagnostics.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"]
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "diagnostics", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "diagnostics", dataset)
+        return {"key": "diagnostics", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "diagnostics", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_keyvault(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = keyvault.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"]
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "keyvault", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "keyvault", dataset)
+        return {"key": "keyvault", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "keyvault", exc)
 
 
 @app.activity_trigger(input_name="payload")

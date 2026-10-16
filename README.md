@@ -79,6 +79,7 @@ Each one unlocks extra findings. Skipping any of them is fine.
 |---|---|---|
 | `Cost Management Reader` | `az role assignment create --assignee <appId> --role "Cost Management Reader" --scope /providers/Microsoft.Management/managementGroups/<tenant-id>` | The Cost page: monthly spend, forecast and budgets |
 | `Security Reader` | Same command with `--role "Security Reader"` | Defender for Cloud posture |
+| `Key Vault Reader` | Same command with `--role "Key Vault Reader"` and a subscription or management group scope. Vaults that use access policies need a list permission for secrets, keys and certificates, and a vault with a firewall must allow the collector | Expired and expiring secrets, keys and certificates. Only metadata is read, never a value |
 | Microsoft Graph application permissions `Application.Read.All`, `User.Read.All`, `SecurityIncident.Read.All`, `SecurityAlert.Read.All` | App registration > API permissions > Add > Microsoft Graph > Application permissions, then **Grant admin consent** | Expiring app credentials, guest users, Defender incidents |
 
 ### Secret expiry
@@ -133,6 +134,8 @@ Every source is read-only and needs only the **Reader** role. Everything runs te
 | **Defender for Cloud** | Unhealthy security recommendations and, where Defender provides it, the Secure Score and its controls. |
 | **Azure Monitor metrics** | Right-sizing from the last 30 days: idle, underutilized and saturated virtual machines, SQL databases and App Service plans, and storage accounts without transactions. Read with the metrics batch API, 50 resources per call. |
 | **Cost Management** | Follows the [FinOps hub](https://learn.microsoft.com/cloud-computing/finops/toolkit/hubs/finops-hubs-overview) approach using the Cost Management APIs (no hub required): **billed** and **effective (amortized)** cost per month and per service for six months, a 60-day daily series, daily **anomaly detection** (each day against the median of the previous 14 days, flagging the day the spend jumps), month over month change, a simple forecast, and budgets. It asks for the whole tenant first (management group scope) and falls back to one subscription at a time (3 API calls each, within a 7 minute budget; if some subscriptions do not fit, tenant totals are hidden instead of shown partially). Needs the Cost Management Reader role; without it the Cost page explains what is missing and the rest keeps working. Checks: no budget, exhausted or forecast-to-exceed budget, month over month growth and daily spend anomalies. |
+| **Diagnostic settings** | For the resource types where logs matter most (Key Vault, firewalls, application gateways, NSGs, App Service and Functions, AKS, Cosmos DB, SQL Managed Instance, messaging, API Management, Redis), whether a diagnostic setting sends logs or metrics anywhere. Read with the ARM diagnostic settings API, Reader is enough. Shown on the Governance page. |
+| **Key Vault expirations** | Secrets, keys and certificates that expired, expire within 30 days or have no expiration date. Needs the optional Key Vault Reader role; vaults that cannot be listed are counted on the Governance page, not treated as errors. |
 | **Governance** | Management group hierarchy, Azure Policy (assignments, compliance, exemptions), role assignments and owners, resource locks and Defender plans. Shown on the Governance page, with checks for too many owners, missing locks, non-compliance, risky exemptions and disabled Defender plans. |
 
 Each finding keeps its source, and the dashboard can filter by pillar, severity and source.
@@ -148,7 +151,7 @@ Each check is scored against the resources it actually evaluates, so one finding
 
 ### Not collected yet
 
-Reservation utilization, diagnostic settings coverage, Microsoft Graph (expiring app credentials, guest users), Defender XDR incidents and Key Vault secret expiry. They are planned and some need permissions beyond Reader.
+Reservation utilization, Microsoft Graph (expiring app credentials, guest users) and Defender XDR incidents. They are planned and some need permissions beyond Reader.
 
 ### Updating the checklists
 

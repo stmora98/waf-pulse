@@ -14,7 +14,7 @@ PILLARS = (
     "Performance Efficiency",
 )
 SEVERITIES = ("critical", "high", "medium", "low")
-SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops")
+SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops", "diagnostics", "keyvault")
 SOURCE_LABELS = {
     "builtin": "Built-in rules",
     "checklist": "Review checklists",
@@ -23,6 +23,8 @@ SOURCE_LABELS = {
     "governance": "Governance",
     "metrics": "Azure Monitor metrics",
     "finops": "Cost Management",
+    "diagnostics": "Diagnostic settings",
+    "keyvault": "Key Vault expirations",
 }
 TENANT_PARTITION = "tenant"
 QUEUE_NAME = "refresh-requests"

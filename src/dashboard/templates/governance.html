@@ -80,6 +80,43 @@
           {% endif %}
         </div>
       </section>
-      <p class="muted">Governance findings are listed on the <a href="{{ url_for('index', source='governance') }}">Overview</a>.</p>
+      {% if summary and (summary.diagnostics or summary.keyvault) %}
+        <section class="insights">
+          {% if summary.diagnostics %}
+            <div class="panel">
+              <h3>Diagnostic settings</h3>
+              {% if summary.diagnostics.checked %}
+                <p class="big">{{ summary.diagnostics.percent }}%</p>
+                <p class="muted">{{ summary.diagnostics.withLogs }} of {{ summary.diagnostics.checked }} resources send logs somewhere.</p>
+                <ul class="plain">
+                  {% for item in summary.diagnostics.byType %}{% if item.checked > item.withLogs %}<li>{{ item.label }} <span class="muted">· {{ item.checked - item.withLogs }} of {{ item.checked }} without</span></li>{% endif %}{% endfor %}
+                </ul>
+              {% else %}
+                <p class="muted">No resource of the supported types was found.</p>
+              {% endif %}
+              {% if summary.diagnostics.skipped.denied %}<p class="muted">{{ summary.diagnostics.skipped.denied }} resource(s) could not be read.</p>{% endif %}
+            </div>
+          {% endif %}
+          {% if summary.keyvault %}
+            <div class="panel">
+              <h3>Key Vault expirations</h3>
+              <p class="muted">{{ summary.keyvault.readable }} of {{ summary.keyvault.vaults }} vault(s) read, {{ summary.keyvault.objects }} secrets, keys and certificates.</p>
+              {% if summary.keyvault.denied %}
+                <p class="muted">{{ summary.keyvault.denied }} vault(s) could not be listed. Grant the Key Vault Reader role on them and allow the collector through their firewall.</p>
+              {% endif %}
+              {% if summary.keyvault.upcoming %}
+                <h4>Expired or expiring within 90 days</h4>
+                <ul class="plain">
+                  {% for item in summary.keyvault.upcoming %}
+                    <li>{{ item.vault }}/{{ item.name }} <span class="muted">· {{ item.kind }} · {% if item.days < 0 %}expired {{ item.expires }}{% else %}{{ item.expires }} (in {{ item.days }} days){% endif %}</span></li>
+                  {% endfor %}
+                </ul>
+              {% elif summary.keyvault.readable %}
+                <p class="muted">Nothing expires in the next 90 days.</p>
+              {% endif %}
+            </div>
+          {% endif %}
+        </section>
+      {% endif %}      <p class="muted">Governance findings are listed on the <a href="{{ url_for('index', source='governance') }}">Overview</a>.</p>
     {% endif %}
 {% endblock %}

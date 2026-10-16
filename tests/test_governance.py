@@ -215,3 +215,16 @@ def test_governance_page_empty_and_error_states(client, monkeypatch):
     monkeypatch.setattr(data, "latest_run", boom)
     response = client.get("/governance")
     assert response.status_code == 503 and b"secret detail" not in response.data
+
+
+def test_governance_page_shows_diagnostics_and_key_vault_panels(client, monkeypatch):
+    summary = {"runId": "r1", "governance": GOVERNANCE,
+               "diagnostics": {"checked": 4, "withLogs": 1, "percent": 25.0, "skipped": {"denied": 1},
+                               "byType": [{"label": "<Key Vault>", "checked": 4, "withLogs": 1}]},
+               "keyvault": {"vaults": 2, "readable": 1, "denied": 1, "objects": 3,
+                            "upcoming": [{"vault": "v", "name": "old", "kind": "secret", "expires": "2026-10-01", "days": -15}]}}
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
+    monkeypatch.setattr(data, "summary", lambda run_id: summary)
+    html = client.get("/governance").get_data(as_text=True)
+    assert "25.0%" in html and "&lt;Key Vault&gt;" in html and "3 of 4 without" in html and "1 resource(s) could not be read" in html
+    assert "v/old" in html and "expired 2026-10-01" in html and "1 vault(s) could not be listed" in html
