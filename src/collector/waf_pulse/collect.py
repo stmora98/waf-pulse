@@ -163,7 +163,7 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
 
     subscription_rows, score_docs = [], []
     for sub in sorted(set(names) | set(by_subscription) | set(inventory)):
-        if sub == "unknown":
+        if sub in ("unknown", "tenant"):
             continue
         scores = scoring.score_pillars(by_subscription.get(sub, []))
         subscription_rows.append(

@@ -3,6 +3,8 @@
 Spend is read per subscription for the last six months. Cost Management throttles hard, so every call honours the
 retry headers, and the whole step stops starting new subscriptions after a time budget instead of running forever.
 """
+import os
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -18,8 +20,13 @@ MONTHS = 6
 MAX_ATTEMPTS = 6
 MAX_PAGES = 10
 REQUEST_TIMEOUT = 90
-TIME_BUDGET_SECONDS = 240
-WORKERS = 2
+TIME_BUDGET_SECONDS = 420
+WORKERS = 3
+DAILY_WINDOW_DAYS = 60
+ANOMALY_RECENT_DAYS = 14
+ANOMALY_SCORE = 3.0
+ANOMALY_MIN_PERCENT = 25
+TENANT = "tenant"
 SPIKE_PERCENT = 30
 SPIKE_MIN_INCREASE = 50.0
 TOP = 10
@@ -67,20 +74,28 @@ def month_start(value):
     return value.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-def query_body(now, months=MONTHS):
-    start = month_start(now)
-    for _ in range(months - 1):
-        start = month_start(start - timedelta(days=1))
+def query_body(now, months=MONTHS, kind="ActualCost", granularity="Monthly", grouping=("ServiceName",), days=None):
+    """A Cost Management query. Actual cost is what is billed; amortized cost spreads reservations and savings
+    plans over their term, which the FinOps hub calls effective cost."""
+    if days:
+        start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start = month_start(now)
+        for _ in range(months - 1):
+            start = month_start(start - timedelta(days=1))
+    dataset = {"granularity": granularity, "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}}}
+    if grouping:
+        dataset["grouping"] = [{"type": "Dimension", "name": name} for name in grouping]
     return {
-        "type": "ActualCost", "timeframe": "Custom",
+        "type": kind, "timeframe": "Custom",
         "timePeriod": {"from": start.strftime("%Y-%m-%dT00:00:00Z"), "to": now.strftime("%Y-%m-%dT00:00:00Z")},
-        "dataset": {"granularity": "Monthly", "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
-                    "grouping": [{"type": "Dimension", "name": "ServiceName"}]},
+        "dataset": dataset,
     }
 
 
 def parse_costs(properties):
-    """Rows of a Cost Management query as [{month, service, cost, currency}], whatever the column order is."""
+    """Rows of a Cost Management query as [{month, service, cost, currency}], whatever the column order is.
+    A SubscriptionId column, present in tenant wide queries, is kept as `subscriptionId`."""
     names = [column["name"].lower() for column in properties.get("columns", [])]
 
     def index(*candidates):
@@ -90,34 +105,79 @@ def parse_costs(properties):
         return None
 
     cost_i, month_i = index("cost", "pretaxcost"), index("billingmonth", "usagedate", "billingperiod")
-    service_i, currency_i = index("servicename"), index("currency")
+    service_i, currency_i, sub_i = index("servicename"), index("currency"), index("subscriptionid")
     if cost_i is None or month_i is None:
         return []
     rows = []
     for row in properties.get("rows", []):
-        month = str(row[month_i])[:7]
-        rows.append({"month": month, "service": row[service_i] if service_i is not None else "",
-                     "cost": float(row[cost_i] or 0), "currency": row[currency_i] if currency_i is not None else ""})
+        item = {"month": str(row[month_i])[:7], "service": row[service_i] if service_i is not None else "",
+                "cost": float(row[cost_i] or 0), "currency": row[currency_i] if currency_i is not None else ""}
+        if sub_i is not None:
+            item["subscriptionId"] = str(row[sub_i]).lower()
+        rows.append(item)
     return rows
 
 
-def fetch_costs(token, subscription, now):
-    """Returns (status, rows). status: ok, denied (no permission) or unavailable (no cost data for this offer)."""
-    url = f"https://management.azure.com/subscriptions/{subscription}/providers/Microsoft.CostManagement/query?api-version={COST_API}"
-    rows = []
+def parse_daily(properties):
+    """[{date, cost}] from a daily query without grouping."""
+    names = [column["name"].lower() for column in properties.get("columns", [])]
+    if "cost" not in names and "pretaxcost" not in names:
+        return []
+    cost_i = names.index("cost") if "cost" in names else names.index("pretaxcost")
+    date_i = names.index("usagedate") if "usagedate" in names else None
+    if date_i is None:
+        return []
+    totals = {}
+    for row in properties.get("rows", []):
+        day = str(row[date_i])
+        day = f"{day[:4]}-{day[4:6]}-{day[6:8]}" if day.isdigit() and len(day) == 8 else day[:10]
+        totals[day] = totals.get(day, 0.0) + float(row[cost_i] or 0)
+    return [{"date": day, "cost": round(cost, 2)} for day, cost in sorted(totals.items())]
+
+
+def _query(token, scope, body):
+    """Runs a Cost Management query at a scope and follows pagination. Returns (status, [properties])."""
+    url = f"https://management.azure.com{scope}/providers/Microsoft.CostManagement/query?api-version={COST_API}"
+    pages = []
     for _ in range(MAX_PAGES):
-        response = _call("POST", url, token, query_body(now))
+        response = _call("POST", url, token, body)
         if response.status_code in (401, 403):
             return "denied", []
         if response.status_code in (400, 404):
             return "unavailable", []
         response.raise_for_status()
         properties = response.json().get("properties", {})
-        rows.extend(parse_costs(properties))
+        pages.append(properties)
         url = properties.get("nextLink")
         if not url:
             break
-    return "ok", rows
+    return "ok", pages
+
+
+def fetch_costs(token, subscription, now):
+    """Billed cost per month and service for one subscription. Returns (status, rows)."""
+    status, pages = _query(token, f"/subscriptions/{subscription}", query_body(now))
+    return status, [row for page in pages for row in parse_costs(page)]
+
+
+def fetch_tenant_costs(token, tenant_id, now):
+    """Billed cost per subscription, month and service in one call, where the tenant root management group can
+    be queried (Enterprise Agreement and Microsoft Customer Agreement). Other offers return `unavailable`."""
+    scope = f"/providers/Microsoft.Management/managementGroups/{tenant_id}"
+    body = query_body(now, grouping=("SubscriptionId", "ServiceName"))
+    status, pages = _query(token, scope, body)
+    return status, [row for page in pages for row in parse_costs(page)]
+
+
+def fetch_effective(token, scope, now):
+    """Amortized (effective) cost per month for a scope: {month: cost}."""
+    status, pages = _query(token, scope, query_body(now, kind="AmortizedCost", grouping=None))
+    return status, monthly_totals([row for page in pages for row in parse_costs(page)])
+
+
+def fetch_daily(token, scope, now):
+    status, pages = _query(token, scope, query_body(now, granularity="Daily", grouping=None, days=DAILY_WINDOW_DAYS))
+    return status, [point for page in pages for point in parse_daily(page)]
 
 
 def parse_budgets(body):
@@ -169,8 +229,50 @@ def forecast_next(totals, complete):
     return round(max(0.0, values[-1] + sum(changes) / len(changes)), 2)
 
 
-def evaluate(run_id, results, now=None):
-    """results: {subscription: {costStatus, rows, budgetStatus, budgets}}. Returns (findings, stats, dataset, errors)."""
+def detect_anomalies(daily):
+    """Days that cost far more than in the days just before, like the anomaly view of the FinOps hub dashboard.
+    Each day is compared with the previous two weeks (robust z-score: median and median absolute deviation), so a
+    lasting rise in spend is a new normal after a few days and only sudden spikes are flagged. A minimum relative
+    gap avoids flagging tiny differences on a very stable bill."""
+    anomalies = []
+    for index in range(ANOMALY_RECENT_DAYS, len(daily)):
+        window = [point["cost"] for point in daily[index - ANOMALY_RECENT_DAYS:index]]
+        median = statistics.median(window)
+        if median <= 0:
+            continue
+        mad = statistics.median(abs(value - median) for value in window)
+        scale = 1.4826 * mad if mad > 0 else median * 0.05
+        cost = daily[index]["cost"]
+        percent = (cost / median - 1) * 100
+        previous = daily[index - 1]["cost"]
+        # Only the day the spend jumps: the days after a lasting rise are the new normal, not new anomalies.
+        jumped = previous <= 0 or (cost / previous - 1) * 100 >= ANOMALY_MIN_PERCENT
+        if jumped and (cost - median) / scale >= ANOMALY_SCORE and percent >= ANOMALY_MIN_PERCENT:
+            anomalies.append({"date": daily[index]["date"], "cost": round(cost, 2), "expected": round(median, 2),
+                              "percent": round(percent, 1)})
+    return anomalies
+
+
+def _sum_effective(results):
+    totals = {}
+    for item in results.values():
+        for month, cost in (item.get("effective") or {}).items():
+            totals[month] = totals.get(month, 0.0) + cost
+    return dict(sorted(totals.items()))
+
+
+def _sum_daily(results):
+    totals = {}
+    for item in results.values():
+        for point in item.get("daily") or []:
+            totals[point["date"]] = totals.get(point["date"], 0.0) + point["cost"]
+    return [{"date": day, "cost": round(cost, 2)} for day, cost in sorted(totals.items())]
+
+
+def evaluate(run_id, results, now=None, tenant=None, mode="subscriptions"):
+    """results: {subscription: {costStatus, rows, budgetStatus, budgets, effective, daily}}.
+    tenant: {effective, daily} read once at tenant scope, when that scope could be queried.
+    Returns (findings, stats, dataset, errors)."""
     now = now or datetime.now(timezone.utc)
     findings, stats, all_rows = [], [], []
 
@@ -229,6 +331,23 @@ def evaluate(run_id, results, now=None):
     currencies = [row["currency"] for row in all_rows if row["currency"]]
     currency = max(set(currencies), key=currencies.count) if currencies else ""
 
+    # Effective cost and the daily series are tenant totals: they are only shown when every subscription was read.
+    everything_read = bool(results) and coverage["ok"] == len(results)
+    tenant = tenant or {}
+    effective = tenant.get("effective") or (_sum_effective(results) if everything_read else {})
+    daily = tenant.get("daily") or (_sum_daily(results) if everything_read else [])
+    anomalies = detect_anomalies(daily)
+    recent_from = (now - timedelta(days=ANOMALY_RECENT_DAYS)).strftime("%Y-%m-%d")
+    recent = [a for a in anomalies if a["date"] >= recent_from]
+    if len(daily) >= ANOMALY_RECENT_DAYS:
+        stat("FIN-COST-002", "medium", TENANT, len(recent), ANOMALY_RECENT_DAYS)
+        for item in recent:
+            finding("FIN-COST-002", "medium",
+                    f"Spend on {item['date']} was {item['percent']:g}% above the usual daily level "
+                    f"({item['cost']:,.0f} against {item['expected']:,.0f}{' ' + currency if currency else ''})",
+                    "Open Cost analysis for that day, find the service or resource behind the increase and "
+                    "confirm it was expected.", f"cost-anomaly/{item['date']}", TENANT, item["date"])
+
     services = {}
     for row in all_rows:
         if row["month"] == last:
@@ -240,14 +359,19 @@ def evaluate(run_id, results, now=None):
 
     dataset = {
         "currency": currency,
-        "months": [{"month": m, "cost": round(c, 2), "partial": m >= now.strftime("%Y-%m")} for m, c in totals.items()],
+        "scope": mode,
+        "months": [{"month": m, "cost": round(c, 2), "partial": m >= now.strftime("%Y-%m"),
+                    "effective": round(effective[m], 2) if m in effective else None} for m, c in totals.items()],
         "lastMonth": last,
         "lastMonthCost": round(totals[last], 2) if last else None,
+        "lastMonthEffective": round(effective[last], 2) if last and last in effective else None,
         "monthOverMonthPercent": round((totals[last] / totals[previous] - 1) * 100, 1) if last and previous and totals[previous] else None,
         "forecastNextMonth": forecast_next(totals, complete),
         "topServices": [{"service": s, "cost": round(c, 2)} for s, c in sorted(services.items(), key=lambda i: -i[1])[:TOP]],
         "bySubscription": by_subscription,
         "budgets": sorted(budgets_out, key=lambda b: -b["percent"])[:20],
+        "daily": daily[-DAILY_WINDOW_DAYS:],
+        "anomalies": anomalies[-TOP:],
         "coverage": coverage,
     }
     errors = []
@@ -260,18 +384,49 @@ def evaluate(run_id, results, now=None):
 
 
 def collect(credential, run_id, subscription_ids, now=None):
+    """Tenant scope first (one call for every subscription, like the FinOps hub reading a billing scope), then
+    one subscription at a time where the tenant scope cannot be queried."""
     now = now or datetime.now(timezone.utc)
     token = credential.get_token(SCOPE).token
     deadline = _now() + TIME_BUDGET_SECONDS
+    subscriptions = [s.lower() for s in subscription_ids]
+    tenant_id = os.environ.get("COLLECTOR_TENANT_ID", "")
+
+    results, tenant, mode = {}, None, "subscriptions"
+    if tenant_id:
+        try:
+            status, rows = fetch_tenant_costs(token, tenant_id, now)
+        except Exception:
+            status, rows = "error", []
+        if status == "ok":
+            mode = "tenant"
+            scope = f"/providers/Microsoft.Management/managementGroups/{tenant_id}"
+            by_sub = {}
+            for row in rows:
+                by_sub.setdefault(row.get("subscriptionId", ""), []).append(
+                    {key: value for key, value in row.items() if key != "subscriptionId"})
+            results = {sub: {"costStatus": "ok", "rows": by_sub.get(sub, [])} for sub in subscriptions}
+            tenant = {}
+            for name, fetch in (("effective", fetch_effective), ("daily", fetch_daily)):
+                try:
+                    tenant[name] = fetch(token, scope, now)[1]
+                except Exception:
+                    tenant[name] = None
 
     def run(sub):
+        item = results.get(sub, {})
         if _now() > deadline:
-            return sub, {"costStatus": "error", "rows": []}
-        item = {}
-        try:
-            item["costStatus"], item["rows"] = fetch_costs(token, sub, now)
-        except Exception:
-            item["costStatus"], item["rows"] = "error", []
+            return sub, {**item, "costStatus": item.get("costStatus", "error"), "rows": item.get("rows", [])}
+        if mode != "tenant":
+            try:
+                item["costStatus"], item["rows"] = fetch_costs(token, sub, now)
+                if item["costStatus"] == "ok":
+                    item["effective"] = fetch_effective(token, f"/subscriptions/{sub}", now)[1]
+                    item["daily"] = fetch_daily(token, f"/subscriptions/{sub}", now)[1]
+            except Exception:
+                item["costStatus"], item["rows"] = item.get("costStatus", "error"), item.get("rows", [])
+                if item["costStatus"] == "ok":
+                    item["costStatus"] = "error"
         try:
             item["budgetStatus"], item["budgets"] = fetch_budgets(token, sub)
         except Exception:
@@ -279,5 +434,5 @@ def collect(credential, run_id, subscription_ids, now=None):
         return sub, item
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        results = dict(pool.map(run, [s.lower() for s in subscription_ids]))
-    return evaluate(run_id, results, now)
+        results = dict(pool.map(run, subscriptions))
+    return evaluate(run_id, results, now, tenant, mode)

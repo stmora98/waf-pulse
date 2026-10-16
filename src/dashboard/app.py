@@ -108,8 +108,13 @@ def cost_page():
         return render_template("cost.html", error="The data store is not reachable right now.", finops=None,
                                chart=None, summary=None), 503
     finops = (summary or {}).get("finops")
-    return render_template("cost.html", error=None, finops=finops, summary=summary,
-                           chart=cost_view.chart(finops["months"]) if finops and finops.get("months") else None)
+    months = finops.get("months") if finops else None
+    daily = (finops or {}).get("daily") or []
+    return render_template(
+        "cost.html", error=None, finops=finops, summary=summary,
+        chart=cost_view.chart(months) if months else None,
+        daily_chart=cost_view.chart([{"month": p["date"], "cost": p["cost"]} for p in daily]) if daily else None,
+    )
 
 
 @app.get("/api/summary")

@@ -16,10 +16,17 @@
     {% else %}
       <section class="cards">
         <div class="card na">
-          <span class="card-title">{{ finops.lastMonth }} (last full month)</span>
+          <span class="card-title">{{ finops.lastMonth }} · billed cost</span>
           <span class="card-score">{{ '{:,.0f}'.format(finops.lastMonthCost) if finops.lastMonthCost is not none else 'n/a' }}</span>
           <span class="muted">{{ finops.currency }}</span>
         </div>
+        {% if finops.lastMonthEffective is defined and finops.lastMonthEffective is not none %}
+          <div class="card na">
+            <span class="card-title">{{ finops.lastMonth }} · effective cost</span>
+            <span class="card-score">{{ '{:,.0f}'.format(finops.lastMonthEffective) }}</span>
+            <span class="muted">{{ finops.currency }} · reservations and savings plans spread over their term</span>
+          </div>
+        {% endif %}
         <div class="card {% if finops.monthOverMonthPercent is none %}na{% elif finops.monthOverMonthPercent > 10 %}bad{% elif finops.monthOverMonthPercent > 0 %}warn{% else %}good{% endif %}">
           <span class="card-title">Change vs previous month</span>
           <span class="card-score">{% if finops.monthOverMonthPercent is none %}n/a{% else %}{{ '%+.1f'|format(finops.monthOverMonthPercent) }}%{% endif %}</span>
@@ -49,10 +56,39 @@
               <rect class="bar {% if bar.partial %}partial{% endif %}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}">
                 <title>{{ bar.label }}: {{ '{:,.0f}'.format(bar.cost) }}{% if bar.partial %} (month in progress){% endif %}</title>
               </rect>
-              <text class="axis" x="{{ bar.label_x }}" y="{{ chart.label_y }}" text-anchor="middle">{{ bar.label[5:] }}/{{ bar.label[2:4] }}</text>
+              <text class="axis" x="{{ bar.label_x }}" y="{{ chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>
             {% endfor %}
           </svg>
-          <p class="muted">The lighter bar is the current month, still in progress.</p>
+          <p class="muted">The lighter bar is the current month, still in progress.{% if finops.scope == 'tenant' %} Read once at the tenant scope.{% endif %}</p>
+        </section>
+      {% endif %}
+
+      {% if daily_chart %}
+        <section class="panel">
+          <h3>Daily spend · last {{ finops.daily | length }} days ({{ finops.currency }})</h3>
+          <svg class="chart" viewBox="0 0 {{ daily_chart.width }} {{ daily_chart.height }}" role="img" aria-label="Daily spend">
+            {% for g in daily_chart.grid %}
+              <line class="grid" x1="{{ daily_chart.left }}" x2="{{ daily_chart.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+              <text class="axis" x="{{ daily_chart.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+            {% endfor %}
+            {% for bar in daily_chart.bars %}
+              <rect class="bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.label }}: {{ '{:,.0f}'.format(bar.cost) }}</title></rect>
+              {% if bar.show_label %}<text class="axis" x="{{ bar.label_x }}" y="{{ daily_chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>{% endif %}
+            {% endfor %}
+          </svg>
+          {% if finops.anomalies %}
+            <h4>Days that cost far more than usual</h4>
+            <div class="table-wrap">
+              <table class="narrow">
+                <thead><tr><th>Day</th><th>Spend</th><th>Usual</th><th>Above usual</th></tr></thead>
+                <tbody>
+                  {% for a in finops.anomalies %}<tr><td>{{ a.date }}</td><td>{{ '{:,.0f}'.format(a.cost) }}</td><td>{{ '{:,.0f}'.format(a.expected) }}</td><td>+{{ '%g'|format(a.percent) }}%</td></tr>{% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="muted">No unusual days detected.</p>
+          {% endif %}
         </section>
       {% endif %}
 

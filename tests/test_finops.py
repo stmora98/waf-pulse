@@ -187,7 +187,7 @@ def test_dataset_summarizes_months_services_and_coverage():
 
     assert dataset["lastMonth"] == "2026-09" and dataset["lastMonthCost"] == 200.0
     assert dataset["monthOverMonthPercent"] == pytest.approx(33.3, abs=0.1)  # 200 vs 150
-    assert dataset["months"][-1] == {"month": "2026-10", "cost": 20.0, "partial": True}
+    assert dataset["months"][-1] == {"month": "2026-10", "cost": 20.0, "partial": True, "effective": None}
     assert dataset["months"][0]["partial"] is False
     assert dataset["topServices"][0] == {"service": "Storage", "cost": 150.0}
     assert dataset["forecastNextMonth"] == pytest.approx(250.0, abs=0.01)  # 100 -> 150 -> 200: average +50
@@ -269,6 +269,17 @@ FINOPS = {"currency": "USD", "lastMonth": "2026-09", "lastMonthCost": 1234.0, "m
           "coverage": {"ok": 1, "denied": 1, "unavailable": 0, "error": 0}}
 
 
+def test_cost_page_shows_effective_cost_daily_chart_and_anomalies(client, monkeypatch):
+    finops = dict(FINOPS, lastMonthEffective=1180.0, scope="tenant",
+                  daily=[{"date": f"2026-09-{d:02d}", "cost": 40.0} for d in range(1, 21)],
+                  anomalies=[{"date": "2026-09-14", "cost": 300.0, "expected": 40.0, "percent": 650.0}])
+    serve(monkeypatch, {"runId": "r1", "finops": finops, "advisorSavings": {"USD": 3804.0}})
+    html = client.get("/cost").get_data(as_text=True)
+    assert "billed cost" in html and "effective cost" in html and "1,180" in html
+    assert "Daily spend" in html and "2026-09-14" in html and "+650%" in html and "Read once at the tenant scope" in html
+    assert html.count('<svg class="chart"') == 2
+
+
 def test_cost_page_renders_and_escapes(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "advisorSavings": {"USD": 3804.0}})
     html = client.get("/cost").get_data(as_text=True)
@@ -288,3 +299,114 @@ def test_cost_page_explains_a_missing_role_and_handles_errors(client, monkeypatc
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: (_ for _ in ()).throw(RuntimeError("secret detail")))
     response = client.get("/cost")
     assert response.status_code == 503 and b"secret detail" not in response.data
+
+
+# --- FinOps hub methodology: effective cost, anomalies and tenant scope ----------------------------------
+
+def daily(*costs, start="2026-09-01"):
+    first = datetime.fromisoformat(start)
+    return [{"date": (first.replace(day=1) + __import__("datetime").timedelta(days=i)).strftime("%Y-%m-%d"), "cost": c}
+            for i, c in enumerate(costs)]
+
+
+def test_parse_daily_accepts_both_date_formats_and_groups_nothing():
+    properties = {"columns": [{"name": "Cost"}, {"name": "UsageDate"}, {"name": "Currency"}],
+                  "rows": [[1.5, 20260901, "USD"], [2.0, "2026-09-02T00:00:00", "USD"], [0.5, 20260901, "USD"]]}
+    assert finops.parse_daily(properties) == [{"date": "2026-09-01", "cost": 2.0}, {"date": "2026-09-02", "cost": 2.0}]
+    assert finops.parse_daily({"columns": [{"name": "Cost"}], "rows": [[1]]}) == []
+    assert finops.parse_daily({}) == []
+
+
+def test_query_body_supports_amortized_cost_daily_ranges_and_groupings():
+    body = finops.query_body(NOW, kind="AmortizedCost", grouping=None)
+    assert body["type"] == "AmortizedCost" and "grouping" not in body["dataset"]
+    body = finops.query_body(NOW, granularity="Daily", grouping=None, days=60)
+    assert body["dataset"]["granularity"] == "Daily" and body["timePeriod"]["from"] == "2026-08-16T00:00:00Z"
+    grouped = finops.query_body(NOW, grouping=("SubscriptionId", "ServiceName"))
+    assert [g["name"] for g in grouped["dataset"]["grouping"]] == ["SubscriptionId", "ServiceName"]
+
+
+def test_parse_costs_keeps_the_subscription_of_tenant_wide_queries():
+    properties = {"columns": [{"name": "Cost"}, {"name": "BillingMonth"}, {"name": "SubscriptionId"}, {"name": "ServiceName"}],
+                  "rows": [[5.0, "2026-09-01T00:00:00", "ABC", "SQL"]]}
+    assert finops.parse_costs(properties) == [{"month": "2026-09", "service": "SQL", "cost": 5.0, "currency": "", "subscriptionId": "abc"}]
+
+
+def test_detect_anomalies_flags_only_clear_spikes():
+    steady = [100.0, 102.0, 98.0, 101.0, 99.0, 100.0, 103.0, 97.0, 100.0, 101.0, 99.0, 100.0, 102.0, 98.0, 100.0]
+    assert finops.detect_anomalies(daily(*steady)) == []
+    found = finops.detect_anomalies(daily(*(steady + [400.0, 100.0])))
+    assert len(found) == 1 and found[0]["cost"] == 400.0 and found[0]["expected"] == 100.0 and found[0]["percent"] == 300.0
+
+
+def test_a_lasting_rise_in_spend_is_not_an_anomaly():
+    # 20 days at ~30, then a permanent step to ~45: the old level must not make every later day look unusual.
+    level_shift = [30.0, 31.0, 29.0, 30.0, 32.0] * 4 + [45.0, 44.0, 46.0, 45.0, 47.0, 45.0, 44.0, 46.0, 45.0, 45.0] * 2
+    found = finops.detect_anomalies(daily(*level_shift))
+    assert [a["date"] for a in found] == ["2026-09-21"]  # only the day the spend jumped, not every day after it
+
+
+def test_detect_anomalies_ignores_small_gaps_short_series_and_drops():
+    assert finops.detect_anomalies(daily(*([100.0] * 14 + [120.0]))) == []  # +20% is below the minimum gap
+    assert finops.detect_anomalies(daily(*([100.0] * 5 + [900.0]))) == []  # not enough history to compare
+    assert finops.detect_anomalies(daily(*([100.0] * 14 + [1.0]))) == []  # cheaper days are not anomalies
+    assert finops.detect_anomalies(daily(*[0.0] * 20)) == []
+
+
+def test_perfectly_flat_history_still_detects_a_spike():
+    found = finops.detect_anomalies(daily(*([50.0] * 20 + [500.0])))
+    assert len(found) == 1 and found[0]["cost"] == 500.0
+
+def test_effective_cost_and_daily_series_are_summed_when_every_subscription_was_read():
+    results = {SUB: {**result([row("2026-09", "a", 100)]), "effective": {"2026-09": 90.0}, "daily": daily(10, 10)},
+               SUB2: {**result([row("2026-09", "a", 50)]), "effective": {"2026-09": 55.0}, "daily": daily(5, 5)}}
+    _, _, dataset, _ = finops.evaluate("r", results, NOW)
+    assert dataset["months"][0]["effective"] == 145.0 and dataset["lastMonthEffective"] == 145.0
+    assert [p["cost"] for p in dataset["daily"]] == [15.0, 15.0]
+
+
+def test_partial_coverage_does_not_show_incomplete_tenant_totals():
+    results = {SUB: {**result([row("2026-09", "a", 100)]), "effective": {"2026-09": 90.0}, "daily": daily(10)},
+               SUB2: result(cost="denied")}
+    _, _, dataset, _ = finops.evaluate("r", results, NOW)
+    assert dataset["months"][0]["effective"] is None and dataset["daily"] == []
+
+
+def test_recent_anomalies_become_a_cost_finding_and_old_ones_do_not():
+    series = [100.0] * 60
+    series[-3] = 600.0   # two days before "today"
+    series[20] = 700.0   # long ago
+    start = NOW - __import__("datetime").timedelta(days=60)
+    points = [{"date": (start + __import__("datetime").timedelta(days=i)).strftime("%Y-%m-%d"), "cost": c} for i, c in enumerate(series)]
+    findings, stats, dataset, _ = finops.evaluate("r", {}, NOW, tenant={"daily": points, "effective": {}}, mode="tenant")
+    row = next(s for s in stats if s["ruleId"] == "FIN-COST-002")
+    assert row["subscriptionId"] == "tenant" and (row["affected"], row["applicable"]) == (1, finops.ANOMALY_RECENT_DAYS)
+    titles = [f["title"] for f in findings if f["ruleId"] == "FIN-COST-002"]
+    assert len(titles) == 1 and "500% above" in titles[0] and titles[0].endswith("(600 against 100)")
+    assert len(dataset["anomalies"]) == 2 and dataset["scope"] == "tenant"
+
+
+def test_collect_uses_the_tenant_scope_when_it_works(monkeypatch):
+    monkeypatch.setenv("COLLECTOR_TENANT_ID", "tenant-1")
+    calls = []
+    tenant_rows = [dict(row("2026-09", "SQL", 30), subscriptionId=SUB), dict(row("2026-09", "SQL", 20), subscriptionId=SUB2)]
+    monkeypatch.setattr(finops, "fetch_tenant_costs", lambda token, tenant, now: ("ok", tenant_rows))
+    monkeypatch.setattr(finops, "fetch_effective", lambda token, scope, now: calls.append(scope) or ("ok", {"2026-09": 48.0}))
+    monkeypatch.setattr(finops, "fetch_daily", lambda token, scope, now: ("ok", daily(1, 2)))
+    monkeypatch.setattr(finops, "fetch_costs", lambda *a: (_ for _ in ()).throw(AssertionError("must not query per subscription")))
+    monkeypatch.setattr(finops, "fetch_budgets", lambda token, sub: ("ok", []))
+    _, _, dataset, _ = finops.collect(Credential(), "r", [SUB, SUB2], NOW)
+    assert dataset["scope"] == "tenant" and dataset["months"][0]["cost"] == 50.0 and dataset["months"][0]["effective"] == 48.0
+    assert calls == ["/providers/Microsoft.Management/managementGroups/tenant-1"]
+
+
+def test_collect_falls_back_to_subscriptions_when_the_tenant_scope_is_not_valid(monkeypatch):
+    monkeypatch.setenv("COLLECTOR_TENANT_ID", "tenant-1")
+    monkeypatch.setattr(finops, "fetch_tenant_costs", lambda token, tenant, now: ("unavailable", []))
+    monkeypatch.setattr(finops, "fetch_costs", lambda token, sub, now: ("ok", [row("2026-09", "a", 10)]))
+    monkeypatch.setattr(finops, "fetch_effective", lambda token, scope, now: ("ok", {"2026-09": 9.0}))
+    monkeypatch.setattr(finops, "fetch_daily", lambda token, scope, now: ("ok", daily(1, 1)))
+    monkeypatch.setattr(finops, "fetch_budgets", lambda token, sub: ("ok", []))
+    _, _, dataset, _ = finops.collect(Credential(), "r", [SUB], NOW)
+    assert dataset["scope"] == "subscriptions" and dataset["lastMonthEffective"] == 9.0
+    assert dataset["months"][0]["effective"] == 9.0
