@@ -280,6 +280,15 @@ def test_cost_page_shows_effective_cost_daily_chart_and_anomalies(client, monkey
     assert html.count('<svg class="chart"') == 2
 
 
+def test_cost_page_lists_reservation_and_savings_plan_options(client, monkeypatch):
+    commitments = {"totals": {"USD": {"P1Y": 900.0, "P3Y": 1200.0}},
+                   "items": [{"subscriptionName": "<One>", "resourceType": "virtualmachines", "currency": "USD",
+                              "terms": {"P1Y": 400.0, "P3Y": 689.0}}]}
+    serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "commitments": commitments})
+    html = client.get("/cost").get_data(as_text=True)
+    assert "Rate optimization" in html and "689 USD" in html and "not added together" in html
+    assert "<strong>900</strong> USD per year with 1 year" in html and "&lt;One&gt;" in html
+
 def test_cost_page_renders_and_escapes(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "advisorSavings": {"USD": 3804.0}})
     html = client.get("/cost").get_data(as_text=True)

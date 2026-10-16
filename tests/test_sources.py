@@ -135,7 +135,8 @@ def test_advisor_groups_by_recommendation_type_and_subscription():
     rows = [advisor_row(resource="/r/1", saving=100), advisor_row(resource="/r/2", saving=50.5),
             advisor_row(resource="/r/2", saving=50.5),  # duplicate of the same resource
             advisor_row(rec="rec2", category="HighAvailability", impact="Low", sub="s2")]
-    findings, stats, savings = advisor.evaluate("run1", rows)
+    findings, stats, dataset = advisor.evaluate("run1", rows)
+    savings = dataset["savings"]
 
     cost = next(s for s in stats if s["ruleId"] == "ADV-rec1")
     assert cost["affected"] == 2 and cost["applicable"] is None and cost["pillar"] == "Cost Optimization"
@@ -146,6 +147,30 @@ def test_advisor_groups_by_recommendation_type_and_subscription():
     assert savings["USD"]["annual"] == 201.0
     assert savings["USD"]["bySubscription"] == {"s1": 201.0}
 
+
+def commitment_row(term, lookback, saving, kind="virtualmachines", sub="s1"):
+    return {**advisor_row(rec="ri", resource=f"/subscriptions/{sub}", sub=sub, saving=saving), "term": term,
+            "lookbackDays": lookback, "commitmentType": kind, "solution": "Consider reserved instances"}
+
+
+def test_commitments_keep_the_longest_lookback_per_term_and_stay_out_of_usage_savings():
+    rows = [commitment_row("P1Y", 7, 371), commitment_row("P1Y", 30, 400), commitment_row("P3Y", 7, 600),
+            commitment_row("P3Y", 30, 689), commitment_row("P1Y", 30, 500, kind="FabricCapacity"),
+            advisor_row(resource="/r/1", saving=240)]
+    findings, stats, dataset = advisor.evaluate("run1", rows)
+
+    assert dataset["savings"]["USD"]["annual"] == 240.0  # reservations are not added to usage savings
+    vms = next(item for item in dataset["commitments"] if item["resourceType"] == "virtualmachines")
+    assert vms["terms"] == {"P1Y": 400.0, "P3Y": 689.0} and vms["lookbackDays"] == 30
+    assert [item["resourceType"] for item in dataset["commitments"]] == ["virtualmachines", "FabricCapacity"]
+    commitment_findings = [f for f in findings if "commitments" in f["resourceId"]]
+    assert len(commitment_findings) == 2 and "1 year: 400 USD per year" in commitment_findings[0]["recommendation"]
+    assert next(s for s in stats if s["ruleId"] == "ADV-ri")["affected"] == 2
+
+
+def test_commitment_rows_without_savings_are_ignored():
+    _, _, dataset = advisor.evaluate("run1", [commitment_row("P1Y", 30, None)])
+    assert dataset["commitments"] == []
 
 def test_advisor_category_and_impact_mapping():
     assert advisor.to_pillar("HighAvailability") == "Reliability"

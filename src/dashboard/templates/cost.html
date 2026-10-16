@@ -107,6 +107,32 @@
         </div>
       </section>
 
+      {% if summary and summary.commitments %}
+        <section>
+          <h3>Rate optimization · reservations and savings plans</h3>
+          <p class="muted">
+            Azure Advisor options based on the last 30 days of usage. The 1 year and 3 year terms are alternatives, so they are not added together.
+            {% for currency, terms in summary.commitments.totals.items() %}
+              Together: {% for term, amount in terms.items() | sort %}<strong>{{ '{:,.0f}'.format(amount) }}</strong> {{ currency }} per year with {{ '1 year' if term == 'P1Y' else '3 years' if term == 'P3Y' else term }}{{ ', ' if not loop.last else '.' }}{% endfor %}
+            {% endfor %}
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Subscription</th><th>Covers</th><th>1 year</th><th>3 years</th></tr></thead>
+              <tbody>
+                {% for c in summary.commitments['items'] %}
+                  <tr>
+                    <td>{{ c.subscriptionName }}</td>
+                    <td>{{ c.resourceType }}</td>
+                    <td>{% if c.terms.P1Y is defined %}{{ '{:,.0f}'.format(c.terms.P1Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+                    <td>{% if c.terms.P3Y is defined %}{{ '{:,.0f}'.format(c.terms.P3Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
       <section>
         <h3>Budgets</h3>
         {% if finops.budgets %}

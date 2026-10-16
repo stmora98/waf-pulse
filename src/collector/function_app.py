@@ -159,12 +159,12 @@ def act_checklist(payload: dict):
 def act_advisor(payload: dict):
     run_id = payload["runId"]
     try:
-        findings, stats, savings = advisor.collect(
+        findings, stats, dataset = advisor.collect(
             credentials.collector_credential(), run_id, payload["subscriptions"]
         )
         store.save_findings(findings)
         store.save_stats(run_id, "advisor", {"stats": stats, "errors": []})
-        store.save_dataset(run_id, "advisor", {"savings": savings})
+        store.save_dataset(run_id, "advisor", dataset)
         return {"key": "advisor", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "advisor", exc)

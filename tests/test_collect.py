@@ -197,6 +197,15 @@ def test_defender_and_advisor_datasets_reach_the_summary():
     assert summary["advisorSavings"] == {"USD": 150.5}
 
 
+def test_commitment_options_are_totalled_per_term_not_added_together():
+    item = {"subscriptionId": "s1", "resourceType": "virtualmachines", "currency": "USD",
+            "terms": {"P1Y": 400.0, "P3Y": 689.0}, "lookbackDays": 30, "solution": "x", "recommendationType": "ri"}
+    other = {**item, "subscriptionId": "s2", "terms": {"P1Y": 100.0, "P3Y": 150.0}}
+    datasets = [{"name": "advisor", "data": {"commitments": [item]}}, {"name": "advisor", "data": {"commitments": [other]}}]
+    summary, _ = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}], [], datasets)
+    assert summary["commitments"]["totals"] == {"USD": {"P1Y": 500.0, "P3Y": 839.0}}
+    assert [i["subscriptionName"] for i in summary["commitments"]["items"]] == ["One", "s2"]
+
 def test_summary_without_optional_sources_has_no_defender_or_advisor_keys():
     summary, _ = collect.build_summary("r", "t0", "t1", "x", [], [], [])
     assert "secureScore" not in summary and "advisorSavings" not in summary

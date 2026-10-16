@@ -412,6 +412,92 @@ resources
 """,
     ),
     Rule(
+        id="COST-SNAP-001",
+        pillar="Cost Optimization",
+        severity="low",
+        title="Disk snapshot is older than 30 days",
+        recommendation="Delete snapshots you no longer need, or keep them in a backup vault. Snapshots are billed by size.",
+        applies_to=("microsoft.compute/snapshots",),
+        query="""
+resources
+| where type =~ 'microsoft.compute/snapshots'
+| where todatetime(properties.timeCreated) < ago(30d)
+| project id, name, type, subscriptionId
+""",
+    ),
+    Rule(
+        id="COST-ASP-001",
+        pillar="Cost Optimization",
+        severity="medium",
+        title="App Service plan has no apps",
+        recommendation="Delete the plan or move apps onto it. A paid plan is billed even when it hosts nothing.",
+        applies_to=("microsoft.web/serverfarms",),
+        query="""
+resources
+| where type =~ 'microsoft.web/serverfarms'
+| where toint(properties.numberOfSites) == 0
+| where tostring(sku.tier) !in~ ('Free', 'Shared', 'Dynamic', 'FlexConsumption', 'WorkflowStandard')
+| project id, name, type, subscriptionId
+""",
+    ),
+    Rule(
+        id="COST-NAT-001",
+        pillar="Cost Optimization",
+        severity="medium",
+        title="NAT gateway is not used by any subnet",
+        recommendation="Delete the NAT gateway or attach it to a subnet. It is billed per hour while it exists.",
+        applies_to=("microsoft.network/natgateways",),
+        query="""
+resources
+| where type =~ 'microsoft.network/natgateways'
+| where isnull(properties.subnets) or array_length(properties.subnets) == 0
+| project id, name, type, subscriptionId
+""",
+    ),
+    Rule(
+        id="COST-VM-003",
+        pillar="Cost Optimization",
+        severity="low",
+        title="Virtual machine uses an older size series",
+        recommendation="Move to a current series (for example Dsv5 or Dasv5). They usually give more performance for the same price.",
+        applies_to=("microsoft.compute/virtualmachines",),
+        query="""
+resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| where tostring(properties.hardwareProfile.vmSize) matches regex '^(Basic_A[0-9]+|Standard_(A[0-9]+(_v2)?|D[0-9]+s?(_v2)?|DS[0-9]+(_v2)?|F[0-9]+s?|G[0-9]+|GS[0-9]+|L[0-9]+s))$'
+| project id, name, type, subscriptionId
+""",
+    ),
+    Rule(
+        id="COST-AHB-003",
+        pillar="Cost Optimization",
+        severity="low",
+        title="SQL Managed Instance pays the license as you go",
+        recommendation="Apply Azure Hybrid Benefit if you own SQL Server licenses with Software Assurance.",
+        applies_to=("microsoft.sql/managedinstances",),
+        query="""
+resources
+| where type =~ 'microsoft.sql/managedinstances'
+| where tostring(properties.licenseType) =~ 'LicenseIncluded'
+| project id, name, type, subscriptionId
+""",
+    ),
+    Rule(
+        id="COST-AHB-004",
+        pillar="Cost Optimization",
+        severity="low",
+        title="Azure SQL vCore database pays the license as you go",
+        recommendation="Apply Azure Hybrid Benefit if you own SQL Server licenses with Software Assurance.",
+        applies_to=("microsoft.sql/servers/databases",),
+        query="""
+resources
+| where type =~ 'microsoft.sql/servers/databases'
+| where tostring(properties.licenseType) =~ 'LicenseIncluded'
+| where tostring(sku.tier) in~ ('GeneralPurpose', 'BusinessCritical', 'Hyperscale')
+| where tostring(sku.name) !startswith 'GP_S_'
+| project id, name, type, subscriptionId
+""",
+    ),    Rule(
         id="OPS-TAG-002",
         pillar="Operational Excellence",
         severity="low",

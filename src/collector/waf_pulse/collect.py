@@ -211,6 +211,9 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
     savings = _advisor_savings(datasets)
     if savings:
         summary["advisorSavings"] = savings
+    commitments = _commitments(datasets, names)
+    if commitments:
+        summary["commitments"] = commitments
     return summary, score_docs
 
 
@@ -243,3 +246,20 @@ def _advisor_savings(datasets):
         for currency, value in (data.get("savings") or {}).items():
             totals[currency] += value.get("annual", 0)
     return {currency: round(amount, 2) for currency, amount in totals.items()}
+
+def _commitments(datasets, names):
+    """Reservation and savings plan options. Terms are alternatives, so they are totalled per term, never together."""
+    items, totals = [], defaultdict(lambda: defaultdict(float))
+    for data in _dataset(datasets, "advisor"):
+        for item in data.get("commitments") or []:
+            items.append({**item, "subscriptionName": names.get(item["subscriptionId"], item["subscriptionId"])})
+            for term, amount in item["terms"].items():
+                totals[item["currency"]][term] += amount
+    if not items:
+        return {}
+    items.sort(key=lambda item: max(item["terms"].values()), reverse=True)
+    return {
+        "items": items[:50],
+        "totals": {currency: {term: round(amount, 2) for term, amount in terms.items()}
+                   for currency, terms in totals.items()},
+    }
