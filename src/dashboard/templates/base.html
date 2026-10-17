@@ -1,3 +1,23 @@
+{% macro icon(name) -%}
+<svg class="icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {%- if name == 'menu' %}<path d="M4 6h16M4 12h16M4 18h16"/>
+  {%- elif name == 'overview' %}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+  {%- elif name == 'security' %}<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>
+  {%- elif name == 'reliability' %}<path d="M3 12h4l2-6 4 12 2-6h6"/>
+  {%- elif name == 'cost' %}<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.6-.8-1.5-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-1.9-.4-2.5-1.2M12 6.5V8m0 8v1.5"/>
+  {%- elif name == 'performance' %}<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>
+  {%- elif name == 'operations' %}<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>
+  {%- elif name == 'governance' %}<path d="M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>
+  {%- elif name == 'history' %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+  {%- elif name == 'findings' %}<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>
+  {%- endif %}
+</svg>
+{%- endmacro %}
+{% macro link(endpoint, label, icon_name, active, slug=None) -%}
+<a class="side-link{% if active %} active{% endif %}" href="{{ url_for(endpoint, slug=slug) if slug else url_for(endpoint) }}" title="{{ label }}"{% if active %} aria-current="page"{% endif %}>
+  {{ icon(icon_name) }}<span class="side-label">{{ label }}</span>
+</a>
+{%- endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -8,30 +28,44 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header class="top">
-    <div>
-      <h1>WAF Pulse</h1>
-      <p class="muted">Well-Architected assessment of your Azure tenant</p>
-    </div>
-    <div class="actions">
-<nav class="nav" aria-label="Sections">
-        <a href="{{ url_for('index') }}" {% if request.endpoint in ('index', 'findings_page', 'rule_page') %}class="active" aria-current="page"{% endif %}>Overview</a>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Show or hide the menu" aria-controls="sidebar" aria-expanded="true" title="Show or hide the menu">{{ icon('menu') }}</button>
+      <nav class="side-nav" aria-label="Sections">
+        {{ link('index', 'Overview', 'overview', request.endpoint in ('index', 'rule_page')) }}
+        <p class="side-group">Well-Architected pillars</p>
         {% for slug, page in nav_pillars %}
-          <a href="{{ url_for('pillar_page', slug=slug) }}" {% if request.endpoint == 'pillar_page' and request.view_args.slug == slug %}class="active" aria-current="page"{% endif %}>{{ page[1] }}</a>
+          {{ link('pillar_page', page[1], slug if slug != 'cost' else 'cost', request.endpoint == 'pillar_page' and request.view_args.slug == slug, slug) }}
         {% endfor %}
-        <a href="{{ url_for('governance_page') }}" {% if request.endpoint == 'governance_page' %}class="active" aria-current="page"{% endif %}>Governance</a>
-        <a href="{{ url_for('history_page') }}" {% if request.endpoint in ('history_page', 'compare_page') %}class="active" aria-current="page"{% endif %}>History</a>
+        <p class="side-group">Manage</p>
+        {{ link('governance_page', 'Governance', 'governance', request.endpoint == 'governance_page') }}
+        {{ link('history_page', 'History', 'history', request.endpoint in ('history_page', 'compare_page')) }}
+        {{ link('findings_page', 'All findings', 'findings', request.endpoint == 'findings_page') }}
       </nav>
-      {% if user %}<span class="muted">{{ user }}</span>{% endif %}
-      <button id="theme-toggle" class="icon-button" type="button" aria-label="Change the color theme" title="Color theme: automatic, light or dark">Theme</button>
-      <button id="refresh" type="button">Refresh now</button>
-    </div>
-  </header>
-  <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
+    </aside>
 
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+    <div class="content">
+      <header class="top">
+        <div class="title">
+          <button id="nav-open" class="nav-toggle mobile-only" type="button" aria-label="Show the menu" aria-controls="sidebar" title="Show the menu">{{ icon('menu') }}</button>
+          <div>
+            <h1>WAF Pulse</h1>
+            <p class="muted">Well-Architected assessment of your Azure tenant</p>
+          </div>
+        </div>
+        <div class="actions">
+          {% if user %}<span class="muted">{{ user }}</span>{% endif %}
+          <button id="theme-toggle" class="icon-button" type="button" aria-label="Change the color theme" title="Color theme: automatic, light or dark">Theme</button>
+          <button id="refresh" type="button">Refresh now</button>
+        </div>
+      </header>
+      <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
+
+      <main>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

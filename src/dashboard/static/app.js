@@ -65,3 +65,28 @@
   });
   show();
 })();
+
+(function () {
+  var root = document.documentElement;
+  var buttons = [document.getElementById("nav-toggle"), document.getElementById("nav-open")];
+  var narrow = window.matchMedia ? window.matchMedia("(max-width: 860px)") : { matches: false };
+
+  function collapsed() { return root.getAttribute("data-nav") === "collapsed"; }
+  function sync() { if (buttons[0]) { buttons[0].setAttribute("aria-expanded", collapsed() ? "false" : "true"); } }
+
+  function toggle() {
+    if (collapsed()) { root.removeAttribute("data-nav"); } else { root.setAttribute("data-nav", "collapsed"); }
+    try {
+      if (!narrow.matches) { localStorage.setItem("wafpulse-nav", collapsed() ? "collapsed" : "expanded"); }
+    } catch (e) { /* storage can be blocked */ }
+    sync();
+  }
+
+  buttons.forEach(function (button) { if (button) { button.addEventListener("click", toggle); } });
+  // After choosing a page on a small screen the menu gets out of the way.
+  var links = document.querySelectorAll(".side-link");
+  Array.prototype.forEach.call(links, function (link) {
+    link.addEventListener("click", function () { if (narrow.matches) { root.setAttribute("data-nav", "collapsed"); } });
+  });
+  sync();
+})();

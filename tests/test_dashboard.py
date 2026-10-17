@@ -182,3 +182,14 @@ def test_theme_toggle_and_early_theme_script_are_served_without_inline_code(clie
     assert "<script>" not in html and "style=" not in html
     css = client.get("/static/style.css").get_data(as_text=True)
     assert ':root[data-theme="dark"]' in css and ':root:not([data-theme="light"])' in css
+
+def test_left_menu_lists_every_page_marks_the_current_one_and_can_be_hidden(client, monkeypatch):
+    serve(monkeypatch)
+    html = client.get("/pillar/security").get_data(as_text=True)
+    for label in ("Overview", "Security", "Reliability", "Cost", "Performance", "Operations", "Governance", "History", "All findings"):
+        assert f'<span class="side-label">{label}</span>' in html
+    assert 'class="side-link active" href="/pillar/security"' in html and html.count("side-link active") == 1
+    assert 'id="nav-toggle"' in html and 'id="nav-open"' in html and 'aria-controls="sidebar"' in html
+    assert 'id="sidebar"' in html and "<script>" not in html and "style=" not in html
+    assert "wafpulse-nav" in client.get("/static/theme.js").get_data(as_text=True)
+    assert 'class="side-link active" href="/"' in client.get("/rule/R-1").get_data(as_text=True)
