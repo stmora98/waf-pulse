@@ -1,3 +1,5 @@
+import re
+import pathlib
 import pytest
 
 import app as dashboard_app
@@ -52,10 +54,11 @@ def serve(monkeypatch, rows=ROWS, truncated=False, findings=FINDINGS):
 def test_the_resource_list_shows_what_is_behind_a_count(client, monkeypatch):
     serve(monkeypatch)
     html = client.get("/resources?type=microsoft.compute/virtualmachines").get_data(as_text=True)
-    assert "Virtual machines" in html and "<span class=\"muted\">· 2</span>" in html
+    assert "Virtual machines" in html and "<span class=\"muted\">· 2 of 4</span>" in html
     assert "vm-a" in html and "vm-b" in html and "Standard_D2s_v3" in html and "rg2" in html and "eastus" in html
     assert "kv1" not in html and "&lt;b&gt;disk" not in html  # other types are left out
     assert 'href="/resource?id=' in html and "Prod" in html
+    assert "Resource type equals" in html and "<strong>Virtual machines</strong>" in html  # shown as a filter pill
 
 
 def test_the_list_filters_by_subscription_group_and_text_and_escapes(client, monkeypatch):
@@ -64,16 +67,20 @@ def test_the_list_filters_by_subscription_group_and_text_and_escapes(client, mon
     assert "vm-b" not in client.get("/resources?group=rg1").get_data(as_text=True)
     found = client.get("/resources?q=premium").get_data(as_text=True)
     assert "&lt;b&gt;disk&lt;/b&gt;" in found and "<b>disk</b>" not in found and "vm-a" not in found
-    bad = client.get("/resources?type=%27%20OR%201%3D1&subscription=x&group=%3Cscript%3E&page=abc")
-    assert bad.status_code == 200 and "vm-a" in bad.get_data(as_text=True)  # invalid filters are ignored
+    odd = client.get("/resources?type=%27%20OR%201%3D1&subscription=x&group=%3Cscript%3E&page=abc&findings=maybe&name_op=zzz")
+    html = odd.get_data(as_text=True)
+    assert odd.status_code == 200 and "<script>" not in html.split("<main>")[1].split("data-facets")[0]  # escaped, never run
+    assert "No resources match these filters." in html
 
 
-def test_the_list_is_paged_and_the_type_chips_count_every_type(client, monkeypatch):
-    many = [res(f"vm{i:03d}") for i in range(130)]
+def test_the_list_is_paged_and_keeps_the_filters_between_pages(client, monkeypatch):
+    many = [res(f"vm{i:03d}") for i in range(130)] + [res("kv", "microsoft.keyvault/vaults")]
     serve(monkeypatch, many)
-    first = client.get("/resources").get_data(as_text=True)
-    assert "vm099" in first and "vm100" not in first and "Page 1 of 2" in first and "Virtual machines: 130" in first
-    assert "vm100" in client.get("/resources?page=2").get_data(as_text=True)
+    first = client.get("/resources?type=microsoft.compute/virtualmachines&location=eastus").get_data(as_text=True)
+    assert "vm099" in first and "vm100" not in first and "Page 1 of 2" in first and "kv" not in first.split("<tbody>")[1]
+    link = re.search(r'href="([^"]*page=2[^"]*)"', first).group(1).replace("&amp;", "&")
+    assert "type=microsoft.compute/virtualmachines" in link and "location=eastus" in link
+    assert "vm100" in client.get("/resources?type=microsoft.compute/virtualmachines&page=2").get_data(as_text=True)
 
 
 def test_the_list_explains_a_run_without_inventory_and_store_errors(client, monkeypatch):
@@ -274,3 +281,91 @@ def test_group_by_resource_counts_and_ranks():
     assert [(r["name"], r["severity"], r["count"]) for r in rows] == [("vm-a", "high", 2), ("vm-b", "high", 1), ("my-app", "medium", 1)]
     assert rows[0]["resourceGroup"].lower() == "rg1" and rows[0]["pillars"] == ["Cost Optimization", "Security"] and rows[0]["titles"] == ["Backup is off", "Old size"]
     assert insights.group_by_resource([{"title": "no resource"}]) == []
+
+
+# --- Azure-style filters ------------------------------------------------------------------------------------
+
+from werkzeug.datastructures import MultiDict  # noqa: E402
+
+
+def many_resources():
+    return [res("vm-a"), res("vm-b", group="rg2"), res("vm-c", sub=SUB2, location="westus", group="rg2"),
+            res("disk1", "microsoft.compute/disks", location="westus", detail="Premium_LRS"),
+            res("kv1", "microsoft.keyvault/vaults", sub=SUB2, location="westus", group="rg3", detail="standard")]
+
+
+def names_of(rows):
+    return [r["name"] for r in rows]
+
+
+def test_filters_are_read_from_the_query_string_with_several_values_and_operators():
+    args = MultiDict([("subscription", SUB.upper()), ("subscription", SUB2), ("subscription", SUB), ("group", " rg1 "), ("group_op", "ne"),
+                      ("type", "Microsoft.Compute/Disks"), ("location", ""), ("findings", "with"), ("name", " vm "), ("page", "2")])
+    filters = insights.parse_resource_filters(args)
+    assert filters["subscription"] == {"op": "eq", "values": [SUB.lower(), SUB2]}  # case-insensitive duplicates collapse
+    assert filters["group"] == {"op": "ne", "values": ["rg1"]} and filters["type"]["values"] == ["microsoft.compute/disks"]
+    assert "location" not in filters and filters["findings"]["values"] == ["with"] and filters["name"] == {"op": "contains", "values": ["vm"]}
+    assert insights.parse_resource_filters(MultiDict([("findings", "maybe"), ("subscription_op", "ne")])) == {}  # nothing to apply
+    many = MultiDict([("group", f"g{i}") for i in range(100)])
+    assert len(insights.parse_resource_filters(many)["group"]["values"]) == insights.MAX_FILTER_VALUES
+
+
+def test_filters_combine_with_and_across_fields_or_within_one_field_and_can_exclude():
+    rows = many_resources()
+    f = insights.parse_resource_filters
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("group", "rg1"), ("group", "rg3")])))) == ["vm-a", "disk1", "kv1"]
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("group", "rg2"), ("group", "rg3")])))) == ["vm-b", "vm-c", "kv1"]
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("group", "rg2"), ("location", "westus")])))) == ["vm-c"]
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("type", "microsoft.compute/virtualmachines"), ("type_op", "ne")])))) == ["disk1", "kv1"]
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("subscription", SUB2), ("name", "KV")])))) == ["kv1"]
+    assert names_of(insights.apply_resource_filters(rows, {}, query="premium")) == ["disk1"]
+    counts = {rows[0]["id"].lower(): 2}
+    assert names_of(insights.apply_resource_filters(rows, f(MultiDict([("findings", "with")])), counts=counts)) == ["vm-a"]
+    assert len(insights.apply_resource_filters(rows, f(MultiDict([("findings", "without")])), counts=counts)) == 4
+
+
+def test_the_choices_of_a_filter_are_counted_with_the_other_filters_applied():
+    rows = many_resources()
+    filters = insights.parse_resource_filters(MultiDict([("location", "westus"), ("group", "rg2")]))
+    choices = insights.filter_choices(rows, filters, names={SUB: "Prod", SUB2: "Dev"})
+    # Group: counted with location=westus only (its own filter is left out): rg2 has vm-c, rg1 has disk1, rg3 has kv1.
+    assert sorted((v, c) for v, _, c in choices["group"]) == [("rg1", 1), ("rg2", 1), ("rg3", 1)]
+    # Location: counted with group=rg2 only: eastus has vm-b, westus has vm-c.
+    assert sorted((v, c) for v, _, c in choices["location"]) == [("eastus", 1), ("westus", 1)]
+    # Subscription: counted with location=westus and group=rg2, which only vm-c satisfies.
+    assert [(v, label, c) for v, label, c in choices["subscription"]] == [(SUB2, "Dev", 1)]
+    assert [(label, c) for _, label, c in choices["type"]] == [("Virtual machines", 1)]
+    everything = insights.filter_choices(rows, {}, names={SUB: "Prod", SUB2: "Dev"})
+    assert {label for _, label, _ in everything["type"]} == {"Virtual machines", "Managed disks", "Key Vaults"}
+    assert {label for _, label, _ in everything["subscription"]} == {"Prod", "Dev"}
+    stays = insights.filter_choices(rows, insights.parse_resource_filters(MultiDict([("group", "ghost")])))
+    assert ["ghost", "ghost", 0] in stays["group"]  # a chosen value stays on the list even if nothing matches it
+    assert [e[2] for e in choices["type"]] == sorted((e[2] for e in choices["type"]), reverse=True)
+
+
+def test_every_filter_shows_as_a_pill_that_can_be_changed_or_removed_and_the_bar_has_the_add_button(client, monkeypatch):
+    serve(monkeypatch, many_resources())
+    html = client.get(f"/resources?subscription={SUB}&subscription={SUB2}&group=rg2&group_op=ne&findings=with&name=vm&q=eastus").get_data(as_text=True)
+    assert 'id="filter-add"' in html and "+ Add filter" in html and 'id="filter-pop"' in html and 'data-facets=' in html
+    assert re.search(r"Subscription equals\s*<strong>Prod, Dev</strong>", html)
+    assert "Resource group does not equal" in html and "Findings equals" in html and "Name contains" in html
+    assert 'data-filter-edit="group"' in html and 'data-filter-edit="name"' in html
+    remove_group = re.search(r'<a href="([^"]+)" aria-label="Remove the Resource group filter"', html).group(1).replace("&amp;", "&")
+    assert "group" not in remove_group.split("?")[1].replace("group_op", "") and "subscription=" in remove_group and "q=eastus" in remove_group
+    assert "Clear all" in html
+    facets = re.search(r"data-facets='([^']*)'", html).group(1)
+    assert "options" in facets and "active" in facets
+
+
+def test_the_filtered_list_only_shows_what_matches_all_of_them(client, monkeypatch):
+    serve(monkeypatch, many_resources())
+    html = client.get("/resources?group=rg2&group=rg3&location=westus&type=microsoft.compute/virtualmachines&type_op=ne").get_data(as_text=True)
+    body = html.split("<tbody>")[1]
+    assert "kv1" in body and "vm-c" not in body and "vm-a" not in body and "disk1" not in body
+    assert "· 1 of 5" in html
+
+
+def test_the_filter_script_offers_the_fields_of_the_portal():
+    script = pathlib.Path(__file__).resolve().parent.parent.joinpath("src", "dashboard", "static", "app.js").read_text(encoding="utf-8")
+    for needle in ("Add filter", "does not equal", "Subscription", "Resource group", "Resource type", "Location", "With findings", "Name contains", "URLSearchParams"):
+        assert needle in script, needle

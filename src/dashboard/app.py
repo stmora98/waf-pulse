@@ -352,12 +352,7 @@ def _inventory(summary):
 
 @app.get("/resources")
 def resources_page():
-    resource_type = request.args.get("type", "").lower()
-    resource_type = resource_type if TYPE_FILTER.match(resource_type) else None
-    subscription = request.args.get("subscription", "").lower()
-    subscription = subscription if SUBSCRIPTION_ID.match(subscription) else None
-    group = request.args.get("group", "")
-    group = group if GROUP_FILTER.match(group) else None
+    filters = insights.parse_resource_filters(request.args)
     query = request.args.get("q", "")[:80]
     try:
         page = max(int(request.args.get("page", "1")), 1)
@@ -370,20 +365,44 @@ def resources_page():
     except Exception:
         logging.exception("Could not load the resources")
         return render_template("resources.html", error="The data store is not reachable right now.", summary=None), 503
-    scoped = insights.filter_resources(rows, None, subscription, group, query)
-    chosen = [r for r in scoped if not resource_type or r["type"] == resource_type]
     names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
-    type_counts = Counter(r["type"] for r in scoped).most_common(14)
+    chosen = insights.apply_resource_filters(rows, filters, query, counts)
     start = (page - 1) * RESOURCES_PER_PAGE
     shown = [{**r, "findings": counts.get(r["id"].lower(), 0), "subscription": names.get(r["subscriptionId"], r["subscriptionId"])}
              for r in chosen[start:start + RESOURCES_PER_PAGE]]
+    types = filters.get("type")
+    only_type = types["values"][0] if types and types["op"] == "eq" and len(types["values"]) == 1 else None
+    active = []
+    for field, spec in filters.items():
+        label = insights.RESOURCE_FILTERS[field][1] if field in insights.RESOURCE_FILTERS else "Findings" if field == "findings" else "Name"
+        shown_values = [names.get(v.lower(), v) if field == "subscription" else insights.friendly_type(v) if field == "type"
+                        else insights.FINDING_FILTER.get(v, v) for v in spec["values"]]
+        rest = {k: s for k, s in filters.items() if k != field}
+        active.append({"field": field, "label": label, "op": spec["op"], "values": shown_values,
+                       "remove": url_for("resources_page", q=query or None, **_filter_args(rest))})
     return render_template(
         "resources.html", error=None, summary=summary, has_inventory=bool(rows), truncated=truncated, rows=shown,
-        total=len(chosen), page=page, pages=max((len(chosen) + RESOURCES_PER_PAGE - 1) // RESOURCES_PER_PAGE, 1),
-        resource_type=resource_type, subscription=subscription, group=group, query=query, per_page=RESOURCES_PER_PAGE,
-        type_chips=[(t, insights.friendly_type(t), n) for t, n in type_counts], names=names,
-        title=insights.friendly_type(resource_type) if resource_type else "Resources", filtered=bool(subscription or group or query),
+        total=len(chosen), everything=len(rows), page=page,
+        pages=max((len(chosen) + RESOURCES_PER_PAGE - 1) // RESOURCES_PER_PAGE, 1), query=query,
+        title=insights.friendly_type(only_type) if only_type else "Resources", active=active,
+        page_args={"q": query or None, **_filter_args(filters)},
+        facets={"fields": {f: {"label": insights.RESOURCE_FILTERS[f][1], "options": o}
+                           for f, o in insights.filter_choices(rows, filters, query, counts, names).items()},
+                "active": {f: {"op": s["op"], "values": s["values"]} for f, s in filters.items()}},
     )
+
+
+def _filter_args(filters):
+    """The filters as keyword arguments for url_for (a list value becomes a repeated parameter)."""
+    args = {}
+    for field, spec in filters.items():
+        if field in insights.RESOURCE_FILTERS:
+            args[field] = list(spec["values"])
+            if spec["op"] == "ne":
+                args[f"{field}_op"] = "ne"
+        else:
+            args[field] = spec["values"][0]
+    return args
 
 
 @app.get("/resource")

@@ -310,3 +310,188 @@
   var reset = document.getElementById("lz-reset");
   if (reset) { reset.addEventListener("click", function () { save({ reset: true }, "Going back to the reference..."); }); }
 })();
+
+(function () {
+  var bar = document.getElementById("filterbar");
+  if (!bar) { return; }
+  var pop = document.getElementById("filter-pop");
+  var facets = JSON.parse(bar.getAttribute("data-facets") || "{}");
+  var fields = facets.fields || {};
+  var active = facets.active || {};
+  var ORDER = ["subscription", "group", "type", "location"];
+  var LABELS = { subscription: "Subscription", group: "Resource group", type: "Resource type", location: "Location",
+                 findings: "Findings", name: "Name" };
+
+  function element(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text) { node.textContent = text; }
+    if (className) { node.className = className; }
+    return node;
+  }
+
+  function close() { pop.hidden = true; }
+
+  function place(anchor) {
+    pop.hidden = false;
+    var wrap = bar.getBoundingClientRect();
+    var rect = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(0, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth)) + "px";
+    pop.style.top = (rect.bottom - wrap.top + 6) + "px";
+  }
+
+  function go(field, op, values) {
+    var params = new URLSearchParams(window.location.search);
+    params.delete(field);
+    params.delete(field + "_op");
+    params.delete("page");
+    values.forEach(function (value) { params.append(field, value); });
+    if (values.length && op === "ne") { params.set(field + "_op", "ne"); }
+    window.location.search = params.toString();
+  }
+
+  function editFacet(field, anchor) {
+    var spec = fields[field];
+    var current = active[field] || { op: "eq", values: [] };
+    var chosen = {};
+    current.values.forEach(function (value) { chosen[String(value).toLowerCase()] = true; });
+    pop.textContent = "";
+    pop.appendChild(element("h4", spec.label));
+    var op = element("select");
+    [["eq", "equals"], ["ne", "does not equal"]].forEach(function (pair) {
+      var option = element("option", pair[1]);
+      option.value = pair[0];
+      op.appendChild(option);
+    });
+    op.value = current.op === "ne" ? "ne" : "eq";
+    op.setAttribute("aria-label", "Operator");
+    pop.appendChild(op);
+    var search = element("input", "", "lz-input");
+    search.type = "search";
+    search.placeholder = "Search " + spec.label.toLowerCase();
+    pop.appendChild(search);
+    var box = element("div", "", "fopts");
+    var rows = [];
+    spec.options.forEach(function (entry) {
+      var label = element("label");
+      var check = element("input");
+      check.type = "checkbox";
+      check.value = entry[0];
+      check.checked = !!chosen[String(entry[0]).toLowerCase()];
+      label.appendChild(check);
+      label.appendChild(element("span", entry[1]));
+      label.appendChild(element("span", String(entry[2]), "count"));
+      box.appendChild(label);
+      rows.push({ label: label, text: String(entry[1]).toLowerCase(), check: check });
+    });
+    if (!rows.length) { box.appendChild(element("p", "Nothing to choose from.", "muted")); }
+    search.addEventListener("input", function () {
+      var needle = search.value.trim().toLowerCase();
+      rows.forEach(function (row) { row.label.hidden = needle !== "" && row.text.indexOf(needle) === -1; });
+    });
+    pop.appendChild(box);
+    var actions = element("div", "", "lz-row");
+    var apply = element("button", "Apply");
+    apply.type = "button";
+    apply.addEventListener("click", function () {
+      var values = rows.filter(function (row) { return row.check.checked; }).map(function (row) { return row.check.value; });
+      go(field, op.value, values);
+    });
+    var cancel = element("button", "Cancel", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    actions.appendChild(apply);
+    actions.appendChild(cancel);
+    pop.appendChild(actions);
+    place(anchor);
+    search.focus();
+  }
+
+  function editFindings(anchor) {
+    var current = (active.findings && active.findings.values[0]) || "";
+    pop.textContent = "";
+    pop.appendChild(element("h4", "Findings"));
+    var box = element("div", "", "fopts");
+    [["with", "With findings"], ["without", "Without findings"]].forEach(function (pair) {
+      var label = element("label");
+      var radio = element("input");
+      radio.type = "radio";
+      radio.name = "findings";
+      radio.value = pair[0];
+      radio.checked = current === pair[0];
+      label.appendChild(radio);
+      label.appendChild(element("span", pair[1]));
+      box.appendChild(label);
+    });
+    pop.appendChild(box);
+    var actions = element("div", "", "lz-row");
+    var apply = element("button", "Apply");
+    apply.type = "button";
+    apply.addEventListener("click", function () {
+      var picked = box.querySelector("input:checked");
+      go("findings", "eq", picked ? [picked.value] : []);
+    });
+    var cancel = element("button", "Cancel", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    actions.appendChild(apply);
+    actions.appendChild(cancel);
+    pop.appendChild(actions);
+    place(anchor);
+  }
+
+  function editName(anchor) {
+    var current = (active.name && active.name.values[0]) || "";
+    pop.textContent = "";
+    pop.appendChild(element("h4", "Name contains"));
+    var input = element("input", "", "lz-input");
+    input.type = "text";
+    input.maxLength = 150;
+    input.value = current;
+    input.placeholder = "Part of a resource name";
+    pop.appendChild(input);
+    var actions = element("div", "", "lz-row");
+    var apply = element("button", "Apply");
+    apply.type = "button";
+    function submit() { go("name", "contains", input.value.trim() ? [input.value.trim()] : []); }
+    apply.addEventListener("click", submit);
+    input.addEventListener("keydown", function (event) { if (event.key === "Enter") { submit(); } });
+    var cancel = element("button", "Cancel", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    actions.appendChild(apply);
+    actions.appendChild(cancel);
+    pop.appendChild(actions);
+    place(anchor);
+    input.focus();
+  }
+
+  function edit(field, anchor) {
+    if (field === "findings") { editFindings(anchor); }
+    else if (field === "name") { editName(anchor); }
+    else { editFacet(field, anchor); }
+  }
+
+  var add = document.getElementById("filter-add");
+  add.addEventListener("click", function (event) {
+    event.stopPropagation();
+    pop.textContent = "";
+    pop.appendChild(element("h4", "Add filter"));
+    ORDER.concat(["findings", "name"]).forEach(function (field) {
+      var item = element("button", LABELS[field], "fmenu-item");
+      item.type = "button";
+      if (active[field]) { item.disabled = true; item.title = "Already added: change it from its pill"; }
+      item.addEventListener("click", function (click) { click.stopPropagation(); edit(field, add); });
+      pop.appendChild(item);
+    });
+    place(add);
+  });
+  Array.prototype.forEach.call(bar.querySelectorAll("[data-filter-edit]"), function (button) {
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      edit(button.getAttribute("data-filter-edit"), button);
+    });
+  });
+  pop.addEventListener("click", function (event) { event.stopPropagation(); });
+  document.addEventListener("click", close);
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { close(); } });
+})();

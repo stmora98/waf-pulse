@@ -436,3 +436,28 @@ a.azure-link:active { transform: scale(0.97); }
   background: var(--panel-2); color: var(--text); font: inherit; font-size: 0.9rem; margin-top: 4px; }
 .lz-pop .lz-error { color: var(--bad); margin: 6px 0; }
 .lz-pop .lz-row.tight button { padding: 6px 10px; font-size: 0.85rem; }
+
+/* Filters like the Azure portal: a pill for each one and a + to add another */
+.filterbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 16px; }
+.fb-search { margin: 0; }
+.fb-search input { width: 240px; padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); font: inherit; font-size: 0.9rem; }
+.fpill { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); overflow: hidden; }
+.fpill button { background: transparent; color: var(--text); font-weight: 400; font-size: 0.85rem; padding: 5px 4px 5px 12px; max-width: 360px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fpill button strong { color: var(--accent); font-weight: 600; }
+.fpill a { display: grid; place-items: center; padding: 0 10px; color: var(--muted); text-decoration: none; font-size: 1.1rem; }
+.fadd { background: transparent; color: var(--accent); border: 1px dashed var(--accent); font-weight: 500; font-size: 0.85rem; padding: 5px 12px; border-radius: 999px; }
+@media (hover: hover) and (pointer: fine) {
+  .fpill button:hover, .fpill a:hover { background: var(--line); }
+  .fadd:hover:not(:disabled) { box-shadow: none; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+}
+.fpop { width: 320px; }
+.fpop .fopts { max-height: 260px; overflow-y: auto; margin: 8px 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.fpop .fopts label { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: 0; font-size: 0.88rem; color: var(--text); cursor: pointer; }
+.fpop .fopts label:hover { background: var(--panel-2); }
+.fpop .fopts .count { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+.fpop .fopts input[type="checkbox"], .fpop .fopts input[type="radio"] { margin: 0; }
+.fpop .fmenu-item { display: block; width: 100%; text-align: left; background: transparent; color: var(--text); font-weight: 400; padding: 8px 10px; border-radius: var(--radius-sm); }
+.fpop .fmenu-item:hover:not(:disabled) { background: var(--panel-2); box-shadow: none; }
+.fpop .fmenu-item[disabled] { color: var(--muted); }

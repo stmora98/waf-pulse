@@ -12,27 +12,28 @@
       <h2>Resources</h2>
       <section class="notice">The resource list is collected from the next run. Select <strong>Refresh now</strong> to collect it.</section>
     {% else %}
-      <h2>{{ title }} <span class="muted">· {{ total }}</span></h2>
+      <h2>{{ title }} <span class="muted">· {{ total }}{% if total != everything %} of {{ everything }}{% endif %}</span></h2>
       {% if truncated %}<p class="muted">The tenant has more resources than the list keeps, so only the first ones are shown.</p>{% endif %}
-      <form class="picker" method="get" action="{{ url_for('resources_page') }}">
-        {% if resource_type %}<input type="hidden" name="type" value="{{ resource_type }}">{% endif %}
-        {% if subscription %}<input type="hidden" name="subscription" value="{{ subscription }}">{% endif %}
-        <label>Search<input type="search" name="q" value="{{ query }}" maxlength="80" placeholder="Name, group, location or details"></label>
-        <label>Resource group<input type="text" name="group" value="{{ group or '' }}" maxlength="90" placeholder="Any"></label>
-        <button type="submit">Filter</button>
-        {% if resource_type or subscription or group or query %}<a class="chip clear" href="{{ url_for('resources_page') }}">Clear filters</a>{% endif %}
-      </form>
-      <section class="severity">
-        <span class="muted">Type</span>
-        <a class="chip {% if not resource_type %}active{% endif %}" href="{{ url_for('resources_page', subscription=subscription, group=group, q=query) }}">All</a>
-        {% for raw, label, count in type_chips %}
-          <a class="chip {% if resource_type == raw %}active{% endif %}" href="{{ url_for('resources_page', type=raw, subscription=subscription, group=group, q=query) }}">{{ label }}: {{ count }}</a>
+
+      <div class="filterbar" id="filterbar" data-facets='{{ facets | tojson }}'>
+        <form class="fb-search" method="get" action="{{ url_for('resources_page') }}">
+          {% for key, value in page_args.items() if key != 'q' and value is not none %}
+            {% if value is string %}<input type="hidden" name="{{ key }}" value="{{ value }}">
+            {% else %}{% for item in value %}<input type="hidden" name="{{ key }}" value="{{ item }}">{% endfor %}{% endif %}
+          {% endfor %}
+          <input type="search" name="q" value="{{ query }}" maxlength="80" placeholder="Filter for any field..." aria-label="Filter for any field">
+        </form>
+        {% for f in active %}
+          <span class="fpill">
+            <button type="button" data-filter-edit="{{ f.field }}" title="Change this filter">{{ f.label }} {{ 'does not equal' if f.op == 'ne' else 'contains' if f.op == 'contains' else 'equals' }}
+              <strong>{{ f['values'] | join(', ') }}</strong></button>
+            <a href="{{ f.remove }}" aria-label="Remove the {{ f.label }} filter" title="Remove this filter">&times;</a>
+          </span>
         {% endfor %}
-        {% if resource_type and not type_chips | selectattr(0, 'equalto', resource_type) | list %}
-          <a class="chip active" href="{{ url_for('resources_page', type=resource_type) }}">{{ title }}</a>
-        {% endif %}
-      </section>
-      {% if subscription %}<p class="muted">Subscription: <strong>{{ names.get(subscription, subscription) }}</strong></p>{% endif %}
+        <button type="button" class="fadd" id="filter-add" aria-haspopup="true">+ Add filter</button>
+        {% if active or query %}<a class="chip clear" href="{{ url_for('resources_page') }}">Clear all</a>{% endif %}
+        <div class="lz-pop fpop" id="filter-pop" hidden role="dialog" aria-label="Filter"></div>
+      </div>
 
       <section class="panel">
         {% if rows %}
@@ -47,7 +48,7 @@
                     <td>{{ r.resourceGroup }}</td>
                     <td>{{ r.location }}</td>
                     <td>{{ r.detail or '–' }}</td>
-                    <td><a href="{{ url_for('resources_page', subscription=r.subscriptionId) }}">{{ r.subscription }}</a></td>
+                    <td>{{ r.subscription }}</td>
                     <td>{% if r.findings %}<a href="{{ url_for('resource_page', id=r.id) }}">{{ r.findings }}</a>{% else %}<span class="muted">0</span>{% endif %}</td>
                     <td>{{ azure_link(r.id) }}</td>
                   </tr>
@@ -57,12 +58,12 @@
           </div>
           {% if pages > 1 %}
             <p class="muted">Page {{ page }} of {{ pages }} ·
-              {% if page > 1 %}<a href="{{ url_for('resources_page', type=resource_type, subscription=subscription, group=group, q=query, page=page - 1) }}">Previous</a>{% endif %}
-              {% if page < pages %}<a href="{{ url_for('resources_page', type=resource_type, subscription=subscription, group=group, q=query, page=page + 1) }}">Next</a>{% endif %}
+              {% if page > 1 %}<a href="{{ url_for('resources_page', page=page - 1, **page_args) }}">Previous</a>{% endif %}
+              {% if page < pages %}<a href="{{ url_for('resources_page', page=page + 1, **page_args) }}">Next</a>{% endif %}
             </p>
           {% endif %}
         {% else %}
-          <p class="muted">No resources match. {% if resource_type %}This type may not be a resource of its own, for example a subscription.{% endif %}</p>
+          <p class="muted">No resources match these filters.</p>
         {% endif %}
       </section>
     {% endif %}

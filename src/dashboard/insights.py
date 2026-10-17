@@ -176,3 +176,86 @@ def group_by_resource(findings):
                      "sources": sorted(item["sources"])})
     rows.sort(key=lambda r: (RANK.get(r["severity"], 9), -r["count"], r["name"].lower()))
     return rows
+
+
+# Filters of the resource list, like the ones of the Azure portal: a field, "equals" or "does not equal", and values.
+RESOURCE_FILTERS = {
+    "subscription": ("subscriptionId", "Subscription"),
+    "group": ("resourceGroup", "Resource group"),
+    "type": ("type", "Resource type"),
+    "location": ("location", "Location"),
+}
+FINDING_FILTER = {"with": "With findings", "without": "Without findings"}
+MAX_FILTER_VALUES = 60
+MAX_FILTER_TEXT = 150
+
+
+def parse_resource_filters(args):
+    """Reads the filters from a query string (a `MultiDict`): {field: {op, values}} for the four fields, plus
+    `findings` (with or without) and `name` (contains). A field takes several values, which mean "any of them"."""
+    filters = {}
+    for field in RESOURCE_FILTERS:
+        values = []
+        for value in args.getlist(field):
+            value = value.strip()[:MAX_FILTER_TEXT]
+            if value and value.lower() not in {v.lower() for v in values}:
+                values.append(value.lower() if field in ("subscription", "type") else value)
+        if values:
+            op = "ne" if args.get(f"{field}_op") == "ne" else "eq"
+            filters[field] = {"op": op, "values": values[:MAX_FILTER_VALUES]}
+    finding = args.get("findings", "")
+    if finding in FINDING_FILTER:
+        filters["findings"] = {"op": "eq", "values": [finding]}
+    name = args.get("name", "").strip()[:MAX_FILTER_TEXT]
+    if name:
+        filters["name"] = {"op": "contains", "values": [name]}
+    return filters
+
+
+def apply_resource_filters(rows, filters, query="", counts=None, skip=None):
+    """The rows that satisfy every filter (except `skip`, to count the choices of that filter) and the free text."""
+    counts = counts or {}
+    needle = str(query or "").strip().lower()
+    result = []
+    for row in rows:
+        keep = True
+        for field, spec in filters.items():
+            if field == skip:
+                continue
+            if field in RESOURCE_FILTERS:
+                value = str(row.get(RESOURCE_FILTERS[field][0], "")).lower()
+                hit = value in {v.lower() for v in spec["values"]}
+                keep = hit if spec["op"] == "eq" else not hit
+            elif field == "findings":
+                has = bool(counts.get(str(row.get("id", "")).lower()))
+                keep = has if spec["values"][0] == "with" else not has
+            elif field == "name":
+                keep = spec["values"][0].lower() in str(row.get("name", "")).lower()
+            if not keep:
+                break
+        if not keep:
+            continue
+        if needle and needle not in " ".join(str(row.get(k, "")) for k in ("name", "type", "resourceGroup", "location", "detail")).lower():
+            continue
+        result.append(row)
+    return result
+
+
+def filter_choices(rows, filters, query="", counts=None, names=None, limit=300):
+    """For each of the four fields, the values to offer with how many resources each would give, counted with all the
+    other filters applied, like the faceted filters of the Azure portal. Returns {field: [[value, label, count]]}."""
+    names = names or {}
+    choices = {}
+    for field, (key, _) in RESOURCE_FILTERS.items():
+        counter = Counter(str(r.get(key, "")) for r in apply_resource_filters(rows, filters, query, counts, skip=field) if r.get(key))
+        selected = {v.lower() for v in filters.get(field, {}).get("values", [])}
+        for value in selected:  # a chosen value stays on the list even when nothing matches it any more
+            if not any(v.lower() == value for v in counter):
+                counter[value] = 0
+        entries = []
+        for value, count in counter.items():
+            label = names.get(value.lower(), value) if field == "subscription" else friendly_type(value) if field == "type" else value
+            entries.append([value, label, count])
+        entries.sort(key=lambda e: (-e[2], str(e[1]).lower()))
+        choices[field] = entries[:limit]
+    return choices
