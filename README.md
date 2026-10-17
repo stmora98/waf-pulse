@@ -123,6 +123,22 @@ Modeled on the Azure Optimization Engine reports: an overview, one page per Well
 | **Action item detail** | Select any action item to see what to do, the documentation link, every affected resource and how many resources it affected in each earlier run. |
 | **Governance** | The management group hierarchy drawn as a landing zone diagram (each group with its subscriptions), next to the Azure landing zone reference architecture with the groups your tenant already has marked, plus policy, access, locks, Defender, diagnostics, Key Vault and Entra. |
 | **History** | Runs, score trend and what changed between two runs. |
+### Landing zone mapping
+
+The Governance page matches each of your management groups to a role of the Azure landing zone reference architecture, without depending on the names being the same. It tries, in this order:
+
+1. **Manual mapping** (below), always wins.
+2. **The name**, in English, Spanish or Portuguese and without accents (`Plataforma`, `Conectividad`, `Zonas de aterrizaje`, `Dado de baja`, `Pruebas` ...).
+3. **Policy assignments** made on the group. The reference architecture assigns well known ones: `Enforce-ALZ-Sandbox` marks the sandbox, `Enforce-ALZ-Decomm` the decommissioned group, `Deny-IP-Forwarding` and similar the landing zones, `Deploy-Private-DNS-Zones` the corp group, `Enable-DDoS-VNET` the connectivity group.
+4. **What the subscriptions contain**, only for groups under a platform group: firewalls, VPN or ExpressRoute gateways and virtual hubs point to connectivity, domain services to identity, Log Analytics workspaces and Automation accounts to management.
+
+Each match shows how it was made (name, policy, content or manual) when you hover a box and in the list under the reference diagram. To fix a wrong or missing match, set the `LANDING_ZONE_MAP` setting of the dashboard App Service (or fill the **Landing zone mapping** field of the form, under Advanced) with a JSON object. Each role takes one management group name or id, or a list of them:
+
+```json
+{"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio"}
+```
+
+Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. Run **Refresh now** is not needed: the dashboard reads the setting on its next restart.
 ## Refresh modes
 
 | Mode | Behavior |

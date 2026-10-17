@@ -64,6 +64,9 @@ param dashboardSignIn string = 'none'
 @description('Object IDs of the users or service principals allowed to open the dashboard, comma separated. Required when sign-in is on: without it every user of the tenant could sign in.')
 param dashboardAllowedUserIds string = ''
 
+@description('Optional JSON that tells the Governance page which management group plays which landing zone role, when the names do not say it. Example: connectivity maps to mg-hub. Roles: platform, security, management, identity, connectivity, landingzones, corp, online, local, sandbox, decommissioned.')
+param landingZoneMap string = ''
+
 @description('Dashboard package URL (run from package).')
 param webPackageUrl string = 'https://github.com/stmora98/waf-pulse/releases/latest/download/dashboard.zip'
 
@@ -185,6 +188,7 @@ module dashboardApp './modules/app-service.bicep' = {
     authTenantId: collectorTenantId
     authSecretUri: keyVault.outputs.collectorSecretUri
     allowedUserIds: allowedUserIds
+    landingZoneMap: landingZoneMap
     workspaceId: logAnalytics.outputs.workspaceId
   }
   dependsOn: [

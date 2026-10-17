@@ -53,12 +53,66 @@ def test_subscriptions_without_a_group_get_their_own_box():
 
 
 def test_the_reference_marks_what_the_tenant_has():
-    roles = lz.present_roles(tree())
-    assert roles == {"platform", "connectivity", "identity", "landingzones"}
-    reference = lz.reference(roles, True)
-    status = {n["label"]: n["status"] for n in reference["nodes"]}
+    _, found = lz.classify(tree())
+    assert set(found) == {"platform", "connectivity", "identity", "landingzones"}
+    status = {n["label"]: n["status"] for n in lz.reference(found, True)["nodes"]}
     assert status["Platform"] == status["Connectivity"] == status["Workload landing zones"] == "present"
-    assert status["Sandbox"] == status["Security"] == "missing" and len(reference["nodes"]) == 13
-    assert lz.reference(set(), False)["nodes"][1]["status"] == "missing"  # no hierarchy: no intermediate root either
-    found = dict(lz.alignment(roles))
-    assert found["Platform"] and not found["Sandbox"] and len(found) == 11
+    assert status["Sandbox"] == status["Security"] == "missing" and len(status) == 13
+    assert lz.reference({}, False)["nodes"][1]["status"] == "missing"  # no hierarchy: no intermediate root either
+    rows = {label: (ok, matches) for label, ok, matches in lz.alignment(found)}
+    assert rows["Platform"] == (True, ["Platform (name)"]) and rows["Sandbox"] == (False, []) and len(rows) == 11
+
+
+def node(name, display, subs=(), children=()):
+    return {"name": name, "displayName": display, "subscriptions": list(subs), "children": list(children)}
+
+
+def test_names_in_spanish_and_portuguese_are_recognized_without_accents():
+    for text, role in [("Plataforma", "platform"), ("Conectividad", "connectivity"), ("Identidad", "identity"),
+                       ("Seguridad", "security"), ("Gestión", "management"), ("Zonas de aterrizaje", "landingzones"),
+                       ("Corporativo", "corp"), ("Pruebas", "sandbox"), ("Dado de baja", "decommissioned"),
+                       ("Conectividade", "connectivity"), ("Segurança", "security")]:
+        assert lz.role_of(text) == role, text
+    assert lz.role_of("Ventas") == "" and lz.role_of("Marketing 2025") == ""
+
+
+def test_policy_assignments_identify_a_group_whose_name_says_nothing():
+    tree_ = [node("root", "Tenant Root Group", children=[node("mg-a1", "Grupo A1"), node("mg-b2", "Grupo B2"), node("mg-c3", "Grupo C3")])]
+    policies = {"mg-a1": ["Enforce-ALZ-Sandbox"], "mg-b2": ["Enforce-ALZ-Decomm"], "mg-c3": ["Deny-IP-Forwarding", "Deny-Storage-http"]}
+    classification, found = lz.classify(tree_, policies)
+    assert classification["mg-a1"] == {"role": "sandbox", "how": "policy"}
+    assert classification["mg-b2"]["role"] == "decommissioned" and classification["mg-c3"]["role"] == "landingzones"
+    assert found["sandbox"] == [{"label": "Grupo A1", "how": "policy"}]
+
+
+def test_the_contents_of_platform_subscriptions_identify_the_platform_groups():
+    tree_ = [node("root", "Root", children=[node("plat", "Plataforma", children=[
+        node("g1", "Alfa", ["s1"]), node("g2", "Beta", ["s2"]), node("g3", "Gamma", ["s3"]), node("g4", "Delta", ["s4"])])])]
+    signals = {"s1": {"microsoft.network/azurefirewalls": 1}, "s2": {"microsoft.operationalinsights/workspaces": 2},
+               "s3": {"microsoft.aad/domainservices": 1}, "s4": {}}
+    classification, _ = lz.classify(tree_, {}, signals)
+    assert classification["g1"] == {"role": "connectivity", "how": "content"}
+    assert classification["g2"]["role"] == "management" and classification["g3"]["role"] == "identity"
+    assert classification["g4"]["role"] == ""  # nothing to go on
+    # The same contents outside a platform group say nothing: a workload subscription often has a workspace.
+    other = [node("root", "Root", children=[node("apps", "Ventas", children=[node("g2", "Beta", ["s2"])])])]
+    assert lz.classify(other, {}, signals)[0]["g2"]["role"] == ""
+
+
+def test_a_manual_mapping_wins_over_everything_else():
+    tree_ = [node("root", "Root", children=[node("mg-1", "Platform"), node("mg-2", "Cosa rara")])]
+    override = lz.parse_override('{"sandbox": ["Cosa Rara"], "connectivity": "MG-1"}')
+    classification, found = lz.classify(tree_, {}, {}, override)
+    assert classification["mg-1"] == {"role": "connectivity", "how": "manual"}  # not "platform" by name
+    assert classification["mg-2"] == {"role": "sandbox", "how": "manual"} and "platform" not in found
+
+
+def test_a_bad_mapping_is_ignored():
+    assert lz.parse_override("") == {} and lz.parse_override("{not json") == {} and lz.parse_override("[1]") == {}
+    assert lz.parse_override('{"nonsense": "x", "sandbox": ["a", " "]}') == {"sandbox": {"a"}}
+
+
+def test_the_diagram_carries_how_each_group_was_matched():
+    classification, _ = lz.classify(tree(), {}, {})
+    by_label = {n["label"]: n for n in lz.actual(tree(), [], NAMES, [], classification)["nodes"]}
+    assert by_label["Platform"]["how"] == "name" and by_label["Tenant Root Group"]["how"] == ""

@@ -51,7 +51,7 @@
         <p><strong>{{ alignment | selectattr(1) | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
         {{ lz_diagram(reference, "Azure landing zone reference architecture") }}
         <ul class="align-list">
-          {% for label, found in alignment %}<li class="{{ 'yes' if found else 'no' }}">{{ label }}</li>{% endfor %}
+          {% for label, found, matches in alignment %}<li class="{{ 'yes' if found else 'no' }}">{{ label }}{% if matches %} <span class="muted">· {{ matches | join(', ') }}</span>{% endif %}</li>{% endfor %}
         </ul>
       </section>
       <section class="insights">

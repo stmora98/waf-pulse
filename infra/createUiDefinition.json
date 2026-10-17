@@ -225,6 +225,19 @@
             }
           },
           {
+            "name": "landingZoneMap",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Landing zone mapping (optional JSON)",
+            "toolTip": "Tells the Governance page which management group plays which landing zone role when the names do not say it, for example {\"connectivity\": \"mg-hub\", \"platform\": [\"Plataforma\"]}. Leave empty to detect it automatically.",
+            "defaultValue": "",
+            "multiLine": true,
+            "constraints": {
+              "required": false,
+              "regex": "^$|^\\s*\\{[\\s\\S]*\\}\\s*$",
+              "validationMessage": "Enter a JSON object or leave empty."
+            }
+          },
+          {
             "name": "collectorPackageUrl",
             "type": "Microsoft.Common.TextBox",
             "label": "Collector package URL",
@@ -252,6 +265,7 @@
       "dashboardSignIn": "[steps('dashboard').dashboardSignIn]",
       "dashboardAllowedUserIds": "[steps('dashboard').dashboardAllowedUserIds]",
       "webPackageUrl": "[steps('advanced').webPackageUrl]",
+      "landingZoneMap": "[steps('advanced').landingZoneMap]",
       "collectorPackageUrl": "[steps('advanced').collectorPackageUrl]"
     }
   }

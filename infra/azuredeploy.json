@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "4279430100667301509"
+      "templateHash": "17257538197329307069"
     }
   },
   "parameters": {
@@ -127,6 +127,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "Object IDs of the users or service principals allowed to open the dashboard, comma separated. Required when sign-in is on: without it every user of the tenant could sign in."
+      }
+    },
+    "landingZoneMap": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional JSON that tells the Governance page which management group plays which landing zone role, when the names do not say it. Example: connectivity maps to mg-hub. Roles: platform, security, management, identity, connectivity, landingzones, corp, online, local, sandbox, decommissioned."
       }
     },
     "webPackageUrl": {
@@ -1139,6 +1146,9 @@
           "allowedUserIds": {
             "value": "[variables('allowedUserIds')]"
           },
+          "landingZoneMap": {
+            "value": "[parameters('landingZoneMap')]"
+          },
           "workspaceId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.workspaceId.value]"
           }
@@ -1150,7 +1160,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "13058673629101412809"
+              "templateHash": "17886199740112671595"
             }
           },
           "parameters": {
@@ -1205,6 +1215,10 @@
             "allowedUserIds": {
               "type": "array"
             },
+            "landingZoneMap": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "workspaceId": {
               "type": "string"
             }
@@ -1235,7 +1249,7 @@
                   "http20Enabled": true,
                   "healthCheckPath": "/api/health",
                   "appCommandLine": "PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app",
-                  "appSettings": "[concat(createArray(createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', parameters('webPackageUrl')), createObject('name', 'SCM_DO_BUILD_DURING_DEPLOYMENT', 'value', 'false'), createObject('name', 'MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('managedIdentityClientId')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabase')), createObject('name', 'STORAGE_ACCOUNT_URL', 'value', parameters('storageAccountUrl')), createObject('name', 'STORAGE_QUEUE_URL', 'value', parameters('storageQueueEndpoint')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES', 'value', '10')), if(parameters('signInEnabled'), createArray(createObject('name', 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('authSecretUri')))), createArray()))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', parameters('webPackageUrl')), createObject('name', 'SCM_DO_BUILD_DURING_DEPLOYMENT', 'value', 'false'), createObject('name', 'MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('managedIdentityClientId')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabase')), createObject('name', 'STORAGE_ACCOUNT_URL', 'value', parameters('storageAccountUrl')), createObject('name', 'STORAGE_QUEUE_URL', 'value', parameters('storageQueueEndpoint')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES', 'value', '10'), createObject('name', 'LANDING_ZONE_MAP', 'value', parameters('landingZoneMap'))), if(parameters('signInEnabled'), createArray(createObject('name', 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('authSecretUri')))), createArray()))]"
                 }
               }
             },

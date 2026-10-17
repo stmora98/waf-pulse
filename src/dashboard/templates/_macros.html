@@ -101,7 +101,7 @@
       {% for link in d.links %}<path class="lz-link" d="{{ link.d }}"></path>{% endfor %}
       {% for n in d.nodes %}
         <g class="lz-node role-{{ n.role or 'plain' }}{% if n.status %} status-{{ n.status }}{% endif %}">
-          <title>{{ n.label }}{% if n.status %} · {{ 'present' if n.status == 'present' else 'not found in your tenant' }}{% endif %}</title>
+          <title>{{ n.label }}{% if n.status %} · {{ 'present' if n.status == 'present' else 'not found in your tenant' }}{% endif %}{% if n.how %} · matched by {{ n.how }}{% endif %}</title>
           <rect x="{{ n.x }}" y="{{ n.y }}" width="{{ n.width }}" height="{{ n.height }}" rx="8"></rect>
           <text x="{{ n.cx }}" y="{{ n.y + 22 }}" text-anchor="middle">{{ n.label }}</text>
           {% if n.status == 'present' %}<circle class="lz-ok" cx="{{ n.x + n.width }}" cy="{{ n.y }}" r="8"></circle><path class="lz-tick" d="M{{ n.x + n.width - 4 }},{{ n.y }} l3,3 l5,-6"></path>{% endif %}

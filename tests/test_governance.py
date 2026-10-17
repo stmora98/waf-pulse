@@ -171,7 +171,7 @@ def test_collect_reports_a_failing_query_and_keeps_the_rest(monkeypatch):
 
 def test_every_query_is_defined_and_has_a_name():
     assert {"managementGroups", "subscriptions", "assignments", "compliance", "exemptions", "owners", "locks",
-            "defender", "rolesByPrincipal", "customRoles", "customDefinitions"} == set(governance.QUERIES)
+            "defender", "rolesByPrincipal", "customRoles", "customDefinitions", "signals"} == set(governance.QUERIES)
     assert governance.OWNER_ROLE_ID in governance.QUERIES["owners"]
 
 
@@ -260,3 +260,21 @@ def test_defender_plans_are_read_from_arm_when_resource_graph_has_none(monkeypat
         ("VirtualMachines", "Standard", "P2"), ("Dns", "Free", "")]
     assert [f["resourceName"] for f in findings if f["ruleId"] == "GOV-DEF-001"] == ["Dns"]
     assert any("denied-sub" in e["error"] for e in errors)
+
+
+def test_policy_assignments_are_grouped_by_the_management_group_they_are_made_on():
+    base = "/providers/Microsoft.Management/managementGroups/"
+    result = governance.policy_by_group([
+        {"name": "Enforce-ALZ-Sandbox", "displayName": "Sandbox guardrails", "scope": base + "mg-sbx"},
+        {"name": "Deny-IP-Forwarding", "displayName": "", "scope": base + "MG-LZ/"},
+        {"name": "Enforce-ALZ-Sandbox", "displayName": "Sandbox guardrails", "scope": base + "mg-sbx"},  # duplicate
+        {"name": "On-a-subscription", "scope": "/subscriptions/s1"},
+    ])
+    assert result == {"mg-sbx": ["Enforce-ALZ-Sandbox", "Sandbox guardrails"], "mg-lz": ["Deny-IP-Forwarding"]}
+
+
+def test_subscription_signals_count_resource_types_per_subscription():
+    rows = [{"subscriptionId": SUB.upper(), "type": "Microsoft.Network/AzureFirewalls", "n": 2},
+            {"subscriptionId": SUB, "type": "microsoft.automation/automationaccounts", "n": 1}, {"type": "x", "n": 1}]
+    assert governance.subscription_signals(rows) == {SUB: {"microsoft.network/azurefirewalls": 2,
+                                                          "microsoft.automation/automationaccounts": 1}}

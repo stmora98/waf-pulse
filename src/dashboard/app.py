@@ -362,12 +362,13 @@ def governance_page():
     diagrams = {}
     if governance:
         names = {sub["id"]: sub.get("name") or sub["id"] for sub in governance.get("subscriptions", [])}
-        roles = landing_zone.present_roles(tree)
+        classification, found = landing_zone.classify(
+            tree, governance.get("policyByGroup"), governance.get("signals"), landing_zone.override_from_environment())
         has_hierarchy = any(node.get("children") for node in tree)
         diagrams = {
-            "hierarchy": landing_zone.actual(tree, governance.get("subscriptions", []), names, unassigned),
-            "reference": landing_zone.reference(roles, has_hierarchy),
-            "alignment": landing_zone.alignment(roles), "has_hierarchy": has_hierarchy,
+            "hierarchy": landing_zone.actual(tree, governance.get("subscriptions", []), names, unassigned, classification),
+            "reference": landing_zone.reference(found, has_hierarchy),
+            "alignment": landing_zone.alignment(found), "has_hierarchy": has_hierarchy,
         }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
                            summary=summary, **diagrams)

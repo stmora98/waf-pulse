@@ -30,6 +30,16 @@ policyresources
 | project id, name, subscriptionId, displayName = tostring(properties.displayName),
           enforcement = tostring(properties.enforcementMode), scope = tostring(properties.scope)
 """,
+    "signals": """
+resources
+| where type in~ ('microsoft.network/azurefirewalls', 'microsoft.network/virtualnetworkgateways',
+                  'microsoft.network/expressroutecircuits', 'microsoft.network/virtualhubs',
+                  'microsoft.network/bastionhosts', 'microsoft.network/privatednszones',
+                  'microsoft.network/ddosprotectionplans', 'microsoft.operationalinsights/workspaces',
+                  'microsoft.automation/automationaccounts', 'microsoft.recoveryservices/vaults',
+                  'microsoft.aad/domainservices', 'microsoft.operationsmanagement/solutions')
+| summarize n = count() by subscriptionId, type = tolower(type)
+""",
     "customDefinitions": """
 policyresources
 | where type =~ 'microsoft.authorization/policydefinitions'
@@ -78,6 +88,35 @@ securityresources
 """,
 }
 
+
+GROUP_SCOPE = "/providers/microsoft.management/managementgroups/"
+MAX_ASSIGNMENTS_PER_GROUP = 60
+
+
+def policy_by_group(assignments):
+    """Names of the policy assignments made at each management group: {group name (lower): [assignment names]}.
+    The names are how a landing zone is recognized when its groups are not called what the reference calls them."""
+    result = {}
+    for item in assignments:
+        scope = str(item.get("scope", "")).lower()
+        if GROUP_SCOPE not in scope:
+            continue
+        group = scope.split(GROUP_SCOPE, 1)[1].strip("/").split("/")[0]
+        names = result.setdefault(group, [])
+        for name in (item.get("name"), item.get("displayName")):
+            if name and name not in names and len(names) < MAX_ASSIGNMENTS_PER_GROUP:
+                names.append(str(name))
+    return result
+
+
+def subscription_signals(rows):
+    """Count of the resource types that hint at what a subscription is for: {subscription: {type: count}}."""
+    result = {}
+    for row in rows:
+        sub = _sub(row)
+        if sub:
+            result.setdefault(sub, {})[str(row.get("type", "")).lower()] = int(row.get("n", 0))
+    return result
 
 def _sub(row):
     return str(row.get("subscriptionId", "")).lower()
@@ -234,6 +273,8 @@ def evaluate(run_id, results, now=None):
     dataset = {
         "managementGroups": groups,
         "subscriptions": subscriptions,
+        "policyByGroup": policy_by_group(assignments.values()),
+        "signals": subscription_signals(results.get("signals", [])),
         "policy": {
             "assignments": len(assignments),
             "notEnforced": sum(1 for a in assignments.values() if str(a.get("enforcement", "")).lower() == "donotenforce"),

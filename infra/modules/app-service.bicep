@@ -15,6 +15,7 @@ param authClientId string
 param authTenantId string
 param authSecretUri string
 param allowedUserIds array
+param landingZoneMap string = ''
 param workspaceId string
 
 resource appService 'Microsoft.Web/sites@2023-12-01' = {
@@ -77,6 +78,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES'
           value: '10'
+        }
+        {
+          name: 'LANDING_ZONE_MAP'
+          value: landingZoneMap
         }
       ], signInEnabled ? [
         {
