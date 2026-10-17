@@ -21,7 +21,7 @@
 
       <section class="cards">
         {% for pillar in pillars %}
-          {% set score = summary.scores.get(pillar) %}
+          {% set score = (summary.scores or {}).get(pillar) %}
           {% set counts = (summary.counts or {}).get(pillar, {}) %}
           <a class="card {% if score is none %}na{% elif score >= 80 %}good{% elif score >= 50 %}warn{% else %}bad{% endif %}"
              href="{{ url_for('pillar_page', slug=slugs[pillar]) }}">

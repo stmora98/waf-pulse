@@ -117,9 +117,8 @@ Modeled on the Azure Optimization Engine reports: an overview, one page per Well
 | Page | What it shows |
 |---|---|
 | **Overview** | Score and finding count per pillar, findings by pillar and severity, by source, resource types and resources with the most findings, and the top recommendations. |
-| **Security, Reliability, Cost, Performance, Operations** | Score, severity counts, charts, the recommendations of that pillar grouped by rule (searchable) and the insights that belong to it: Defender secure score, Entra and Key Vault for Security, Advisor savings and right-sizing for Cost, diagnostic settings for Operations. |
+| **Security, Reliability, Cost, Performance, Operations** | Score, severity counts, charts, the recommendations of that pillar grouped by rule (searchable) and the insights that belong to it: Defender secure score, Entra and Key Vault for Security, diagnostic settings for Operations. **Cost** also holds the spend: billed and effective cost, daily anomalies, budgets, reservation options, Advisor savings and right-sizing. |
 | **Recommendation** | Select any recommendation to see what to do, the documentation link, every affected resource and how many resources it affected in each earlier run. |
-| **Spend** | Billed and effective cost, daily anomalies, budgets and reservation options. |
 | **Governance** | Management groups, policy, access, locks, diagnostics, Key Vault and Entra. |
 | **History** | Runs, score trend and what changed between two runs. |
 | **All findings** | The flat list with pillar, source and severity filters (`/findings`). |

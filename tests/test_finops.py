@@ -256,6 +256,7 @@ def client():
 def serve(monkeypatch, summary):
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
     monkeypatch.setattr(data, "summary", lambda run_id: summary)
+    monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
 
 
 FINOPS = {"currency": "USD", "lastMonth": "2026-09", "lastMonthCost": 1234.0, "monthOverMonthPercent": 12.5,
@@ -274,7 +275,7 @@ def test_cost_page_shows_effective_cost_daily_chart_and_anomalies(client, monkey
                   daily=[{"date": f"2026-09-{d:02d}", "cost": 40.0} for d in range(1, 21)],
                   anomalies=[{"date": "2026-09-14", "cost": 300.0, "expected": 40.0, "percent": 650.0}])
     serve(monkeypatch, {"runId": "r1", "finops": finops, "advisorSavings": {"USD": 3804.0}})
-    html = client.get("/cost").get_data(as_text=True)
+    html = client.get("/pillar/cost").get_data(as_text=True)
     assert "billed cost" in html and "effective cost" in html and "1,180" in html
     assert "Daily spend" in html and "2026-09-14" in html and "+650%" in html and "Read once at the tenant scope" in html
     assert html.count('<svg class="chart"') == 2
@@ -285,13 +286,24 @@ def test_cost_page_lists_reservation_and_savings_plan_options(client, monkeypatc
                    "items": [{"subscriptionName": "<One>", "resourceType": "virtualmachines", "currency": "USD",
                               "terms": {"P1Y": 400.0, "P3Y": 689.0}, "lookbackDays": 7}]}
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "commitments": commitments})
-    html = client.get("/cost").get_data(as_text=True)
+    html = client.get("/pillar/cost").get_data(as_text=True)
     assert "Rate optimization" in html and "7 days" in html and "689 USD" in html and "not added together" in html
     assert "<strong>900</strong> USD per year with 1 year" in html and "&lt;One&gt;" in html
 
+
+
+def test_spend_and_recommendations_share_the_cost_page(client, monkeypatch):
+    response = client.get("/cost")
+    assert response.status_code == 302 and response.headers["Location"].endswith("/pillar/cost")
+    serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "scores": {"Cost Optimization": 47}})
+    html = client.get("/pillar/cost").get_data(as_text=True)
+    assert "Cost Optimization score" in html and "Spend and budgets" in html and "Monthly spend" in html
+    assert "Recommendations" in html and ">Spend</a>" not in html
+
+
 def test_cost_page_renders_and_escapes(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "advisorSavings": {"USD": 3804.0}})
-    html = client.get("/cost").get_data(as_text=True)
+    html = client.get("/pillar/cost").get_data(as_text=True)
     assert "1,234" in html and "+12.5%" in html and "1,500" in html and "3,804" in html
     assert '<rect class="bar partial"' in html and "<progress" in html and "Team" in html
     assert "<b>Storage</b>" not in html and "&lt;b&gt;Storage&lt;/b&gt;" in html
@@ -301,12 +313,12 @@ def test_cost_page_renders_and_escapes(client, monkeypatch):
 
 def test_cost_page_explains_a_missing_role_and_handles_errors(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "finops": {"months": [], "coverage": {"ok": 0, "denied": 3, "unavailable": 0, "error": 0}}})
-    assert "not readable for 3 subscription" in client.get("/cost").get_data(as_text=True)
+    assert "not readable for 3 subscription" in client.get("/pillar/cost").get_data(as_text=True)
     serve(monkeypatch, {"runId": "r1"})
-    assert b"needs the" in client.get("/cost").data
+    assert b"needs the" in client.get("/pillar/cost").data
 
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: (_ for _ in ()).throw(RuntimeError("secret detail")))
-    response = client.get("/cost")
+    response = client.get("/pillar/cost")
     assert response.status_code == 503 and b"secret detail" not in response.data
 
 

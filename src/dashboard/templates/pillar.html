@@ -8,7 +8,7 @@
     {% elif not summary %}
       <section class="notice">No assessment has completed yet. Select <strong>Refresh now</strong> to start the first one.</section>
     {% else %}
-      {% set score = summary.scores.get(pillar) %}
+      {% set score = (summary.scores or {}).get(pillar) %}
       <section class="cards">
         <div class="card {% if score is none %}na{% elif score >= 80 %}good{% elif score >= 50 %}warn{% else %}bad{% endif %}">
           <span class="card-title">{{ pillar }} score</span>
@@ -24,6 +24,10 @@
         {% endfor %}
       </section>
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
+
+      {% if slug == 'cost' %}
+        {% include "_finops.html" %}
+      {% endif %}
 
       {% if rules %}
         <section class="insights two">
@@ -44,9 +48,8 @@
           {% include "_p_entra.html" %}
           {% include "_p_keyvault.html" %}
         {% elif slug == 'cost' %}
-          {% include "_p_advisor.html" %}
+          {% if not (finops and finops.months) %}{% include "_p_advisor.html" %}{% endif %}
           {% include "_p_rightsizing.html" %}
-          <div class="panel"><h3>Spend and budgets</h3><p class="muted">Monthly cost, anomalies, budgets and reservation options.</p><p><a href="{{ url_for('cost_page') }}">Open the Spend page</a></p></div>
         {% elif slug == 'performance' %}
           {% include "_p_rightsizing.html" %}
         {% elif slug == 'operations' %}

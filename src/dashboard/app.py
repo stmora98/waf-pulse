@@ -136,8 +136,9 @@ def pillar_page(slug):
         logging.exception("Could not load the %s page", pillar)
         return render_template("pillar.html", pillar=pillar, slug=slug, summary=None, error="The data store is not reachable right now.",
                                source_labels=data.SOURCE_LABELS), 503
+    spend = _spend_context(summary) if slug == "cost" else {}
     return render_template(
-        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES,
+        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=insights.group_rules(findings),
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("findings_page", pillar=pillar, source=name))
@@ -145,6 +146,17 @@ def pillar_page(slug):
         type_chart=charts.hbars([(name, count, None) for name, count in
                                  insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
     )
+
+
+def _spend_context(summary):
+    finops = (summary or {}).get("finops")
+    months = finops.get("months") if finops else None
+    daily = (finops or {}).get("daily") or []
+    return {
+        "finops": finops,
+        "chart": cost_view.chart(months) if months else None,
+        "daily_chart": cost_view.chart([{"month": p["date"], "cost": p["cost"]} for p in daily]) if daily else None,
+    }
 
 
 RULE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
@@ -202,22 +214,8 @@ def governance_page():
 
 @app.get("/cost")
 def cost_page():
-    try:
-        latest = data.latest_run()
-        completed = latest if latest and latest.get("status") == "completed" else data.latest_run(True)
-        summary = data.summary(completed["id"]) if completed else None
-    except Exception:
-        logging.exception("Could not load cost data")
-        return render_template("cost.html", error="The data store is not reachable right now.", finops=None,
-                               chart=None, summary=None), 503
-    finops = (summary or {}).get("finops")
-    months = finops.get("months") if finops else None
-    daily = (finops or {}).get("daily") or []
-    return render_template(
-        "cost.html", error=None, finops=finops, summary=summary,
-        chart=cost_view.chart(months) if months else None,
-        daily_chart=cost_view.chart([{"month": p["date"], "cost": p["cost"]} for p in daily]) if daily else None,
-    )
+    # Spend and recommendations live on one page.
+    return redirect(url_for("pillar_page", slug="cost"))
 
 
 @app.get("/api/summary")

@@ -18,7 +18,6 @@
         {% for slug, page in nav_pillars %}
           <a href="{{ url_for('pillar_page', slug=slug) }}" {% if request.endpoint == 'pillar_page' and request.view_args.slug == slug %}class="active" aria-current="page"{% endif %}>{{ page[1] }}</a>
         {% endfor %}
-        <a href="{{ url_for('cost_page') }}" {% if request.endpoint == 'cost_page' %}class="active" aria-current="page"{% endif %}>Spend</a>
         <a href="{{ url_for('governance_page') }}" {% if request.endpoint == 'governance_page' %}class="active" aria-current="page"{% endif %}>Governance</a>
         <a href="{{ url_for('history_page') }}" {% if request.endpoint in ('history_page', 'compare_page') %}class="active" aria-current="page"{% endif %}>History</a>
       </nav>
