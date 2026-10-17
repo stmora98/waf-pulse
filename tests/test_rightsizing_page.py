@@ -103,3 +103,11 @@ def test_overview_lists_what_each_source_could_read(client, monkeypatch):
     assert "1 subscription(s) need the Cost Management Reader role" in html
     assert 'class="chip as-saturated">No access' not in html  # Cost Management is partial, not missing
     assert 'class="chip as-under">Partial' in html and 'class="chip as-right">Available' in html
+
+def test_rightsizing_opens_the_first_type_that_has_data(client, monkeypatch):
+    metrics = {"lookbackDays": 30, "distribution": {"plan": {"idle": 0, "under": 1, "right": 0, "saturated": 0, "nodata": 0}},
+               "resources": [{"kind": "plan", "id": "/s/p", "name": "only-plan", "subscriptionId": SUB, "resourceGroup": "rg",
+                              "detail": "B1 x1", "avg": 5.0, "assessment": "under"}]}
+    serve(monkeypatch, {"runId": "r1", "metrics": metrics})
+    html = page(client)
+    assert "only-plan" in html and "<h3>App Service plans</h3>" in html

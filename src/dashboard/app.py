@@ -259,7 +259,7 @@ MAX_TABLE_ROWS = 500
 
 @app.get("/rightsizing")
 def rightsizing_page():
-    kind = _allowed(request.args.get("kind"), rightsizing.KINDS) or "vm"
+    kind = _allowed(request.args.get("kind"), rightsizing.KINDS)
     assessment = _allowed(request.args.get("assessment"), rightsizing.ASSESSMENTS)
     subscription = request.args.get("subscription", "")
     subscription = subscription.lower() if SUBSCRIPTION_ID.match(subscription) else None
@@ -271,6 +271,8 @@ def rightsizing_page():
     metrics = (summary or {}).get("metrics")
     if not metrics:
         return render_template("rightsizing.html", error=None, metrics=None)
+    # Without a choice, open the first resource type that has measurements.
+    kind = kind or next((key for key in rightsizing.KINDS if any(rightsizing.counts(metrics, key).values())), "vm")
     cards = []
     for key, (title, _, labels) in rightsizing.KINDS.items():
         totals = rightsizing.counts(metrics, key)
