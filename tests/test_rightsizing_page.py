@@ -168,6 +168,7 @@ def test_rightsizing_csv_has_the_rows_and_guards_formulas(client, monkeypatch):
     assert response.mimetype == "text/csv" and "attachment" in response.headers["Content-Disposition"]
     assert text.splitlines()[0].lstrip("\ufeff").startswith("Name,Type,Subscription")
     assert "'=HYPERLINK(1)" in text and ",=HYPERLINK" not in text and "Standard_D4as_v5" in text and "stopped" in text
+    assert "Shutdown,Shutdown" not in text
 
 
 def test_rightsizing_csv_without_data(client, monkeypatch):
