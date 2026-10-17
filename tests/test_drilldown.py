@@ -187,7 +187,7 @@ def test_the_findings_of_one_resource_are_queried_without_caring_about_case(monk
 
 # --- affected resources and the link to Azure ------------------------------------------------------------
 
-TENANT = "fe4c3fde-a91a-4c25-9fc6-171dc2e4247a"
+TENANT = "00000000-1111-2222-3333-444444444444"
 
 
 def many_findings():
