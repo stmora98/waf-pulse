@@ -17,6 +17,7 @@
           </a>
         {% endfor %}
       </section>
+      <p><a href="{{ url_for('affected_page', pillar=selected_pillar, severity=selected_severity, source=selected_source) }}">See the affected resources</a></p>
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
 
       <section class="severity">

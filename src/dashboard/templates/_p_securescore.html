@@ -1,6 +1,6 @@
 {% if summary.secureScore %}
   <div class="panel">
-    <h3><a href="{{ url_for('actions_page', pillar='Security', source='defender') }}">Defender for Cloud Secure Score</a></h3>
+    <h3><a href="{{ url_for('affected_page', pillar='Security', source='defender') }}">Defender for Cloud Secure Score</a></h3>
     {% if summary.secureScore.average is not none %}<p class="big">{{ summary.secureScore.average }}%<span class="muted"> average</span></p>{% endif %}
     {% if summary.secureScore.subscriptions %}
       <ul class="plain">

@@ -26,7 +26,7 @@
           {% if governance.policy.notEnforced %}<span class="muted">{{ governance.policy.notEnforced }} not enforced</span>{% endif %}</div>
         <div class="card na"><span class="card-title">Role assignments</span><span class="card-score">{{ governance.rbac.assignments }}</span>
           <span class="muted">{{ governance.rbac.customRoles }} custom role(s)</span></div>
-        <a class="card na" href="{{ url_for('actions_page', source='governance') }}"><span class="card-title">Resource locks</span><span class="card-score">{{ governance.locks.total }}</span>
+        <a class="card na" href="{{ url_for('affected_page', source='governance') }}"><span class="card-title">Resource locks</span><span class="card-score">{{ governance.locks.total }}</span>
           <span class="muted">{{ governance.locks.subscriptionsWithoutLocks | length }} subscription(s) without locks · see the actions</span></a>
         <a class="card na" href="{{ url_for('pillar_page', slug='security') }}#defender"><span class="card-title">Defender plans on</span><span class="card-score">{{ governance.defender.enabled }}/{{ governance.defender.plans }}</span><span class="muted">see each plan</span></a>
       </section>

@@ -1,5 +1,6 @@
 """WAF Pulse dashboard."""
 import logging
+import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,12 @@ import landing_zone
 import rightsizing
 
 app = Flask(__name__)
+
+
+@app.template_global("azure_url")
+def azure_url(resource_id):
+    """Where to open a resource in the Azure portal (None when it is not an Azure resource)."""
+    return insights.portal_url(resource_id, os.environ.get("AZURE_TENANT_ID", ""))
 
 
 @app.template_filter("when")
@@ -159,7 +166,7 @@ def index():
         source_labels=data.SOURCE_LABELS, partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         pillar_chart=charts.stacked(pillar_rows),
         source_chart=charts.hbars(
-            [(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", source=name))
+            [(data.SOURCE_LABELS.get(name, name), count, url_for("affected_page", source=name))
              for name, count in insights.top_counts(findings, "source", 10)]),
         type_chart=charts.hbars(_type_bars(findings)),
         resource_chart=charts.hbars([(name, count, url_for("resource_page", id=resource_id))
@@ -219,7 +226,7 @@ def pillar_page(slug):
         "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
-        source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", pillar=pillar, source=name))
+        source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("affected_page", pillar=pillar, source=name))
                                    for name, count in insights.top_counts(findings, "source", 10)]),
         type_chart=charts.hbars(_type_bars(findings)),
     )
@@ -288,6 +295,48 @@ def _spend_context(summary, rules):
 
 SUBSCRIPTION_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 MAX_TABLE_ROWS = 500
+
+
+AFFECTED_PER_PAGE = 100
+
+
+@app.get("/affected")
+def affected_page():
+    """The resources behind a count: every resource with a finding that matches the filters, worst first."""
+    pillar = _allowed(request.args.get("pillar"), data.PILLARS)
+    severity = _allowed(request.args.get("severity"), data.SEVERITIES)
+    source = _allowed(request.args.get("source"), data.SOURCES)
+    rule = request.args.get("rule", "")
+    rule = rule if RULE_ID.match(rule) else None
+    try:
+        page = max(int(request.args.get("page", "1")), 1)
+    except ValueError:
+        page = 1
+    try:
+        _, summary = _latest()
+        findings = _all_findings(summary, pillar, rule)
+        inventory = {r["id"].lower(): r for r in _inventory(summary)[0]} if findings else {}
+    except Exception:
+        logging.exception("Could not load the affected resources")
+        return render_template("affected.html", error="The data store is not reachable right now.", summary=None), 503
+    findings = [f for f in findings if (not severity or f.get("severity") == severity) and (not source or f.get("source") == source)]
+    grouped = insights.group_by_resource(findings)
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    start = (page - 1) * AFFECTED_PER_PAGE
+    rows = []
+    for item in grouped[start:start + AFFECTED_PER_PAGE]:
+        known = inventory.get(str(item["id"]).lower(), {})
+        # The inventory spells the resource the way Azure does; findings from some sources do not.
+        rows.append({**item, "id": known.get("id") or item["id"], "name": known.get("name") or item["name"],
+                     "resourceGroup": known.get("resourceGroup") or item["resourceGroup"], "location": known.get("location", ""),
+                     "subscription": names.get(item["subscriptionId"], item["subscriptionId"])})
+    rule_title = next((f.get("title") for f in findings if rule and f.get("ruleId") == rule), None)
+    return render_template(
+        "affected.html", error=None, summary=summary, rows=rows, total=len(grouped), page=page,
+        pages=max((len(grouped) + AFFECTED_PER_PAGE - 1) // AFFECTED_PER_PAGE, 1), pillar=pillar, severity=severity,
+        source=source, rule=rule, rule_title=rule_title, source_labels=data.SOURCE_LABELS, findings_total=len(findings),
+        friendly=insights.friendly_type,
+    )
 
 
 RESOURCES_PER_PAGE = 100

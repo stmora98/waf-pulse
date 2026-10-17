@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_macros.html" import azure_link %}
+{% block title %}Affected resources · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Affected resources{% if total %} <span class="muted">· {{ total }}</span>{% endif %}</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not summary %}
+      <section class="notice">No assessment has completed yet. Select <strong>Refresh now</strong> to start the first one.</section>
+    {% else %}
+      <p class="muted">
+        The resources with a finding that matches
+        {% if rule_title %}<strong>{{ rule_title }}</strong>{% else %}
+          {{ severity if severity else 'any severity' }}{% if pillar %} · {{ pillar }}{% endif %}{% if source %} · {{ source_labels.get(source, source) }}{% endif %}
+        {% endif %}.
+        {{ findings_total }} finding(s) on {{ total }} resource(s). Select a resource to see all of its findings, or open it in Azure.
+      </p>
+      <p>
+        {% if rule %}<a href="{{ url_for('rule_page', rule_id=rule) }}">What to do about it</a> ·{% endif %}
+        <a href="{{ url_for('actions_page', pillar=pillar, severity=severity, source=source) }}">See these as action items</a>
+        {% if pillar or severity or source or rule %}· <a href="{{ url_for('affected_page') }}">Clear filters</a>{% endif %}
+      </p>
+
+      <section class="panel">
+        {% if rows %}
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Resource</th><th>Type</th><th>Resource group</th><th>Subscription</th><th>Findings</th><th>Azure</th></tr></thead>
+              <tbody>
+                {% for r in rows %}
+                  <tr>
+                    <td><a href="{{ url_for('resource_page', id=r.id) }}">{{ r.name }}</a>{% if r.location %}<br><span class="muted">{{ r.location }}</span>{% endif %}</td>
+                    <td>{{ friendly(r.type) if r.type else '–' }}</td>
+                    <td>{{ r.resourceGroup or '–' }}</td>
+                    <td>{{ r.subscription }}</td>
+                    <td>
+                      <span class="chip {{ r.severity }}">{{ r.severity }}</span> {{ r.count }}
+                      <br><span class="muted">{{ r.titles[:2] | join(' · ') }}{% if r.titles | length > 2 %} · +{{ r.titles | length - 2 }} more{% endif %}</span>
+                    </td>
+                    <td>{{ azure_link(r.id) }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if pages > 1 %}
+            <p class="muted">Page {{ page }} of {{ pages }} ·
+              {% if page > 1 %}<a href="{{ url_for('affected_page', pillar=pillar, severity=severity, source=source, rule=rule, page=page - 1) }}">Previous</a>{% endif %}
+              {% if page < pages %}<a href="{{ url_for('affected_page', pillar=pillar, severity=severity, source=source, rule=rule, page=page + 1) }}">Next</a>{% endif %}
+            </p>
+          {% endif %}
+        {% else %}
+          <p class="muted">No resource has a finding like this.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+{% endblock %}

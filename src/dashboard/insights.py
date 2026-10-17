@@ -129,3 +129,50 @@ def findings_per_resource(findings):
     """{resource id (lower): number of findings}."""
     counts = Counter(str(f.get("resourceId", "")).lower() for f in findings if f.get("resourceId"))
     return dict(counts)
+
+
+_ARM_ID = re.compile(r"^/subscriptions/[0-9a-fA-F-]{36}(/|$)")
+PORTAL = "https://portal.azure.com/"
+
+
+def portal_url(resource_id, tenant_id=""):
+    """Link that opens a resource in the Azure portal, or None for anything that is not an Azure resource (an Entra
+    app, a cost anomaly, a commitment option). With the tenant in the link, the portal opens it in the right directory."""
+    value = str(resource_id or "")
+    if not _ARM_ID.match(value) or "/commitments/" in value.lower() or len(value) > 800:
+        return None
+    directory = f"@{tenant_id}/" if re.fullmatch(r"[0-9a-fA-F-]{36}", str(tenant_id or "")) else ""
+    return f"{PORTAL}#{directory}resource{value}"
+
+
+def resource_group_of(resource_id):
+    parts = str(resource_id or "").split("/")
+    lowered = [p.lower() for p in parts]
+    return parts[lowered.index("resourcegroups") + 1] if "resourcegroups" in lowered[:-1] else ""
+
+
+def group_by_resource(findings):
+    """One row per affected resource: its worst severity, how many findings it has and their titles."""
+    groups = {}
+    for finding in findings:
+        resource = str(finding.get("resourceId", "")).lower()
+        if not resource:
+            continue
+        item = groups.setdefault(resource, {
+            "id": finding.get("resourceId"), "name": finding.get("resourceName") or resource.rsplit("/", 1)[-1],
+            "type": str(finding.get("resourceType", "")).lower(), "subscriptionId": finding.get("subscriptionId", ""),
+            "severity": "low", "count": 0, "titles": [], "pillars": set(), "sources": set()})
+        item["count"] += 1
+        if RANK.get(finding.get("severity"), 9) < RANK.get(item["severity"], 9):
+            item["severity"] = finding.get("severity")
+        title = finding.get("title", "")
+        if title and title not in item["titles"]:
+            item["titles"].append(title)
+        item["pillars"].add(finding.get("pillar", ""))
+        item["sources"].add(finding.get("source") or "builtin")
+    rows = []
+    for item in groups.values():
+        rows.append({**item, "resourceGroup": resource_group_of(item["id"]), "pillars": sorted(item["pillars"]),
+                     "sources": sorted(item["sources"])})
+    rows.sort(key=lambda r: (RANK.get(r["severity"], 9), -r["count"], r["name"].lower()))
+    return rows

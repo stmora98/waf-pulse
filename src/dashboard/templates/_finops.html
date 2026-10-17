@@ -48,7 +48,7 @@
       </a>
     {% endif %}
     {% if summary and summary.advisorSavings %}
-      <a class="card good" href="{{ url_for('actions_page', pillar='Cost Optimization', source='advisor') }}">
+      <a class="card good" href="{{ url_for('affected_page', pillar='Cost Optimization', source='advisor') }}">
         <span class="card-title">Advisor potential savings</span>
         {% for currency, amount in summary.advisorSavings.items() %}<span class="card-score">{{ '{:,.0f}'.format(amount) }}</span><span class="muted">{{ currency }} per year · see the actions</span>{% endfor %}
       </a>

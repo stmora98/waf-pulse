@@ -1,6 +1,6 @@
 {% if summary.advisorSavings %}
   <div class="panel">
-    <h3><a href="{{ url_for('actions_page', source='advisor') }}">Azure Advisor potential savings</a></h3>
+    <h3><a href="{{ url_for('affected_page', source='advisor') }}">Azure Advisor potential savings</a></h3>
     {% for currency, amount in summary.advisorSavings.items() %}
       <p class="big">{{ '{:,.0f}'.format(amount) }} {{ currency }}<span class="muted"> per year</span></p>
     {% endfor %}

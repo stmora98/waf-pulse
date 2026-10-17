@@ -16,6 +16,7 @@ param authTenantId string
 param authSecretUri string
 param allowedUserIds array
 param landingZoneMap string = ''
+param tenantId string = ''
 param workspaceId string
 
 resource appService 'Microsoft.Web/sites@2023-12-01' = {
@@ -82,6 +83,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'LANDING_ZONE_MAP'
           value: landingZoneMap
+        }
+        {
+          name: 'AZURE_TENANT_ID'
+          value: tenantId
         }
       ], signInEnabled ? [
         {

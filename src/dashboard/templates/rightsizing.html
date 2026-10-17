@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import hbar_chart %}
+{% from "_macros.html" import hbar_chart, azure_link %}
 {% block title %}Right-sizing · WAF Pulse{% endblock %}
 {% block content %}
     <h2>Right-sizing</h2>
@@ -43,7 +43,7 @@
                   <th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
                   {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ 'DTU' if kind == 'sql' else 'CPU' }} %</th><th>Max %</th>{% endif %}
                   {% if kind == 'plan' %}<th>Avg memory %</th>{% endif %}
-                  <th>Assessment</th>
+                  <th>Assessment</th><th>Azure</th>
                 </tr>
               </thead>
               <tbody>
@@ -60,6 +60,7 @@
                     {% endif %}
                     {% if kind == 'plan' %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
                     <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span></td>
+                    <td>{{ azure_link(r.id) }}</td>
                   </tr>
                 {% endfor %}
               </tbody>

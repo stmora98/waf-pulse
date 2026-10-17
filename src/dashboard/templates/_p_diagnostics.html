@@ -2,7 +2,7 @@
   <div class="panel">
     <h3>Diagnostic settings</h3>
     {% if summary.diagnostics.checked %}
-      <p class="big"><a href="{{ url_for('rule_page', rule_id='OPS-DIAG-001') }}" title="The resources without diagnostic settings">{{ summary.diagnostics.percent }}%</a></p>
+      <p class="big"><a href="{{ url_for('affected_page', rule='OPS-DIAG-001') }}" title="The resources without diagnostic settings">{{ summary.diagnostics.percent }}%</a></p>
       <p class="muted">{{ summary.diagnostics.withLogs }} of {{ summary.diagnostics.checked }} resources send logs somewhere.</p>
       <ul class="plain">
         {% for item in summary.diagnostics.byType %}{% if item.checked > item.withLogs %}<li>{{ item.label }} <span class="muted">· {{ item.checked - item.withLogs }} of {{ item.checked }} without</span></li>{% endif %}{% endfor %}

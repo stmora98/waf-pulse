@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import azure_link %}
 {% block title %}Recommendation · WAF Pulse{% endblock %}
 {% block content %}
     <p><a href="{{ back }}">&larr; Action items</a></p>
@@ -13,7 +14,7 @@
         <span>{{ rule.pillar }}</span>
         <span>{{ source_labels.get(rule.source, rule.source) }}</span>
         <span>Rule <code>{{ rule.ruleId }}</code></span>
-        <span><strong>{{ rule.resources }}</strong> resource(s) in <strong>{{ rule.subscriptions }}</strong> subscription(s)</span>
+        <a href="{{ url_for('affected_page', rule=rule.ruleId) }}"><strong>{{ rule.resources }}</strong> resource(s) in <strong>{{ rule.subscriptions }}</strong> subscription(s)</a>
       </section>
       <section class="panel">
         <h3>What to do</h3>
@@ -34,13 +35,14 @@
         <h3>Affected resources</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Resource</th><th>Type</th><th>Subscription</th></tr></thead>
+            <thead><tr><th>Resource</th><th>Type</th><th>Subscription</th><th>Azure</th></tr></thead>
             <tbody>
               {% for f in resources %}
                 <tr>
                   <td><a href="{{ url_for('resource_page', id=f.resourceId) }}">{{ f.resourceName }}</a><br><span class="muted">{{ f.resourceId }}</span></td>
                   <td>{{ f.resourceType }}</td>
                   <td><span class="muted">{{ f.subscriptionId }}</span></td>
+                  <td>{{ azure_link(f.resourceId) }}</td>
                 </tr>
               {% endfor %}
             </tbody>

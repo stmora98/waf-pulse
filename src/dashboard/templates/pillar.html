@@ -16,7 +16,7 @@
           <span class="muted">out of 100</span>
         </div>
         {% for level in severities %}
-          <a class="card {{ 'bad' if level in ('critical', 'high') and totals[level] else 'na' }}" href="{{ url_for('actions_page', pillar=pillar, severity=level) }}">
+          <a class="card {{ 'bad' if level in ('critical', 'high') and totals[level] else 'na' }}" href="{{ url_for('affected_page', pillar=pillar, severity=level) }}">
             <span class="card-title">{{ level | capitalize }}</span>
             <span class="card-score">{{ totals[level] }}</span>
             <span class="muted">finding(s) · see the list</span>

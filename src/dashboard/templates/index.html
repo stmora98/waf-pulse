@@ -13,7 +13,7 @@
         <span>Last completed run: <strong>{{ summary.completedUtc | when }}</strong></span>
         <a class="meta-link" href="#subscriptions">Subscriptions: <strong>{{ summary.subscriptionCount }}</strong></a>
         <a class="meta-link" href="{{ url_for('resources_page') }}">Resources: <strong>{{ summary.resourceCount }}</strong></a>
-        <a class="meta-link" href="{{ url_for('actions_page') }}">Findings: <strong>{{ summary.findingCount }}</strong></a>
+        <a class="meta-link" href="{{ url_for('affected_page') }}">Findings: <strong>{{ summary.findingCount }}</strong></a>
         {% if latest and latest.status == 'running' %}<span class="chip running">Refresh running</span>{% endif %}
         {% if latest and latest.status == 'failed' %}<span class="chip failed">Last refresh failed</span>{% endif %}
         <a href="{{ url_for('actions_page') }}"><strong>{{ action_items }}</strong> action items{% if high_items %} · {{ high_items }} critical or high{% endif %}</a>

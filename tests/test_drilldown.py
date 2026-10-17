@@ -115,7 +115,7 @@ def test_counts_lead_to_the_lists_behind_them(client, monkeypatch):
     assert "/resources?type=microsoft.compute/virtualmachines" in overview  # the resource type bars
     assert "/resource?id=" in overview  # the resources with most findings
     pillar = client.get("/pillar/security").get_data(as_text=True)
-    assert 'href="/actions?pillar=Security&amp;severity=high"' in pillar and "see the list" in pillar
+    assert 'href="/affected?pillar=Security&amp;severity=high"' in pillar and "see the list" in pillar
     rule = client.get("/rule/R-1").get_data(as_text=True)
     assert 'href="/resource?id=' in rule
     assert 'href="/resources"' in client.get("/pillar/security").get_data(as_text=True)  # the menu entry
@@ -183,3 +183,94 @@ def test_the_findings_of_one_resource_are_queried_without_caring_about_case(monk
     assert data.all_findings("r1", resource_id="/Subscriptions/S1/x") == [{"id": "1", "_rid": "x"}]
     assert "STRINGEQUALS(c.resourceId, @resource, true)" in seen["query"]
     assert {"name": "@resource", "value": "/Subscriptions/S1/x"} in seen["parameters"] and seen["partition_key"] == "r1"
+
+
+# --- affected resources and the link to Azure ------------------------------------------------------------
+
+TENANT = "fe4c3fde-a91a-4c25-9fc6-171dc2e4247a"
+
+
+def many_findings():
+    vm = ROWS[0]["id"]
+    return FINDINGS + [
+        {"id": "3", "ruleId": "R-1", "severity": "high", "pillar": "Security", "title": "Backup is off", "source": "builtin",
+         "resourceId": ROWS[1]["id"], "resourceName": "vm-b", "resourceType": "Microsoft.Compute/virtualMachines",
+         "subscriptionId": SUB, "recommendation": "Turn it on"},
+        {"id": "4", "ruleId": "R-3", "severity": "medium", "pillar": "Security", "title": "Entra <app>", "source": "entra",
+         "resourceId": "/tenant/applications/abc", "resourceName": "my-app", "resourceType": "microsoft.graph/applications",
+         "subscriptionId": "tenant", "recommendation": "Rotate"},
+    ]
+
+
+def test_a_count_opens_the_resources_behind_it_with_a_link_to_azure(client, monkeypatch):
+    monkeypatch.setenv("AZURE_TENANT_ID", TENANT)
+    serve(monkeypatch, findings=many_findings())
+    html = client.get("/affected?pillar=Security&severity=high").get_data(as_text=True)
+    assert "Affected resources" in html and "<span class=\"muted\">· 2</span>" in html  # vm-a and vm-b
+    assert "vm-a" in html and "vm-b" in html and "my-app" not in html and "Prod" in html and "rg2" in html
+    assert f'href="https://portal.azure.com/#@{TENANT}/resource{ROWS[1]["id"]}"' in html
+    # vm-a was reported with an upper case id by one source: the link uses the inventory's spelling.
+    assert f'href="https://portal.azure.com/#@{TENANT}/resource{ROWS[0]["id"]}"' in html and ROWS[0]["id"].upper() not in html
+    assert 'target="_blank"' in html and 'rel="noopener noreferrer"' in html and "Open in Azure" in html
+    assert 'href="/resource?id=' in html and 'href="/actions?pillar=Security&amp;severity=high"' in html
+
+
+def test_the_resources_are_grouped_and_ordered_by_their_worst_finding(client, monkeypatch):
+    serve(monkeypatch, findings=many_findings())
+    html = client.get("/affected").get_data(as_text=True)
+    assert html.index("vm-a") < html.index("my-app")  # high before medium
+    row = html[html.index("vm-a"):html.index("vm-b")]
+    assert 'class="chip high">high</span> 2' in row and "Old size" in row  # two findings on the same resource, any case
+    assert html.count("vm-a") >= 1 and "Entra &lt;app&gt;" in html and "Entra <app>" not in html
+
+
+def test_things_that_are_not_azure_resources_get_no_azure_link(client, monkeypatch):
+    serve(monkeypatch, findings=many_findings())
+    html = client.get("/affected?source=entra").get_data(as_text=True)
+    assert "my-app" in html and "portal.azure.com" not in html and "Open in Azure" not in html
+
+
+def test_a_single_rule_shows_its_title_and_filters_are_validated(client, monkeypatch):
+    serve(monkeypatch, findings=many_findings())
+    html = client.get("/affected?rule=R-1").get_data(as_text=True)
+    assert "Backup is off" in html and "What to do about it" in html and 'href="/rule/R-1"' in html
+    bad = client.get("/affected?pillar=%27%20OR%201%3D1&severity=nope&source=x&rule=bad%20rule&page=abc")
+    assert bad.status_code == 200 and "vm-a" in bad.get_data(as_text=True)
+
+
+def test_the_affected_list_is_paged_and_handles_errors(client, monkeypatch):
+    rows = [{"id": f"/subscriptions/{SUB}/resourceGroups/rg/providers/p/t/r{i:03d}", "ruleId": "R", "severity": "low", "pillar": "Security",
+             "title": "t", "source": "builtin", "resourceId": f"/subscriptions/{SUB}/resourceGroups/rg/providers/p/t/r{i:03d}",
+             "resourceName": f"r{i:03d}", "resourceType": "p/t", "subscriptionId": SUB} for i in range(130)]
+    serve(monkeypatch, findings=rows)
+    first = client.get("/affected").get_data(as_text=True)
+    assert "r099" in first and "r100" not in first and "Page 1 of 2" in first and "r100" in client.get("/affected?page=2").get_data(as_text=True)
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: (_ for _ in ()).throw(RuntimeError("secret")))
+    response = client.get("/affected")
+    assert response.status_code == 503 and b"secret" not in response.data
+
+
+def test_every_list_of_resources_offers_the_azure_link(client, monkeypatch):
+    monkeypatch.setenv("AZURE_TENANT_ID", TENANT)
+    serve(monkeypatch, findings=many_findings())
+    expected = f"https://portal.azure.com/#@{TENANT}/resource{ROWS[0]['id']}"
+    assert expected in client.get("/resources").get_data(as_text=True)
+    assert expected in client.get("/resource", query_string={"id": ROWS[0]["id"]}).get_data(as_text=True)
+    assert expected in client.get("/rule/R-1").get_data(as_text=True)
+
+
+def test_the_portal_link_is_only_built_for_azure_resources():
+    vm = f"/subscriptions/{SUB}/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1"
+    assert insights.portal_url(vm, TENANT) == f"https://portal.azure.com/#@{TENANT}/resource{vm}"
+    assert insights.portal_url(vm) == f"https://portal.azure.com/#resource{vm}"  # without a tenant
+    assert insights.portal_url(vm, "not a guid") == f"https://portal.azure.com/#resource{vm}"
+    assert insights.portal_url(f"/subscriptions/{SUB}", TENANT).endswith(f"resource/subscriptions/{SUB}")
+    for not_azure in ("/tenant/applications/x", "cost-anomaly/2026-10-01", "", None, f"/subscriptions/{SUB}/commitments/vm", "/" + "a" * 900):
+        assert insights.portal_url(not_azure, TENANT) is None
+
+
+def test_group_by_resource_counts_and_ranks():
+    rows = insights.group_by_resource(many_findings())
+    assert [(r["name"], r["severity"], r["count"]) for r in rows] == [("vm-a", "high", 2), ("vm-b", "high", 1), ("my-app", "medium", 1)]
+    assert rows[0]["resourceGroup"].lower() == "rg1" and rows[0]["pillars"] == ["Cost Optimization", "Security"] and rows[0]["titles"] == ["Backup is off", "Old size"]
+    assert insights.group_by_resource([{"title": "no resource"}]) == []

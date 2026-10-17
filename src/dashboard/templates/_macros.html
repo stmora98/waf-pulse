@@ -126,3 +126,9 @@
     </svg>
   </div>
 {% endmacro %}
+
+
+{% macro azure_link(resource_id, label='Open in Azure') %}
+  {%- set url = azure_url(resource_id) -%}
+  {%- if url %}<a class="azure-link" href="{{ url }}" target="_blank" rel="noopener noreferrer" title="Open this resource in the Azure portal">{{ label }} &#8599;</a>{% else %}<span class="muted">–</span>{% endif -%}
+{% endmacro %}

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "17257538197329307069"
+      "templateHash": "15480749411268551622"
     }
   },
   "parameters": {
@@ -1149,6 +1149,9 @@
           "landingZoneMap": {
             "value": "[parameters('landingZoneMap')]"
           },
+          "tenantId": {
+            "value": "[parameters('collectorTenantId')]"
+          },
           "workspaceId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.workspaceId.value]"
           }
@@ -1160,7 +1163,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "17886199740112671595"
+              "templateHash": "741914630392697325"
             }
           },
           "parameters": {
@@ -1219,6 +1222,10 @@
               "type": "string",
               "defaultValue": ""
             },
+            "tenantId": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "workspaceId": {
               "type": "string"
             }
@@ -1249,7 +1256,7 @@
                   "http20Enabled": true,
                   "healthCheckPath": "/api/health",
                   "appCommandLine": "PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 app:app",
-                  "appSettings": "[concat(createArray(createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', parameters('webPackageUrl')), createObject('name', 'SCM_DO_BUILD_DURING_DEPLOYMENT', 'value', 'false'), createObject('name', 'MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('managedIdentityClientId')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabase')), createObject('name', 'STORAGE_ACCOUNT_URL', 'value', parameters('storageAccountUrl')), createObject('name', 'STORAGE_QUEUE_URL', 'value', parameters('storageQueueEndpoint')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES', 'value', '10'), createObject('name', 'LANDING_ZONE_MAP', 'value', parameters('landingZoneMap'))), if(parameters('signInEnabled'), createArray(createObject('name', 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('authSecretUri')))), createArray()))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', parameters('webPackageUrl')), createObject('name', 'SCM_DO_BUILD_DURING_DEPLOYMENT', 'value', 'false'), createObject('name', 'MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('managedIdentityClientId')), createObject('name', 'COSMOS_ENDPOINT', 'value', parameters('cosmosEndpoint')), createObject('name', 'COSMOS_DATABASE', 'value', parameters('cosmosDatabase')), createObject('name', 'STORAGE_ACCOUNT_URL', 'value', parameters('storageAccountUrl')), createObject('name', 'STORAGE_QUEUE_URL', 'value', parameters('storageQueueEndpoint')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'WEBSITE_HEALTHCHECK_MAXPINGFAILURES', 'value', '10'), createObject('name', 'LANDING_ZONE_MAP', 'value', parameters('landingZoneMap')), createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), if(parameters('signInEnabled'), createArray(createObject('name', 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('authSecretUri')))), createArray()))]"
                 }
               }
             },

@@ -189,6 +189,7 @@ module dashboardApp './modules/app-service.bicep' = {
     authSecretUri: keyVault.outputs.collectorSecretUri
     allowedUserIds: allowedUserIds
     landingZoneMap: landingZoneMap
+    tenantId: collectorTenantId
     workspaceId: logAnalytics.outputs.workspaceId
   }
   dependsOn: [
