@@ -367,7 +367,7 @@ def test_the_filtered_list_only_shows_what_matches_all_of_them(client, monkeypat
 
 def test_the_filter_script_offers_the_fields_of_the_portal():
     script = pathlib.Path(__file__).resolve().parent.parent.joinpath("src", "dashboard", "static", "app.js").read_text(encoding="utf-8")
-    for needle in ("Add filter", "does not equal", "Subscription", "Resource group", "Resource type", "Location", "With findings", "Name contains", "URLSearchParams"):
+    for needle in ("Add filter", "does not equal", "Subscription", "Resource group", "Resource type", "Location", "With findings", " contains", "URLSearchParams", "facets.menu"):
         assert needle in script, needle
 
 

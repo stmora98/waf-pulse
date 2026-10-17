@@ -195,3 +195,15 @@ def resources(run_id):
         rows.extend(item.get("rows", []))
         truncated = truncated or bool(item.get("truncated"))
     return rows, truncated
+
+
+def rows_of(run_id, kind):
+    """Rows the collector kept next to a run, apart from the summary: kind is "advice" or "costs". Empty for runs
+    from before they existed."""
+    items = _db().get_container_client("summaries").query_items(
+        "SELECT c.rows FROM c WHERE c.runId = @run AND c.kind = @kind",
+        parameters=[{"name": "@run", "value": run_id}, {"name": "@kind", "value": kind}], partition_key=run_id)
+    rows = []
+    for item in items:
+        rows.extend(item.get("rows", []))
+    return rows

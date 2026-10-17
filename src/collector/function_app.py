@@ -176,6 +176,7 @@ def act_advisor(payload: dict):
         )
         store.save_findings(findings)
         store.save_stats(run_id, "advisor", {"stats": stats, "errors": []})
+        store.save_rows(run_id, "advice", dataset.pop("advice", []))
         store.save_dataset(run_id, "advisor", dataset)
         return {"key": "advisor", "findings": len(findings)}
     except Exception as exc:
@@ -236,6 +237,7 @@ def act_finops(payload: dict):
         )
         store.save_findings(findings)
         store.save_stats(run_id, "finops", {"stats": stats, "errors": errors})
+        store.save_rows(run_id, "costs", dataset.pop("resourceCosts", []))
         store.save_dataset(run_id, "finops", dataset)
         return {"key": "finops", "findings": len(findings)}
     except Exception as exc:

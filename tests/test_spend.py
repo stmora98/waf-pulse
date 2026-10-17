@@ -82,8 +82,9 @@ def test_finops_collect_stores_the_breakdowns_next_to_the_totals(monkeypatch):
     monkeypatch.setattr(finops, "fetch_budgets", lambda *a: ("ok", []))
     seen = {}
 
-    def fake_collect(token, scopes, now, deadline, clock):
+    def fake_collect(token, scopes, now, deadline, clock, costs=None):
         seen["scopes"] = scopes
+        costs.append({"id": "/s/x", "cost": 4.0})
         return {"byService": {"series": ["S"], "periods": [month], "values": {"S": {month: 5.0}}}}, False
 
     monkeypatch.setattr(spend, "collect", fake_collect)
@@ -95,3 +96,20 @@ def test_finops_collect_stores_the_breakdowns_next_to_the_totals(monkeypatch):
     _, _, dataset, _ = finops.collect(Cred(), "r1", ["SUB1"], now=NOW)
     assert seen["scopes"] == ["/providers/Microsoft.Management/managementGroups/tenant-1"]
     assert dataset["breakdowns"]["byService"]["series"] == ["S"] and dataset["breakdowns"]["partial"] is False
+    assert dataset["resourceCosts"] == [{"id": "/s/x", "cost": 4.0}]  # kept apart from the summary by the activity
+
+
+def test_the_cost_of_each_resource_is_ranked_lowercased_and_capped(monkeypatch):
+    rows = [row("", 5, ResourceId="/S/A"), row("", 3, ResourceId="/s/a"), row("", 9, ResourceId="/s/b"),
+            row("", 0, ResourceId="/s/free"), row("", 4, ResourceId="")]
+    assert spend.resource_costs(rows) == [{"id": "/s/b", "cost": 9.0}, {"id": "/s/a", "cost": 8.0}]
+    monkeypatch.setattr(spend, "MAX_COSTS", 1)
+    assert spend.resource_costs(rows) == [{"id": "/s/b", "cost": 9.0}]
+
+
+def test_collect_hands_the_resource_costs_back_only_when_asked(monkeypatch):
+    monkeypatch.setattr(spend, "fetch", lambda token, scope, name, now: [row("", 7, ResourceId="/s/a")] if name == "resources" else [])
+    costs = []
+    spend.collect("t", ["/subscriptions/a"], NOW, deadline=1e12, clock=lambda: 0, costs=costs)
+    assert costs == [{"id": "/s/a", "cost": 7.0}]
+    assert spend.collect("t", ["/subscriptions/a"], NOW, deadline=1e12, clock=lambda: 0)[1] in (True, False)

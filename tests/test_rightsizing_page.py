@@ -30,10 +30,11 @@ def client():
     return dashboard_app.app.test_client()
 
 
-def serve(monkeypatch, summary):
+def serve(monkeypatch, summary, rows=None):
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
     monkeypatch.setattr(data, "summary", lambda run_id: summary)
     monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: (rows or {}).get(kind, []))
 
 
 def page(client, query=""):
@@ -55,7 +56,7 @@ def test_rightsizing_table_shows_size_cpu_and_assessment_and_escapes(client, mon
     html = page(client, "?kind=vm")
     assert "Standard_D8as_v5" in html and "3.9" in html and "80.5" in html and "Prod" in html and "rg1" in html
     assert "<b>vm1</b>" not in html and "&lt;b&gt;vm1&lt;/b&gt;" in html
-    assert "Avg CPU %" in html and "Max %" in html and 'data-filter-table="rs"' in html
+    assert "Avg CPU %" in html and "Max %" in html
 
 
 def test_rightsizing_filters_by_assessment_and_ignores_bad_input(client, monkeypatch):
@@ -111,3 +112,76 @@ def test_rightsizing_opens_the_first_type_that_has_data(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "metrics": metrics})
     html = page(client)
     assert "only-plan" in html and "<h3>App Service plans</h3>" in html
+
+# ---- advice, cost, filters and CSV
+
+ADVICE = [
+    {"id": "/s/vm1", "name": "<b>vm1</b>", "subscriptionId": SUB, "type": "microsoft.compute/virtualmachines", "action": "Resize",
+     "targetSku": "Standard_D4as_v5", "currentSku": "Standard_D8as_v5", "monthlySavings": 120.5, "currency": "USD", "cpuP95": 8, "memoryP95": 20, "networkP95": 1},
+    {"id": "/subscriptions/" + SUB + "/resourcegroups/rg9/providers/microsoft.compute/virtualmachines/stopped", "name": "stopped", "subscriptionId": SUB,
+     "type": "microsoft.compute/virtualmachines", "action": "Shutdown", "targetSku": "", "currentSku": "Standard_D2s_v3", "monthlySavings": 20,
+     "currency": "USD", "cpuP95": 0, "memoryP95": None, "networkP95": None},
+]
+COSTS = [{"id": "/s/vm1", "cost": 300.0}, {"id": "/s/vm2", "cost": 55.0}]
+
+
+def serve_all(monkeypatch):
+    serve(monkeypatch, {"runId": "r1", "metrics": METRICS, "subscriptions": [{"id": SUB, "name": "Prod"}]}, {"advice": ADVICE, "costs": COSTS})
+
+
+def test_rightsizing_shows_cost_advice_and_resources_only_advisor_knows(client, monkeypatch):
+    serve_all(monkeypatch)
+    html = page(client, "?kind=vm")
+    assert "Cost (30 d)" in html and ">300<" in html and "→ Standard_D4as_v5" in html and "saves 120" in html
+    assert "P95 CPU 8%" in html and "stopped" in html and "Shut down" in html and "from Advisor, no metrics" in html
+    assert "<b>vm1</b>" not in html
+
+
+def test_rightsizing_headline_numbers(client, monkeypatch):
+    serve_all(monkeypatch)
+    html = page(client)
+    assert "Advisor savings" in html and ">140<" in html and "2 recommendation(s)" in html and "Spent on them" in html and ">355<" in html
+
+
+def test_rightsizing_filter_by_advisor_and_name_and_sort(client, monkeypatch):
+    serve_all(monkeypatch)
+    with_advice = page(client, "?kind=vm&advice=with")
+    assert "stopped" in with_advice and "vm3" not in with_advice
+    by_name = page(client, "?kind=vm&name=vm2")
+    assert "vm2" in by_name and "vm3" not in by_name
+    ordered = page(client, "?kind=vm&sort=cost")
+    assert ordered.index("vm2") < ordered.index("vm3")
+
+
+def test_rightsizing_filter_bar_carries_the_menu(client, monkeypatch):
+    serve_all(monkeypatch)
+    html = page(client, "?kind=vm&assessment=idle")
+    assert 'id="filterbar"' in html and "Advisor recommendation" in html and "Download CSV" in html
+    assert 'class="fpill"' in html
+
+
+def test_rightsizing_csv_has_the_rows_and_guards_formulas(client, monkeypatch):
+    metrics = {**METRICS, "resources": [{**METRICS["resources"][0], "name": "=HYPERLINK(1)"}, METRICS["resources"][1]]}
+    serve(monkeypatch, {"runId": "r1", "metrics": metrics, "subscriptions": [{"id": SUB, "name": "Prod"}]}, {"advice": ADVICE, "costs": COSTS})
+    response = client.get("/rightsizing.csv?kind=vm")
+    text = response.get_data(as_text=True)
+    assert response.mimetype == "text/csv" and "attachment" in response.headers["Content-Disposition"]
+    assert text.splitlines()[0].lstrip("\ufeff").startswith("Name,Type,Subscription")
+    assert "'=HYPERLINK(1)" in text and ",=HYPERLINK" not in text and "Standard_D4as_v5" in text and "stopped" in text
+
+
+def test_rightsizing_csv_without_data(client, monkeypatch):
+    serve(monkeypatch, {"runId": "r1", "subscriptions": []})
+    assert client.get("/rightsizing.csv").status_code == 404
+
+
+def test_resources_csv(client, monkeypatch):
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
+    monkeypatch.setattr(data, "summary", lambda run_id: {"runId": "r1", "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
+    rows = [{"id": "/subscriptions/" + SUB + "/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/+evil", "name": "+evil",
+             "type": "microsoft.compute/virtualmachines", "subscriptionId": SUB, "resourceGroup": "rg1", "location": "eastus", "detail": "x", "tags": 0}]
+    monkeypatch.setattr(data, "resources", lambda run_id: (rows, False))
+    response = client.get("/resources.csv?location=eastus")
+    text = response.get_data(as_text=True)
+    assert response.mimetype == "text/csv" and "'+evil" in text and "Prod" in text

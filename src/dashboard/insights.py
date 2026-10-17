@@ -190,26 +190,33 @@ MAX_FILTER_VALUES = 60
 MAX_FILTER_TEXT = 150
 
 
-def parse_resource_filters(args):
-    """Reads the filters from a query string (a `MultiDict`): {field: {op, values}} for the four fields, plus
-    `findings` (with or without) and `name` (contains). A field takes several values, which mean "any of them"."""
+def parse_filters(args, facets, lowercase=(), radios=None, texts=("name",)):
+    """Reads filters from a query string (a `MultiDict`): {field: {op, values}}. A facet field takes several values
+    (any of them) and `field_op=ne` turns it into "does not equal"; a radio field takes one of its choices; a text
+    field is "contains"."""
     filters = {}
-    for field in RESOURCE_FILTERS:
+    for field in facets:
         values = []
         for value in args.getlist(field):
             value = value.strip()[:MAX_FILTER_TEXT]
             if value and value.lower() not in {v.lower() for v in values}:
-                values.append(value.lower() if field in ("subscription", "type") else value)
+                values.append(value.lower() if field in lowercase else value)
         if values:
             op = "ne" if args.get(f"{field}_op") == "ne" else "eq"
             filters[field] = {"op": op, "values": values[:MAX_FILTER_VALUES]}
-    finding = args.get("findings", "")
-    if finding in FINDING_FILTER:
-        filters["findings"] = {"op": "eq", "values": [finding]}
-    name = args.get("name", "").strip()[:MAX_FILTER_TEXT]
-    if name:
-        filters["name"] = {"op": "contains", "values": [name]}
+    for field, choices in (radios or {}).items():
+        if args.get(field, "") in choices:
+            filters[field] = {"op": "eq", "values": [args.get(field)]}
+    for field in texts:
+        text = args.get(field, "").strip()[:MAX_FILTER_TEXT]
+        if text:
+            filters[field] = {"op": "contains", "values": [text]}
     return filters
+
+
+def parse_resource_filters(args):
+    """The filters of the resource list: the four fields, `findings` (with or without) and `name` (contains)."""
+    return parse_filters(args, RESOURCE_FILTERS, ("subscription", "type"), {"findings": FINDING_FILTER})
 
 
 def apply_resource_filters(rows, filters, query="", counts=None, skip=None):

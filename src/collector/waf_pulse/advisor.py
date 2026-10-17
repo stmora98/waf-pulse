@@ -22,9 +22,19 @@ advisorresources
          currency = tostring(properties.extendedProperties.savingsCurrency),
          term = tostring(properties.extendedProperties.term),
          lookbackDays = toint(properties.extendedProperties.lookbackPeriod),
-         commitmentType = tostring(properties.extendedProperties.reservedResourceType)
+         commitmentType = tostring(properties.extendedProperties.reservedResourceType),
+         targetSku = tostring(properties.extendedProperties.targetSku),
+         currentSku = tostring(properties.extendedProperties.currentSku),
+         monthlySavings = todouble(properties.extendedProperties.savingsAmount),
+         advice = tostring(properties.extendedProperties.recommendationMessage),
+         adviceType = tostring(properties.extendedProperties.recommendationType),
+         cpuP95 = todouble(properties.extendedProperties.MaxCpuP95),
+         memoryP95 = todouble(properties.extendedProperties.MaxMemoryP95),
+         networkP95 = todouble(properties.extendedProperties.MaxTotalNetworkP95),
+         adviceDays = toint(properties.extendedProperties.Duration)
 | project id, subscriptionId, category, impact, recommendationType, impactedType, impactedName,
-          problem, solution, resourceId, annualSavings, currency, term, lookbackDays, commitmentType
+          problem, solution, resourceId, annualSavings, currency, term, lookbackDays, commitmentType,
+          targetSku, currentSku, monthlySavings, advice, adviceType, cpuP95, memoryP95, networkP95, adviceDays
 """
 
 CATEGORY_TO_PILLAR = {
@@ -78,6 +88,32 @@ def _terms_text(item):
     names = {"P1Y": "1 year", "P3Y": "3 years"}
     return "; ".join(f"{names.get(term, term)}: {amount:,.0f} {item['currency']} per year"
                      for term, amount in sorted(item["terms"].items()))
+
+
+MAX_ADVICE = 2000
+
+
+def right_size_advice(rows):
+    """What Advisor says to do with each resource it found underused: the size to move to (or to shut it down), how
+    much that saves and the 95th percentile of its CPU, memory and network, which show what a smaller size would face."""
+    advice = {}
+    for row in rows:
+        if _is_commitment(row) or not row.get("targetSku") or not row.get("resourceId"):
+            continue
+        key = row["resourceId"].lower()
+        saving = float(row.get("monthlySavings") or 0)
+        if key in advice and advice[key]["monthlySavings"] >= saving:
+            continue
+        advice[key] = {
+            "id": key, "currentSku": row.get("currentSku") or "", "targetSku": row["targetSku"],
+            "action": (row.get("adviceType") or "").capitalize() or ("Shutdown" if row["targetSku"].lower() == "shutdown" else "Resize"),
+            "message": row.get("advice") or "", "monthlySavings": round(saving, 2),
+            "annualSavings": round(float(row.get("annualSavings") or saving * 12), 2), "currency": row.get("currency") or "",
+            "cpuP95": row.get("cpuP95"), "memoryP95": row.get("memoryP95"), "networkP95": row.get("networkP95"),
+            "days": row.get("adviceDays"), "name": row.get("impactedName") or key.rsplit("/", 1)[-1],
+            "subscriptionId": (row.get("subscriptionId") or "").lower(), "type": row.get("impactedType") or "",
+        }
+    return sorted(advice.values(), key=lambda item: -item["monthlySavings"])[:MAX_ADVICE]
 
 
 def evaluate(run_id, rows):
@@ -147,7 +183,7 @@ def evaluate(run_id, rows):
                    "bySubscription": {sub: round(amount, 2) for sub, amount in value["bySubscription"].items()}}
         for currency, value in savings.items()
     }
-    return findings, stats, {"savings": clean_savings, "commitments": commitments}
+    return findings, stats, {"savings": clean_savings, "commitments": commitments, "advice": right_size_advice(rows)}
 
 def collect(credential, run_id, subscriptions):
     rows = []

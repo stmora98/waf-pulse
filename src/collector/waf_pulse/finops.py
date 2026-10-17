@@ -443,11 +443,13 @@ def collect(credential, run_id, subscription_ids, now=None):
 
         scopes = ([f"/providers/Microsoft.Management/managementGroups/{tenant_id}"] if mode == "tenant"
                   else [f"/subscriptions/{sub}" for sub, item in results.items() if item.get("costStatus") == "ok"])
+        resource_costs = []
         try:
-            section, partial = spend.collect(token, scopes, now, _now() + BREAKDOWN_BUDGET_SECONDS, _now)
+            section, partial = spend.collect(token, scopes, now, _now() + BREAKDOWN_BUDGET_SECONDS, _now, costs=resource_costs)
         except Exception:
             logging.exception("Cost breakdowns could not be read")
             section, partial = {}, True
         if section:
             dataset["breakdowns"] = {**section, "partial": partial}
+        dataset["resourceCosts"] = resource_costs  # kept apart from the summary by the activity
     return findings, stats, dataset, errors

@@ -32,6 +32,7 @@
         {% endfor %}
         <button type="button" class="fadd" id="filter-add" aria-haspopup="true">+ Add filter</button>
         {% if active or query %}<a class="chip clear" href="{{ url_for('resources_page') }}">Clear all</a>{% endif %}
+        <a class="chip" href="{{ url_for('resources_csv', **page_args) }}" title="Download this list as a CSV file">Download CSV</a>
         <div class="lz-pop fpop" id="filter-pop" hidden role="dialog" aria-label="Filter"></div>
       </div>
 

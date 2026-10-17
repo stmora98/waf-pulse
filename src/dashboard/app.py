@@ -1,4 +1,6 @@
 """WAF Pulse dashboard."""
+import csv
+import io
 import logging
 import os
 import re
@@ -6,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
-from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
 import charts
@@ -396,12 +398,12 @@ def _filter_args(filters):
     """The filters as keyword arguments for url_for (a list value becomes a repeated parameter)."""
     args = {}
     for field, spec in filters.items():
-        if field in insights.RESOURCE_FILTERS:
+        if spec["op"] == "contains":
+            args[field] = spec["values"][0]
+        else:
             args[field] = list(spec["values"])
             if spec["op"] == "ne":
                 args[f"{field}_op"] = "ne"
-        else:
-            args[field] = spec["values"][0]
     return args
 
 
@@ -434,39 +436,118 @@ def resource_page():
 
 
 
+def _csv(filename, header, rows):
+    """A CSV download. A cell that starts with = + - @ would run as a formula in a spreadsheet, so it gets a quote."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow([("'" + str(c)) if isinstance(c, str) and c[:1] in ("=", "+", "-", "@", "\t", "\r") else ("" if c is None else c) for c in row])
+    response = Response("\ufeff" + buffer.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _rightsizing_context(include_all=False):
+    """Everything the right-sizing page and its CSV need. Returns a dict, or raises when the data store is down."""
+    _, summary = _latest()
+    metrics = (summary or {}).get("metrics")
+    if not metrics:
+        return {"summary": summary, "metrics": None}
+    advice = data.rows_of(summary["runId"], "advice")
+    costs = data.rows_of(summary["runId"], "costs")
+    kind = _allowed(request.args.get("kind"), rightsizing.KINDS)
+    kind = kind or next((key for key in rightsizing.KINDS if any(rightsizing.counts(metrics, key).values())), "vm")
+    names = {sub["id"].lower(): sub["name"] for sub in summary.get("subscriptions", [])}
+    labels = rightsizing.KINDS[kind][2]
+    filters = rightsizing.parse_filters(request.args)
+    order = _allowed(request.args.get("sort"), rightsizing.SORTS) or "assessment"
+    base = rightsizing.build_rows(metrics, kind, advice, costs)
+    rows = rightsizing.sort_rows(rightsizing.apply_filters(base, filters), order)
+    return {"summary": summary, "metrics": metrics, "advice": advice, "costs": costs, "kind": kind, "names": names, "labels": labels,
+            "filters": filters, "order": order, "base": base, "rows": rows}
+
+
 @app.get("/rightsizing")
 def rightsizing_page():
-    kind = _allowed(request.args.get("kind"), rightsizing.KINDS)
-    assessment = _allowed(request.args.get("assessment"), rightsizing.ASSESSMENTS)
-    subscription = request.args.get("subscription", "")
-    subscription = subscription.lower() if SUBSCRIPTION_ID.match(subscription) else None
     try:
-        _, summary = _latest()
+        ctx = _rightsizing_context()
     except Exception:
         logging.exception("Could not load right-sizing data")
         return render_template("rightsizing.html", error="The data store is not reachable right now.", metrics=None), 503
-    metrics = (summary or {}).get("metrics")
+    metrics, kind, names, labels, filters = ctx.get("metrics"), ctx.get("kind"), ctx.get("names"), ctx.get("labels"), ctx.get("filters")
     if not metrics:
         return render_template("rightsizing.html", error=None, metrics=None)
-    # Without a choice, open the first resource type that has measurements.
-    kind = kind or next((key for key in rightsizing.KINDS if any(rightsizing.counts(metrics, key).values())), "vm")
     cards = []
-    for key, (title, _, labels) in rightsizing.KINDS.items():
+    for key, (title, _, kind_labels) in rightsizing.KINDS.items():
         totals = rightsizing.counts(metrics, key)
         if not any(totals.values()):
             continue
-        bars = [(labels[name], totals[name], url_for("rightsizing_page", kind=key, assessment=name, subscription=subscription) + "#resources",
-                 f"as-{name}") for name in rightsizing.visible_assessments(key, totals)]
+        bars = [(kind_labels[name], totals[name], url_for("rightsizing_page", kind=key, assessment=name) + "#resources", f"as-{name}")
+                for name in rightsizing.visible_assessments(key, totals)]
         cards.append({"key": key, "title": title, "chart": charts.hbars(bars, width=440, label_width=210, label_limit=34),
                       "measured": sum(totals[n] for n in rightsizing.ASSESSMENTS), "nodata": totals["nodata"]})
-    rows = rightsizing.resources(metrics, kind, assessment, subscription)
-    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    active = []
+    for field, spec in filters.items():
+        label = (rightsizing.FACETS[field][1] if field in rightsizing.FACETS else "Advisor" if field == "advice" else "Name")
+        shown = [names.get(v.lower(), v) if field == "subscription" else labels.get(v, v) if field == "assessment"
+                 else rightsizing.ADVICE_FILTER.get(v, v) for v in spec["values"]]
+        rest = {k: s for k, s in filters.items() if k != field}
+        active.append({"field": field, "label": label, "op": spec["op"], "values": shown,
+                       "remove": url_for("rightsizing_page", kind=kind, **_filter_args(rest))})
+    facets = {
+        "fields": {f: {"label": rightsizing.FACETS[f][1], "options": o} for f, o in
+                   rightsizing.filter_choices(ctx["base"], filters, labels, names).items()},
+        "active": {f: {"op": s["op"], "values": s["values"]} for f, s in filters.items()},
+        "menu": [{"field": f, "label": l, "kind": k, **({"choices": [[c, t] for c, t in rightsizing.ADVICE_FILTER.items()]} if k == "radio" else {})}
+                 for f, l, k in rightsizing.MENU],
+    }
+    rows = ctx["rows"]
+    page_args = {"kind": kind, **_filter_args(filters)}
     return render_template(
-        "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, assessment=assessment,
-        subscription=subscription, title=rightsizing.KINDS[kind][0], labels=rightsizing.KINDS[kind][2],
-        assessments=rightsizing.ASSESSMENTS, rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), names=names,
-        lookback=metrics.get("lookbackDays", 30), kinds=rightsizing.KINDS,
+        "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, title=rightsizing.KINDS[kind][0], labels=labels,
+        rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), everything=len(ctx["base"]), names=names, kinds=rightsizing.KINDS,
+        lookback=metrics.get("lookbackDays", 30), totals=rightsizing.totals(metrics, ctx["advice"], ctx["costs"]), active=active,
+        facets=facets, page_args=page_args, order=ctx["order"], sorts=rightsizing.SORTS, has_costs=bool(ctx["costs"]),
     )
+
+
+@app.get("/rightsizing.csv")
+def rightsizing_csv():
+    try:
+        ctx = _rightsizing_context()
+    except Exception:
+        logging.exception("Could not export right-sizing data")
+        return jsonify(error="The data store is not reachable right now."), 503
+    if not ctx.get("metrics"):
+        return jsonify(error="No utilization data yet."), 404
+    names, labels = ctx["names"], ctx["labels"]
+    header = ["Name", "Type", "Subscription", "Resource group", "Size", "Avg %", "Max %", "Assessment", "Cost last 30 days",
+              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Resource ID"]
+    rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r["resourceGroup"], r["detail"], r["avg"], r["max"],
+             labels.get(r["assessment"], r["assessment"]), r["cost"], (r["advice"] or {}).get("action"), (r["advice"] or {}).get("targetSku"),
+             (r["advice"] or {}).get("monthlySavings"), (r["advice"] or {}).get("currency"), (r["advice"] or {}).get("cpuP95"),
+             (r["advice"] or {}).get("memoryP95"), r["id"]] for r in ctx["rows"]]
+    return _csv(f"right-sizing-{ctx['kind']}.csv", header, rows)
+
+
+@app.get("/resources.csv")
+def resources_csv():
+    filters = insights.parse_resource_filters(request.args)
+    query = request.args.get("q", "")[:80]
+    try:
+        _, summary = _latest()
+        rows, _ = _inventory(summary)
+        counts = insights.findings_per_resource(_all_findings(summary)) if rows else {}
+    except Exception:
+        logging.exception("Could not export the resources")
+        return jsonify(error="The data store is not reachable right now."), 503
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    chosen = insights.apply_resource_filters(rows, filters, query, counts)
+    header = ["Name", "Type", "Resource group", "Location", "Details", "Subscription", "Findings", "Resource ID"]
+    return _csv("resources.csv", header, [[r["name"], r["type"], r["resourceGroup"], r["location"], r["detail"],
+                                           names.get(r["subscriptionId"], r["subscriptionId"]), counts.get(r["id"].lower(), 0), r["id"]] for r in chosen])
+
 
 MAX_ACTIONS = 400
 RULE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")

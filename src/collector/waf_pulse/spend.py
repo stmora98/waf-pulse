@@ -121,6 +121,19 @@ def top_resources(rows):
             for resource, cost in sorted(totals.items(), key=lambda item: -item[1])[:TOP_RESOURCES] if cost > 0]
 
 
+MAX_COSTS = 1500
+
+
+def resource_costs(rows):
+    """What each resource cost in the last 30 days (amortized), the most expensive first: [{id (lower), cost}]."""
+    totals = defaultdict(float)
+    for row in rows:
+        if row["ResourceId"]:
+            totals[row["ResourceId"].lower()] += row["cost"]
+    ranked = sorted(totals.items(), key=lambda item: -item[1])
+    return [{"id": resource, "cost": round(cost, 2)} for resource, cost in ranked[:MAX_COSTS] if cost > 0]
+
+
 def build(raw, now):
     """raw: {query name: rows or None}. Returns the dataset section for the page, with only what could be read."""
     out = {}
@@ -140,7 +153,7 @@ def build(raw, now):
     return out
 
 
-def collect(token, scopes, now, deadline, clock=time.monotonic):
+def collect(token, scopes, now, deadline, clock=time.monotonic, costs=None):
     """scopes: one tenant scope, or one scope per subscription. Rows of the same query are added together.
     Returns (section, partial) where partial says some scope could not be read within the time budget."""
     raw, partial = {name: None for name in QUERIES}, False
@@ -160,4 +173,6 @@ def collect(token, scopes, now, deadline, clock=time.monotonic):
             partial = partial or skipped or rows is None
             if rows is not None:
                 raw[name] = (raw[name] or []) + rows
+    if costs is not None and raw.get("resources"):
+        costs.extend(resource_costs(raw["resources"]))
     return build(raw, now), partial

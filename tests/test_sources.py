@@ -239,3 +239,28 @@ def test_short_error_drops_the_support_ticket_text():
         "\tMessage: 'extend' operator: Failed to resolve column named 'principalType'"
     )
     assert checklists._short_error(error).startswith("'extend' operator")
+
+
+def advice_row(resource, target, current="Standard_D4as_v5", monthly=20.0, kind="Shutdown", **extra):
+    return {**advisor_row(resource=resource, saving=monthly * 12), "targetSku": target, "currentSku": current,
+            "monthlySavings": monthly, "advice": "Delete this Virtual Machine" if target == "Shutdown" else "Resize it",
+            "adviceType": kind, "cpuP95": 0.0, "memoryP95": 33.0, "networkP95": 0.0, "adviceDays": 7, **extra}
+
+
+def test_right_size_advice_keeps_the_target_size_the_savings_and_the_p95_metrics():
+    rows = [advice_row("/R/VM1", "Shutdown", monthly=20.0), advice_row("/r/vm1", "Standard_D2as_v5", monthly=12.0, kind="Resize"),
+            advice_row("/r/vm2", "Standard_D2as_v5", monthly=30.0, kind="Resize"), advice_row("/r/vm3", "", monthly=5.0),
+            advisor_row(resource="/r/other", saving=100)]
+    advice = advisor.right_size_advice(rows)
+    assert [a["id"] for a in advice] == ["/r/vm2", "/r/vm1"]  # biggest saving first; no target, no advice
+    first = {a["id"]: a for a in advice}["/r/vm1"]
+    assert first["action"] == "Shutdown" and first["targetSku"] == "Shutdown" and first["monthlySavings"] == 20.0
+    assert first["currentSku"] == "Standard_D4as_v5" and first["memoryP95"] == 33.0 and first["annualSavings"] == 240.0
+    assert {a["id"]: a["action"] for a in advice}["/r/vm2"] == "Resize"
+
+
+def test_the_advice_travels_in_the_dataset_and_never_counts_as_a_commitment():
+    rows = [advice_row("/r/vm1", "Shutdown"), commitment_row("P1Y", 30, 400)]
+    _, _, dataset = advisor.evaluate("run1", rows)
+    assert [a["id"] for a in dataset["advice"]] == ["/r/vm1"] and dataset["commitments"]
+    assert "targetSku" in advisor.ADVISOR_QUERY.split("| project")[-1] and "memoryP95" in advisor.ADVISOR_QUERY

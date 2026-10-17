@@ -335,9 +335,18 @@ function fitPopover(pop, container, anchor) {
   var facets = JSON.parse(bar.getAttribute("data-facets") || "{}");
   var fields = facets.fields || {};
   var active = facets.active || {};
-  var ORDER = ["subscription", "group", "type", "location"];
-  var LABELS = { subscription: "Subscription", group: "Resource group", type: "Resource type", location: "Location",
-                 findings: "Findings", name: "Name" };
+  var MENU = facets.menu || [
+    { field: "subscription", label: "Subscription", kind: "facet" },
+    { field: "group", label: "Resource group", kind: "facet" },
+    { field: "type", label: "Resource type", kind: "facet" },
+    { field: "location", label: "Location", kind: "facet" },
+    { field: "findings", label: "Findings", kind: "radio", choices: [["with", "With findings"], ["without", "Without findings"]] },
+    { field: "name", label: "Name", kind: "text" }
+  ];
+  function entryOf(field) {
+    for (var i = 0; i < MENU.length; i++) { if (MENU[i].field === field) { return MENU[i]; } }
+    return { field: field, label: field, kind: "facet" };
+  }
 
   function element(tag, text, className) {
     var node = document.createElement(tag);
@@ -417,16 +426,17 @@ function fitPopover(pop, container, anchor) {
     search.focus();
   }
 
-  function editFindings(anchor) {
-    var current = (active.findings && active.findings.values[0]) || "";
+  function editRadio(entry, anchor) {
+    var field = entry.field;
+    var current = (active[field] && active[field].values[0]) || "";
     pop.textContent = "";
-    pop.appendChild(element("h4", "Findings"));
+    pop.appendChild(element("h4", entry.label));
     var box = element("div", "", "fopts");
-    [["with", "With findings"], ["without", "Without findings"]].forEach(function (pair) {
+    (entry.choices || []).forEach(function (pair) {
       var label = element("label");
       var radio = element("input");
       radio.type = "radio";
-      radio.name = "findings";
+      radio.name = field;
       radio.value = pair[0];
       radio.checked = current === pair[0];
       label.appendChild(radio);
@@ -439,7 +449,7 @@ function fitPopover(pop, container, anchor) {
     apply.type = "button";
     apply.addEventListener("click", function () {
       var picked = box.querySelector("input:checked");
-      go("findings", "eq", picked ? [picked.value] : []);
+      go(field, "eq", picked ? [picked.value] : []);
     });
     var cancel = element("button", "Cancel", "icon-button");
     cancel.type = "button";
@@ -450,10 +460,11 @@ function fitPopover(pop, container, anchor) {
     place(anchor);
   }
 
-  function editName(anchor) {
-    var current = (active.name && active.name.values[0]) || "";
+  function editText(entry, anchor) {
+    var field = entry.field;
+    var current = (active[field] && active[field].values[0]) || "";
     pop.textContent = "";
-    pop.appendChild(element("h4", "Name contains"));
+    pop.appendChild(element("h4", entry.label + " contains"));
     var input = element("input", "", "lz-input");
     input.type = "text";
     input.maxLength = 150;
@@ -463,7 +474,7 @@ function fitPopover(pop, container, anchor) {
     var actions = element("div", "", "lz-row");
     var apply = element("button", "Apply");
     apply.type = "button";
-    function submit() { go("name", "contains", input.value.trim() ? [input.value.trim()] : []); }
+    function submit() { go(field, "contains", input.value.trim() ? [input.value.trim()] : []); }
     apply.addEventListener("click", submit);
     input.addEventListener("keydown", function (event) { if (event.key === "Enter") { submit(); } });
     var cancel = element("button", "Cancel", "icon-button");
@@ -477,8 +488,9 @@ function fitPopover(pop, container, anchor) {
   }
 
   function edit(field, anchor) {
-    if (field === "findings") { editFindings(anchor); }
-    else if (field === "name") { editName(anchor); }
+    var entry = entryOf(field);
+    if (entry.kind === "radio") { editRadio(entry, anchor); }
+    else if (entry.kind === "text") { editText(entry, anchor); }
     else { editFacet(field, anchor); }
   }
 
@@ -487,8 +499,9 @@ function fitPopover(pop, container, anchor) {
     event.stopPropagation();
     pop.textContent = "";
     pop.appendChild(element("h4", "Add filter"));
-    ORDER.concat(["findings", "name"]).forEach(function (field) {
-      var item = element("button", LABELS[field], "fmenu-item");
+    MENU.forEach(function (entry) {
+      var field = entry.field;
+      var item = element("button", entry.label, "fmenu-item");
       item.type = "button";
       if (active[field]) { item.disabled = true; item.title = "Already added: change it from its pill"; }
       item.addEventListener("click", function (click) { click.stopPropagation(); edit(field, add); });

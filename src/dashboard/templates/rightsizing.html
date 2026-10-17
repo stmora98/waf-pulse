@@ -8,7 +8,25 @@
     {% elif not metrics %}
       <section class="notice">No utilization data yet. It comes from Azure Monitor metrics: select <strong>Refresh now</strong> to collect it.</section>
     {% else %}
-      <p class="muted">Average and peak utilization of the last {{ lookback }} days, from Azure Monitor. Select a bar to list the resources behind it.</p>
+      <p class="muted">Average and peak utilization of the last {{ lookback }} days from Azure Monitor, what Azure Advisor recommends for each resource and what it cost. Select a bar to list the resources behind it.</p>
+
+      <section class="cards compact">
+        <a class="card {{ 'warn' if totals.toAct else 'na' }}" href="{{ url_for('rightsizing_page', kind=kind, assessment=['idle', 'under']) }}#resources">
+          <span class="card-title">To right-size</span><span class="card-score">{{ totals.toAct }}</span>
+          <span class="muted">idle or underutilized resources</span>
+        </a>
+        <div class="card {{ 'good' if totals.monthlySavings else 'na' }}">
+          <span class="card-title">Advisor savings</span><span class="card-score">{{ '{:,.0f}'.format(totals.monthlySavings) }}</span>
+          <span class="muted">{{ totals.currency }} per month · {{ totals.advised }} recommendation(s)</span>
+        </div>
+        {% if has_costs %}
+          <div class="card na">
+            <span class="card-title">Spent on them</span><span class="card-score">{{ '{:,.0f}'.format(totals.spentOnThem) }}</span>
+            <span class="muted">{{ totals.currency }} in the last 30 days, the most that shutting them down could save</span>
+          </div>
+        {% endif %}
+      </section>
+
       <section class="insights two">
         {% for card in cards %}
           <div class="panel">
@@ -20,22 +38,43 @@
       </section>
 
       <section class="panel" id="resources">
-        <h3>{{ title }}{% if assessment %} · {{ labels[assessment] }}{% endif %}</h3>
+        <h3>{{ title }} <span class="muted">· {{ total_rows }}{% if total_rows != everything %} of {{ everything }}{% endif %}</span></h3>
         <section class="severity">
           <span class="muted">Type</span>
           {% for key, definition in kinds.items() %}
-            <a class="chip {% if key == kind %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=key, subscription=subscription) }}#resources">{{ definition[0] }}</a>
+            <a class="chip {% if key == kind %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=key) }}#resources">{{ definition[0] }}</a>
           {% endfor %}
         </section>
+
+        <div class="filterbar" id="filterbar" data-facets='{{ facets | tojson }}'>
+          <form class="fb-search" method="get" action="{{ url_for('rightsizing_page') }}#resources">
+            {% for key, value in page_args.items() if value is not none %}
+              {% if value is string %}<input type="hidden" name="{{ key }}" value="{{ value }}">
+              {% else %}{% for item in value %}<input type="hidden" name="{{ key }}" value="{{ item }}">{% endfor %}{% endif %}
+            {% endfor %}
+            <input type="hidden" name="sort" value="{{ order }}">
+            <input type="search" name="name" value="{{ page_args.get('name', '') }}" maxlength="150" placeholder="Filter by name..." aria-label="Filter by name">
+          </form>
+          {% for f in active %}
+            <span class="fpill">
+              <button type="button" data-filter-edit="{{ f.field }}" title="Change this filter">{{ f.label }} {{ 'does not equal' if f.op == 'ne' else 'contains' if f.op == 'contains' else 'equals' }}
+                <strong>{{ f['values'] | join(', ') }}</strong></button>
+              <a href="{{ f.remove }}#resources" aria-label="Remove the {{ f.label }} filter" title="Remove this filter">&times;</a>
+            </span>
+          {% endfor %}
+          <button type="button" class="fadd" id="filter-add" aria-haspopup="true">+ Add filter</button>
+          {% if active %}<a class="chip clear" href="{{ url_for('rightsizing_page', kind=kind) }}#resources">Clear all</a>{% endif %}
+          <a class="chip" href="{{ url_for('rightsizing_csv', sort=order, **page_args) }}" title="Download this list as a CSV file">Download CSV</a>
+          <div class="lz-pop fpop" id="filter-pop" hidden role="dialog" aria-label="Filter"></div>
+        </div>
         <section class="severity">
-          <span class="muted">Show</span>
-          <a class="chip {% if not assessment %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=kind, subscription=subscription) }}#resources">All</a>
-          {% for name in assessments %}
-            <a class="chip {% if assessment == name %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=kind, assessment=name, subscription=subscription) }}#resources">{{ labels[name] }}</a>
+          <span class="muted">Order by</span>
+          {% for key, label in sorts.items() %}
+            <a class="chip {% if order == key %}active{% endif %}" href="{{ url_for('rightsizing_page', sort=key, **page_args) }}#resources">{{ label }}</a>
           {% endfor %}
         </section>
+
         {% if rows %}
-          <p class="filter"><label>Filter <input type="search" id="rs-filter" data-filter-table="rs" placeholder="Type a name, size or resource group" autocomplete="off"></label></p>
           <div class="table-wrap">
             <table id="rs">
               <thead>
@@ -43,7 +82,7 @@
                   <th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
                   {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ 'DTU' if kind == 'sql' else 'CPU' }} %</th><th>Max %</th>{% endif %}
                   {% if kind == 'plan' %}<th>Avg memory %</th>{% endif %}
-                  <th>Assessment</th><th>Azure</th>
+                  <th>Assessment</th><th>Cost (30 d)</th><th>Advisor</th><th>Azure</th>
                 </tr>
               </thead>
               <tbody>
@@ -54,19 +93,27 @@
                     <td>{{ r.resourceGroup }}</td>
                     <td>{{ r.detail }}</td>
                     {% if kind == 'storage' %}
-                      <td>{{ '{:,.0f}'.format(r.avg) }}</td>
+                      <td>{{ '{:,.0f}'.format(r.avg) if r.avg is not none else '–' }}</td>
                     {% else %}
-                      <td>{{ r.avg }}</td><td>{{ r.max if r.max is defined else '–' }}</td>
+                      <td>{{ r.avg if r.avg is not none else '–' }}</td><td>{{ r.max if r.max is defined and r.max is not none else '–' }}</td>
                     {% endif %}
                     {% if kind == 'plan' %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
-                    <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span></td>
+                    <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span>{% if r.source == 'advisor' %}<br><span class="muted">from Advisor, no metrics</span>{% endif %}</td>
+                    <td>{% if r.cost is not none %}{{ '{:,.0f}'.format(r.cost) }}{% else %}<span class="muted">–</span>{% endif %}</td>
+                    <td>
+                      {% if r.advice %}
+                        <strong>{{ 'Shut down' if r.advice.action | lower == 'shutdown' else '→ ' ~ r.advice.targetSku }}</strong>
+                        {% if r.advice.monthlySavings %}<br><span class="muted">saves {{ '{:,.0f}'.format(r.advice.monthlySavings) }} {{ r.advice.currency }}/mo</span>{% endif %}
+                        {% if r.advice.cpuP95 is not none or r.advice.memoryP95 is not none %}<br><span class="muted">P95 CPU {{ r.advice.cpuP95 if r.advice.cpuP95 is not none else '–' }}% · memory {{ r.advice.memoryP95 if r.advice.memoryP95 is not none else '–' }}%</span>{% endif %}
+                      {% else %}<span class="muted">–</span>{% endif %}
+                    </td>
                     <td>{{ azure_link(r.id) }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
-          {% if total_rows > rows | length %}<p class="muted">Showing {{ rows | length }} of {{ total_rows }}.</p>{% endif %}
+          {% if total_rows > rows | length %}<p class="muted">Showing {{ rows | length }} of {{ total_rows }}. Download the CSV for the whole list.</p>{% endif %}
         {% else %}
           <p class="muted">No resources for this selection.</p>
         {% endif %}
