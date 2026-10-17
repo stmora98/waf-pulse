@@ -52,18 +52,6 @@ def test_subscriptions_without_a_group_get_their_own_box():
     assert lz.actual([], [], {}, [])["nodes"] == []
 
 
-def test_the_reference_marks_what_the_tenant_has():
-    _, found = lz.classify(tree())
-    assert set(found) == {"platform", "connectivity", "identity", "landingzones"}
-    status = {n["label"]: n["status"] for n in lz.reference(found, True)["nodes"]}
-    assert status["Platform"] == status["Connectivity"] == status["Workload landing zones"] == "present"
-    assert status["Sandbox"] == status["Security"] == "missing" and len(status) == 13
-    assert lz.reference({}, False)["nodes"][1]["status"] == "missing"  # no hierarchy: no intermediate root either
-    rows = {row["label"]: row for row in lz.alignment(found)}
-    assert rows["Platform"]["found"] and rows["Platform"]["matches"] == ["Platform (name)"]
-    assert not rows["Sandbox"]["found"] and rows["Sandbox"]["matches"] == [] and len(rows) == 11
-
-
 def node(name, display, subs=(), children=()):
     return {"name": name, "displayName": display, "subscriptions": list(subs), "children": list(children)}
 
@@ -119,74 +107,109 @@ def test_the_diagram_carries_how_each_group_was_matched():
     assert by_label["Platform"]["how"] == "name" and by_label["Tenant Root Group"]["how"] == ""
 
 
-def test_typed_names_are_cleaned_before_they_are_saved():
-    raw = {"platform": " Plataforma , mg-plat;Plataforma\n", "nonsense": "x", "sandbox": "", "corp": ["A", "a", "B"],
-           "online": "x" * 300}
-    assert lz.sanitize_mapping(raw) == {"platform": ["Plataforma", "mg-plat"], "corp": ["A", "B"], "online": ["x" * 100]}
-    assert lz.sanitize_mapping(None) == {} and lz.sanitize_mapping("text") == {}
-    assert lz.sanitize_hidden(["sandbox", "root", "nope", "sandbox", "local"]) == ["local", "sandbox"]
-    assert lz.sanitize_hidden("sandbox") == []
+# --- the editable design ------------------------------------------------------------------------------------
+
+def sub(name, link=""):
+    return {"id": name.lower().replace(" ", "-"), "label": name, "kind": "sub", "role": "", "link": link, "children": []}
 
 
-def test_what_was_typed_replaces_the_deployment_setting_role_by_role():
-    merged = lz.merge_override({"platform": {"a"}, "sandbox": {"b"}}, {"platform": ["X", " y "]})
-    assert merged == {"platform": {"x", "y"}, "sandbox": {"b"}}
+def group(name, children=(), link="", role=""):
+    return {"id": name.lower().replace(" ", "-"), "label": name, "kind": "mg", "role": role, "link": link, "children": list(children)}
 
 
-def test_a_subscription_can_play_a_role_when_there_is_no_management_group_for_it():
-    subs = [{"id": "s1", "name": "Hub Sub"}, {"id": "s2", "name": "Mgmt Sub"}, {"id": "s3", "name": "Other"}]
-    found = lz.assign_subscriptions(subs, {"connectivity": {"hub sub"}, "management": {"s2"}, "identity": {"mgmt sub"}})
-    assert [m["label"] for m in found["connectivity"]] == ["Hub Sub"] and found["connectivity"][0]["kind"] == "subscription"
-    assert [m["label"] for m in found["management"]] == ["Mgmt Sub"]  # an id works too
-    assert [m["label"] for m in found["identity"]] == ["Mgmt Sub"]
-    assert "Other" not in str(found)
-    reference = {n["label"]: n for n in lz.reference({}, True, subscriptions=found)["nodes"]}
-    assert [c["label"] for c in reference["Connectivity"]["chips"]] == ["Hub Sub"]  # shown under the box, like the image
-    assert reference["Connectivity"]["status"] == "present"
-    row = {r["label"]: r for r in lz.alignment({}, subscriptions=found)}["Connectivity"]
-    assert row["subscriptionMatches"] == ["Hub Sub"] and row["matches"] == [] and row["found"]
+def design(*children):
+    return {"id": "root", "label": "Tenant root group", "kind": "root", "role": "", "link": "", "children": list(children)}
 
 
-def test_subscriptions_and_management_groups_never_match_each_other():
-    tree_ = [node("root", "Root", children=[node("mg-hub", "Hub", ["s1"])])]
-    subs = [{"id": "s1", "name": "Hub Sub"}]
-    # A subscription name typed as a management group does nothing, and the other way around.
-    _, found = lz.classify(tree_, {}, {}, {"sandbox": {"hub sub"}})
-    assert "sandbox" not in found
-    assert lz.assign_subscriptions(subs, {"sandbox": {"mg-hub", "hub"}}) == {}
-    assert lz.rejected_names({"sandbox": ["Hub Sub", "Hub"]}, {"hub"}) == [("sandbox", "Hub Sub")]
-    assert lz.rejected_names({}, {"hub"}) == []
+def test_the_default_design_is_the_reference_architecture():
+    base = lz.default_design()
+    flat = [node["label"] for node, _ in lz.design_nodes(base)]
+    assert flat[0] == "Tenant root group" and len(flat) == 13 and "Sandbox" in flat and "Internal (Corp)" in flat
+    assert base["kind"] == "root" and all(n["kind"] == "mg" for n, p in lz.design_nodes(base) if p)
+    assert lz.sanitize_design(base) == (base, [])  # what is shown is valid
+    platform = next(n for n, _ in lz.design_nodes(base) if n["id"] == "platform")
+    assert platform["role"] == "platform" and [c["id"] for c in platform["children"]] == ["security", "management", "identity", "connectivity"]
 
 
-def test_only_the_boxes_that_hold_subscriptions_get_a_slot_and_only_when_interactive():
-    plain = {n["label"]: n for n in lz.reference({}, True)["nodes"]}
-    assert not any("add" in n for n in plain.values())
-    slots = {n["label"] for n in lz.reference({}, True, interactive=True)["nodes"] if "add" in n}
-    assert slots == {"Security", "Management", "Identity", "Connectivity", "Internal (Corp)", "Online", "Local",
-                     "Decommissioned", "Sandbox"}  # not Platform or the landing zones group: they only hold groups
-    assert not any("add" in n for n in lz.reference({}, True, hidden=["sandbox"], interactive=True)["nodes"] if n["label"] == "Sandbox")
+def test_a_box_can_be_a_subscription_and_a_group_can_gain_levels_and_subscriptions():
+    mine = design(group("Contoso", [group("Platform", [group("Hub", [group("Spoke A", [sub("Spoke A prod"), sub("Spoke A dev")])])]),
+                                    sub("Shared services")]))
+    cleaned, errors = lz.sanitize_design(mine)
+    assert errors == [] and cleaned == mine
+    kinds = [(n["label"], n["kind"]) for n, _ in lz.design_nodes(cleaned)]
+    assert ("Shared services", "sub") in kinds and ("Spoke A", "mg") in kinds
+    diagram, facts, counts = lz.design_diagram(cleaned, {}, True)
+    assert {n["label"]: n["kind"] for n in diagram["nodes"]}["Spoke A prod"] == "sub" and counts["subscriptions"] == 3
+    by_level = {}
+    for n in diagram["nodes"]:
+        by_level.setdefault(n["y"], []).append(n["label"])
+    assert len(by_level) == 6  # root, Contoso, Platform and the subscription, Hub, Spoke A, its subscriptions
 
 
-def test_the_subscriptions_key_of_the_deployment_setting_is_read_apart():
-    text = '{"connectivity": "mg-hub", "subscriptions": {"connectivity": ["Hub Sub"], "bogus": "x"}}'
-    assert lz.parse_override(text) == {"connectivity": {"mg-hub"}}
-    assert lz.parse_subscription_override(text) == {"connectivity": {"hub sub"}}
-    assert lz.parse_subscription_override("{bad") == {} and lz.parse_subscription_override('{"subscriptions": 3}') == {}
+def test_a_subscription_cannot_have_boxes_below_it_and_the_root_cannot_change():
+    bad = design(group("A", [{**sub("S"), "children": [group("B")]}]))
+    assert lz.sanitize_design(bad)[0] is None and "cannot have boxes below" in lz.sanitize_design(bad)[1][0]
+    assert lz.sanitize_design({**design(), "kind": "mg"})[0] is None  # the root cannot become a group or a subscription
+    assert lz.sanitize_design({**design(), "kind": "sub"})[0] is None
+    assert lz.sanitize_design({**design(), "id": "other"})[0] is None
+    assert lz.sanitize_design("text")[0] is None and lz.sanitize_design(None)[1] == ["The diagram needs its root."]
 
 
-def test_removed_boxes_leave_the_reference_and_the_count_but_can_be_put_back():
-    found = {"platform": [{"label": "P", "how": "name"}]}
-    full = lz.reference(found, True)
-    pruned = lz.reference(found, True, hidden=["platform", "sandbox"])
-    labels = {n["label"] for n in pruned["nodes"]}
-    assert "Platform" not in labels and "Security" not in labels and "Sandbox" not in labels  # a box takes its children
-    assert "Workload landing zones" in labels and len(pruned["nodes"]) < len(full["nodes"])
-    rows = lz.alignment(found, hidden=["platform", "sandbox"])
-    assert {r["role"] for r in rows} == {"landingzones", "corp", "online", "local", "decommissioned"}
-    assert lz.removed_boxes(["platform", "security", "sandbox"]) == [
-        {"label": "Platform", "role": "platform"}, {"label": "Sandbox", "role": "sandbox"}]  # Security goes with its parent
+def test_the_design_is_limited_in_size_depth_names_and_identifiers():
+    deep = design()
+    cursor = deep
+    for level in range(10):
+        child = group(f"L{level}")
+        cursor["children"].append(child)
+        cursor = child
+    assert "at most 8 levels" in lz.sanitize_design(deep)[1][0]
+    wide = design(*[group(f"G{i}") for i in range(151)])
+    assert "at most 150 boxes" in lz.sanitize_design(wide)[1][0]
+    assert lz.sanitize_design(design(group("A"), group("A")))[0] is None  # the same identifier twice
+    assert lz.sanitize_design(design({**group("A"), "id": "bad id!"}))[0] is None
+    assert lz.sanitize_design(design({**group("A"), "label": "  "}))[0] is None
+    long = lz.sanitize_design(design({**group("A"), "label": "x" * 200}))[0]
+    assert len(long["children"][0]["label"]) == 60
+    odd = lz.sanitize_design(design({**group("A"), "kind": "folder"}))
+    assert odd[0] is None and "unknown type" in odd[1][0]
+    assert lz.sanitize_design(design({**group("A"), "role": "nonsense"}))[0]["children"][0]["role"] == ""
 
 
-def test_names_typed_for_a_role_show_which_ones_match_nothing():
-    rows = {r["role"]: r for r in lz.alignment({}, {"sandbox": ["Lab", "Nope"]}, known={"lab"})}
-    assert rows["sandbox"]["names"] == ["Lab", "Nope"] and rows["sandbox"]["unmatched"] == ["Nope"]
+def test_a_link_must_be_of_the_right_kind_and_exist_in_the_tenant():
+    groups, subs = {"mg-hub", "hub"}, {"hub sub", "s1"}
+    ok = design(group("Hub", link="MG-Hub"), sub("Hub sub", link="Hub Sub"))
+    assert lz.sanitize_design(ok, groups, subs)[1] == []
+    wrong_group = lz.sanitize_design(design(group("Hub", link="Hub Sub")), groups, subs)
+    assert wrong_group[0] is None and "Hub Sub is not a management group of your tenant" in wrong_group[1][0]
+    wrong_sub = lz.sanitize_design(design(sub("S", link="mg-hub")), groups, subs)
+    assert wrong_sub[0] is None and "mg-hub is not a subscription of your tenant" in wrong_sub[1][0]
+    assert lz.sanitize_design(design(group("Hub", link="Anything")))[1] == []  # tenant unknown: nothing to check against
+    assert lz.sanitize_design({**design(), "link": "x"}, groups, subs)[0]["link"] == ""  # the root is not linked
+
+
+def test_boxes_are_found_by_their_link_by_automatic_matching_or_not_at_all():
+    found = {"platform": [{"label": "Contoso Platform", "how": "name"}]}
+    mine = design(group("Platform", role="platform"), group("Sandbox", role="sandbox"), group("Mine", link="Real MG"),
+                  group("Ghost", link="Gone"), sub("Hub", link="Hub Sub"), sub("Empty"), group("Alone"))
+    diagram, facts, counts = lz.design_diagram(mine, found, True, {"real mg"}, {"hub sub"})
+    assert facts["platform"] == {"status": "present", "matches": ["Contoso Platform (name)"], "how": "name"}
+    assert facts["sandbox"]["status"] == "missing" and facts["alone"]["status"] == "missing"
+    assert facts["mine"] == {"status": "present", "matches": ["Real MG (manual)"], "how": "manual"}
+    assert facts["ghost"]["status"] == "missing"  # linked to something that no longer exists
+    assert facts["hub"]["status"] == "present" and facts["empty"]["status"] == "missing"
+    assert counts == {"groups": 5, "groupsFound": 2, "subscriptions": 2, "subscriptionsLinked": 1}
+    labels = {n["node_id"]: n["label"] for n in diagram["nodes"]}
+    assert labels["hub"] == "Hub Sub"  # a linked subscription shows the real name
+
+
+def test_the_intermediate_root_follows_whether_a_hierarchy_exists():
+    base = lz.default_design()
+    assert lz.design_diagram(base, {}, True)[1]["intermediate"]["status"] == "present"
+    assert lz.design_diagram(base, {}, False)[1]["intermediate"]["status"] == "missing"
+
+
+def test_subscription_boxes_are_small_leaf_boxes_with_their_own_geometry():
+    nodes = {n["node_id"]: n for n in lz.design_diagram(design(group("A", [sub("S1"), sub("S2")])), {}, True)[0]["nodes"]}
+    assert nodes["s1"]["height"] < nodes["a"]["height"] and nodes["s1"]["kind"] == "sub" and nodes["s1"]["width"] == lz.SUB_WIDTH
+    assert nodes["s1"]["x"] + nodes["s1"]["width"] <= nodes["s2"]["x"]  # siblings do not overlap
+    assert nodes["root"]["kind"] == "root" and nodes["root"]["status"] == ""

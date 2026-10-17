@@ -128,44 +128,6 @@ def parse_override(text):
     return result
 
 
-MAX_NAMES_PER_ROLE = 10
-MAX_NAME_LENGTH = 100
-
-
-def sanitize_mapping(raw):
-    """A mapping typed in the page -> {role: [names]}. Only known roles, a few short names each, no empty ones."""
-    result = {}
-    for role, value in (raw.items() if isinstance(raw, dict) else ()):
-        if role not in ROLE_NAMES:
-            continue
-        parts = value if isinstance(value, list) else re.split(r"[,\n;]", str(value))
-        names = []
-        for part in parts:
-            name = str(part).strip()[:MAX_NAME_LENGTH]
-            if name and name.lower() not in {n.lower() for n in names}:
-                names.append(name)
-        if names:
-            result[role] = names[:MAX_NAMES_PER_ROLE]
-    return result
-
-
-HIDEABLE = {"platform", "security", "management", "identity", "connectivity", "landingzones", "corp", "online", "local",
-            "decommissioned", "sandbox"}
-
-
-def sanitize_hidden(raw):
-    """Roles of the reference architecture that the visitor removed because they do not apply. Unknown ones are dropped."""
-    return sorted({str(role) for role in (raw if isinstance(raw, list) else ()) if str(role) in HIDEABLE})
-
-
-def merge_override(environment, saved):
-    """What the deployment configuration says, role by role, replaced by what was typed in the page."""
-    merged = {role: set(names) for role, names in (environment or {}).items()}
-    for role, names in (saved or {}).items():
-        merged[role] = {str(n).strip().lower() for n in names if str(n).strip()}
-    return merged
-
-
 def override_from_environment():
     return parse_override(os.environ.get("LANDING_ZONE_MAP", ""))
 
@@ -235,11 +197,12 @@ def _measure(node):
     return node["span"]
 
 
-def normalize(label, role="", children=(), subs=(), status="", key="", how="", slot=False):
+def normalize(label, role="", children=(), subs=(), status="", key="", how="", slot=False, kind="mg", node_id="", link=""):
     chips = [_short(s, 24) for s in subs[:MAX_CHIPS]]
     hidden = max(len(subs) - MAX_CHIPS, 0)
     return {"label": label, "role": role, "children": list(children), "chips": chips, "hidden": hidden,
-            "status": status, "key": key or label, "width": _label_width(label), "subscriptions": len(subs), "how": how, "slot": slot}
+            "status": status, "key": key or label, "width": SUB_WIDTH if kind == "sub" else _label_width(label), "subscriptions": len(subs), "how": how, "slot": slot,
+            "kind": kind, "node_id": node_id, "link": link}
 
 
 def layout(roots):
@@ -250,6 +213,8 @@ def layout(roots):
     level_height = {}
 
     def height_of(node):
+        if node["kind"] == "sub":
+            return SUB_HEIGHT
         chips = len(node["chips"]) + (1 if node["hidden"] else 0) + (1 if node["slot"] else 0)
         return NODE_HEIGHT + (chips * (CHIP_HEIGHT + CHIP_GAP) + CHIP_GAP if chips else 0)
 
@@ -268,8 +233,9 @@ def layout(roots):
     def place(node, left, depth):
         cx = left + node["span"] / 2
         top = tops[depth]
-        entry = {**{k: node[k] for k in ("label", "role", "status", "key", "hidden", "subscriptions", "how")},
-                 "x": round(cx - node["width"] / 2, 1), "y": top, "width": node["width"], "height": NODE_HEIGHT,
+        entry = {**{k: node[k] for k in ("label", "role", "status", "key", "hidden", "subscriptions", "how", "kind", "node_id", "link")},
+                 "x": round(cx - node["width"] / 2, 1), "y": top, "width": node["width"],
+                 "height": SUB_HEIGHT if node["kind"] == "sub" else NODE_HEIGHT,
                  "cx": round(cx, 1), "chips": []}
         for index, chip in enumerate(node["chips"]):
             entry["chips"].append({"label": chip, "x": round(cx - 70, 1), "width": 140,
@@ -306,37 +272,6 @@ def layout(roots):
     return {"width": round(width), "height": round(y - LEVEL_GAP + 12), "nodes": nodes, "links": links}
 
 
-def parse_subscription_override(text):
-    """The "subscriptions" key of LANDING_ZONE_MAP: {role: {lower names or ids of subscriptions}}."""
-    try:
-        raw = json.loads(text) if text else {}
-    except ValueError:
-        return {}
-    return parse_override(json.dumps(raw["subscriptions"])) if isinstance(raw, dict) and isinstance(raw.get("subscriptions"), dict) else {}
-
-
-def subscription_override_from_environment():
-    return parse_subscription_override(os.environ.get("LANDING_ZONE_MAP", ""))
-
-
-def assign_subscriptions(subscriptions, override):
-    """Subscriptions named for a role, by name or id. Only subscriptions are looked at, never management groups.
-    Returns {role: [{label, how, kind, id}]}."""
-    found = {}
-    for role, names in (override or {}).items():
-        for sub in subscriptions:
-            label = sub.get("name") or sub.get("id", "")
-            if {str(label).lower(), str(sub.get("id", "")).lower()} & set(names):
-                found.setdefault(role, []).append({"label": label, "how": "manual", "kind": "subscription", "id": sub.get("id", "")})
-    return found
-
-
-def rejected_names(mapping, allowed):
-    """The typed names that are not in `allowed` (lower case), so a subscription cannot be mapped as a management
-    group or the other way around. Returns [(role, name)]."""
-    return [(role, name) for role, names in mapping.items() for name in names if name.lower() not in allowed]
-
-
 def actual(tree, subscriptions, names, outside, classification=None):
     """The tenant's own hierarchy. tree: roots from governance_view.build_tree."""
     classification = classification or {}
@@ -356,70 +291,137 @@ def actual(tree, subscriptions, names, outside, classification=None):
     return layout(roots)
 
 
-SLOT_ROLES = {"security", "management", "identity", "connectivity", "corp", "online", "local", "decommissioned", "sandbox"}
+
+# ---------------------------------------------------------------------------------------------------------
+# The editable design: the tree the visitor draws, starting from the reference architecture.
+
+SUB_HEIGHT = 28
+SUB_WIDTH = 160
+MAX_NODES = 150
+MAX_DEPTH = 8
+MAX_LABEL = 60
+NODE_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+KIND_NAMES = {"mg": "management group", "sub": "subscription"}
 
 
-def reference(found, has_hierarchy, hidden=(), subscriptions=None, interactive=False):
-    """The reference architecture, each box marked present or missing in the tenant. `found` is the second value of
-    `classify` and `subscriptions` what `assign_subscriptions` returned. Boxes that only organize the tree (tenant
-    root, intermediate root) are marked present when any hierarchy is visible. Subscriptions hang under the boxes that
-    hold them, like the key icons of the reference image."""
-    subscriptions = subscriptions or {}
-
+def default_design():
+    """The reference architecture as an editable tree. Every node: id, label, kind (root, mg or sub), role (the box of
+    the reference it started as, used to find it by name, policy or content), link (the name of the real management
+    group or subscription it stands for) and children."""
     def convert(item):
         label, role, kids = item
-        kids = [kid for kid in kids if kid[1] not in hidden]
-        if role in ("root", "intermediate"):
-            status = "present" if has_hierarchy or role == "root" else "missing"
-            how = ""
-        else:
-            status = "present" if found.get(role) or subscriptions.get(role) else "missing"
-            how = (found.get(role) or subscriptions.get(role) or [{"how": ""}])[0]["how"]
-        subs = [m["label"] for m in subscriptions.get(role, [])]
-        return normalize(label, role, [convert(k) for k in kids], subs, status=status, key=role, how=how,
-                         slot=interactive and role in SLOT_ROLES)
+        return {"id": role, "label": label, "kind": "root" if role == "root" else "mg", "role": "" if role == "root" else role,
+                "link": "", "children": [convert(kid) for kid in kids]}
 
-    return layout([convert(REFERENCE)])
+    return convert(REFERENCE)
 
 
-def alignment(found, typed=None, known=(), hidden=(), subscriptions=None, typed_subscriptions=None, known_subscriptions=()):
-    """One row per box of the reference architecture that a tenant is expected to have: the management groups
-    found for it, the names typed for it and which of those match no management group, and the same for
-    subscriptions. `known` and `known_subscriptions` hold the lower case names of the tenant."""
-    expected, typed, subscriptions, typed_subscriptions = [], typed or {}, subscriptions or {}, typed_subscriptions or {}
+def sanitize_design(raw, group_names=None, subscription_names=None):
+    """Checks a design coming from the page. Returns (design or None, [errors]). A subscription is always a leaf, a
+    management group may hold anything, the root cannot change kind, and when the names of the tenant are known
+    a link must be a management group of the right kind: a subscription is never linked to a group or the other way."""
+    errors, seen, count = [], set(), [0]
 
-    def walk(item):
-        label, role, kids = item
-        if role in hidden:
-            return  # a removed box takes its children with it
-        if role not in ("root", "intermediate"):
-            matches = [f"{m['label']} ({m['how']})" for m in found.get(role, [])]
-            sub_matches = [m["label"] for m in subscriptions.get(role, [])]
-            names, sub_names = list(typed.get(role, [])), list(typed_subscriptions.get(role, []))
-            expected.append({
-                "label": label, "role": role, "found": bool(matches or sub_matches), "matches": matches,
-                "subscriptionMatches": sub_matches, "names": names, "subscriptionNames": sub_names,
-                "unmatched": [n for n in names if n.lower() not in known],
-                "unmatchedSubscriptions": [n for n in sub_names if n.lower() not in known_subscriptions],
-                "holdsSubscriptions": role in SLOT_ROLES})
-        for kid in kids:
-            walk(kid)
+    def walk(node, depth, is_root):
+        if not isinstance(node, dict):
+            errors.append("A box is not valid.")
+            return None
+        count[0] += 1
+        if count[0] > MAX_NODES:
+            errors.append(f"The diagram can have at most {MAX_NODES} boxes.")
+            return None
+        if depth > MAX_DEPTH:
+            errors.append(f"The diagram can have at most {MAX_DEPTH} levels.")
+            return None
+        node_id = str(node.get("id", ""))
+        kind = "root" if is_root else str(node.get("kind", ""))
+        label = " ".join(str(node.get("label", "")).split())[:MAX_LABEL]
+        link = " ".join(str(node.get("link", "")).split())[:120]
+        role = str(node.get("role", "")) if not is_root else ""
+        if not NODE_ID.match(node_id) or node_id in seen:
+            errors.append("A box has a missing or repeated identifier.")
+            return None
+        seen.add(node_id)
+        if kind not in ("root", "mg", "sub"):
+            errors.append(f"{label or node_id} has an unknown type.")
+            return None
+        if not label:
+            errors.append("Every box needs a name.")
+            return None
+        if role and role not in ROLE_NAMES and role != "intermediate":
+            role = ""
+        children = node.get("children") or []
+        if not isinstance(children, list):
+            children = []
+        if kind == "sub":
+            role = ""
+            if children:
+                errors.append(f"{label} is a subscription and cannot have boxes below it.")
+                return None
+        if link:
+            known = group_names if kind == "mg" else subscription_names if kind == "sub" else None
+            if kind == "root":
+                link = ""
+            elif known is not None and link.lower() not in known:
+                errors.append(f"{link} is not a {KIND_NAMES[kind]} of your tenant.")
+                return None
+        built = [walk(child, depth + 1, False) for child in children]
+        if any(child is None for child in built):
+            return None
+        return {"id": node_id, "label": label, "kind": kind, "role": role, "link": link, "children": built}
 
-    walk(REFERENCE)
-    return expected
+    if not isinstance(raw, dict) or raw.get("kind") not in (None, "root") or raw.get("id") != "root":
+        return None, ["The diagram needs its root."]
+    design = walk(raw, 0, True)
+    return (design, []) if design and not errors else (None, errors[:3] or ["The diagram is not valid."])
 
 
-def removed_boxes(hidden):
-    """The boxes the visitor removed, so they can be put back: [{label, role}]. Children of a removed box are not listed."""
-    removed = []
+def design_nodes(design):
+    """Every node of a design, parents first: [(node, parent or None)]."""
+    result = []
 
-    def walk(item):
-        label, role, kids = item
-        if role in hidden:
-            removed.append({"label": label, "role": role})
-            return
-        for kid in kids:
-            walk(kid)
+    def walk(node, parent):
+        result.append((node, parent))
+        for child in node.get("children", []):
+            walk(child, node)
 
-    walk(REFERENCE)
-    return removed
+    walk(design, None)
+    return result
+
+
+def design_diagram(design, found, has_hierarchy, group_names=(), subscription_names=()):
+    """Draws a design. `found` is the second value of `classify`. Returns (diagram, facts, summary): facts says, for
+    each box id, whether it was found and how, for the editing panel; summary counts what the tenant has."""
+    groups, subs = {n.lower() for n in group_names}, {n.lower() for n in subscription_names}
+    facts, counts = {}, {"groups": 0, "groupsFound": 0, "subscriptions": 0, "subscriptionsLinked": 0}
+
+    def convert(node):
+        kind, link, role = node["kind"], node.get("link", ""), node.get("role", "")
+        status, how, matches = "present", "", []
+        if kind == "mg":
+            counts["groups"] += 1
+            if link:
+                ok = link.lower() in groups
+                status, how, matches = ("present", "manual", [f"{link} (manual)"]) if ok else ("missing", "", [])
+            elif role in ("intermediate",):
+                status = "present" if has_hierarchy else "missing"
+            elif role and found.get(role):
+                status, how = "present", found[role][0]["how"]
+                matches = [f"{m['label']} ({m['how']})" for m in found[role]]
+            else:
+                status = "missing"
+            counts["groupsFound"] += status == "present"
+        elif kind == "sub":
+            counts["subscriptions"] += 1
+            ok = bool(link) and link.lower() in subs
+            status, how = ("present", "manual") if ok else ("missing", "")
+            matches = [link] if ok else []
+            counts["subscriptionsLinked"] += ok
+        facts[node["id"]] = {"status": status, "matches": matches, "how": how}
+        label = link if kind == "sub" and link else node["label"]
+        return normalize(label, role if kind != "sub" else "", [convert(child) for child in node["children"]],
+                         status="" if kind == "root" else status, key=node["id"], how=how, kind=kind,
+                         node_id=node["id"], link=link)
+
+    diagram = layout([convert(design)])
+    return diagram, facts, counts

@@ -502,26 +502,22 @@ def governance_page():
     diagrams = {}
     if governance:
         names = {sub["id"]: sub.get("name") or sub["id"] for sub in governance.get("subscriptions", [])}
-        mapping, sub_mapping, hidden = _landing_zone_settings()
         environment = landing_zone.override_from_environment()
-        sub_environment = landing_zone.subscription_override_from_environment()
         classification, found = landing_zone.classify(
-            tree, governance.get("policyByGroup"), governance.get("signals"), landing_zone.merge_override(environment, mapping))
+            tree, governance.get("policyByGroup"), governance.get("signals"), environment)
         group_names = sorted({name for node in _walk_groups(tree) for name in (node.get("displayName"), node.get("name")) if name})
         subscriptions = governance.get("subscriptions", [])
-        sub_found = landing_zone.assign_subscriptions(subscriptions, landing_zone.merge_override(sub_environment, sub_mapping))
+        subscription_names = sorted({s.get("name") for s in subscriptions if s.get("name")})
         has_hierarchy = any(node.get("children") for node in tree)
-        typed = {role: mapping.get(role) or sorted(environment.get(role, ())) for role in {*mapping, *environment}}
-        typed_subs = {role: sub_mapping.get(role) or sorted(sub_environment.get(role, ())) for role in {*sub_mapping, *sub_environment}}
+        saved = _saved_design()
+        design = saved or landing_zone.default_design()
         known_groups = {n.lower() for n in group_names}
-        known_subs = {str(s.get("name", "")).lower() for s in subscriptions} | {str(s.get("id", "")).lower() for s in subscriptions}
+        known_subs = {n.lower() for n in subscription_names} | {str(s.get("id", "")).lower() for s in subscriptions}
+        reference, facts, summary_counts = landing_zone.design_diagram(design, found, has_hierarchy, known_groups, known_subs)
         diagrams = {
             "hierarchy": landing_zone.actual(tree, subscriptions, names, unassigned, classification),
-            "reference": landing_zone.reference(found, has_hierarchy, hidden, sub_found, interactive=True),
-            "alignment": landing_zone.alignment(found, typed, known_groups, hidden, sub_found, typed_subs, known_subs),
-            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy,
-            "typed": typed, "typed_subscriptions": typed_subs,
-            "group_options": group_names, "subscription_options": sorted({s.get("name") for s in subscriptions if s.get("name")}),
+            "reference": reference, "design": design, "facts": facts, "design_summary": summary_counts, "custom_design": bool(saved),
+            "has_hierarchy": has_hierarchy, "group_options": group_names, "subscription_options": subscription_names,
         }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
                            summary=summary, **diagrams)
@@ -661,19 +657,17 @@ def _cross_site():
     )
 
 
-MAPPING_SETTING = "landing-zone-map"
+DESIGN_SETTING = "landing-zone-design"
 
 
-def _landing_zone_settings():
-    """What was typed in the Governance page: ({role: [management groups]}, {role: [subscriptions]}, [removed roles])."""
+def _saved_design():
+    """The design the visitor drew, or None to use the reference architecture."""
     try:
-        saved = data.get_setting(MAPPING_SETTING)
+        saved = data.get_setting(DESIGN_SETTING)
     except Exception:
-        logging.exception("Could not read the landing zone settings")
-        return {}, {}, []
-    saved = saved if isinstance(saved, dict) else {}
-    return (landing_zone.sanitize_mapping(saved.get("mapping")), landing_zone.sanitize_mapping(saved.get("subscriptions")),
-            landing_zone.sanitize_hidden(saved.get("hidden")))
+        logging.exception("Could not read the landing zone design")
+        return None
+    return landing_zone.sanitize_design(saved)[0] if saved else None
 
 
 def _tenant_names():
@@ -690,30 +684,27 @@ def _tenant_names():
     return groups, subs
 
 
-@app.post("/api/landing-zone-map")
-def api_landing_zone_map():
-    """Saves the management groups and subscriptions typed for each landing zone role and the boxes removed from
-    the reference. A management group is only accepted for a box and a subscription only under it, never the other
-    way around."""
+@app.post("/api/landing-zone-design")
+def api_landing_zone_design():
+    """Saves the diagram the visitor drew (or goes back to the reference with {"reset": true}). Each box can be a
+    management group or a subscription and linked to a real one of that kind only; the shape is checked here."""
     if _cross_site():
         return jsonify(error="Forbidden"), 403
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
-    saved = {"mapping": landing_zone.sanitize_mapping(body.get("mapping")),
-             "subscriptions": landing_zone.sanitize_mapping(body.get("subscriptions")),
-             "hidden": landing_zone.sanitize_hidden(body.get("hidden"))}
-    groups, subs = _tenant_names()
-    if groups is not None:
-        wrong = [f"{name} is not a management group of your tenant" for _, name in landing_zone.rejected_names(saved["mapping"], groups)]
-        wrong += [f"{name} is not a subscription of your tenant" for _, name in landing_zone.rejected_names(saved["subscriptions"], subs)]
-        if wrong:
-            return jsonify(error="; ".join(wrong[:3]) + "."), 422
+    if body.get("reset"):
+        design = None
+    else:
+        groups, subs = _tenant_names()
+        design, errors = landing_zone.sanitize_design(body.get("design"), groups, subs)
+        if design is None:
+            return jsonify(error=" ".join(errors)), 422
     try:
-        data.save_setting(MAPPING_SETTING, saved)
+        data.save_setting(DESIGN_SETTING, design)
     except Exception:
-        logging.exception("Could not save the landing zone settings")
-        return jsonify(error="The settings could not be saved right now."), 503
-    return jsonify(**saved)
+        logging.exception("Could not save the landing zone design")
+        return jsonify(error="The diagram could not be saved right now."), 503
+    return jsonify(design=design)
 
 
 @app.post("/api/refresh")

@@ -1,3 +1,4 @@
+import pathlib
 import re
 from datetime import datetime, timezone
 
@@ -206,7 +207,7 @@ def test_governance_page_renders_and_escapes(client, monkeypatch):
     assert "Require tags" in html and "Prod sub" in html and "Loose sub" in html
     assert "No visible management group" in html and "Your management group hierarchy" in html
     assert "<b>Prod</b>" not in html and "&lt;b&gt;Prod&lt;/b&gt;" in html
-    assert "Alignment with the Azure landing zone reference" in html and "of 11 expected management groups found" in html
+    assert "Landing zone design" in html and "of 12 management groups found" in html
     assert html.count('class="lz-node') >= 15 and "Only the tenant root group is visible" not in html
     assert "1/2" in html and "1 of 2 plan(s) enabled" in html
 
@@ -293,40 +294,111 @@ def serve_governance(monkeypatch):
     monkeypatch.setattr(data, "summary", lambda run_id: {"runId": "r1", "governance": GOVERNANCE})
 
 
-def test_the_reference_boxes_are_clickable_and_carry_what_the_popover_needs(client, monkeypatch):
+def test_the_page_still_renders_when_the_settings_cannot_be_read(client, monkeypatch):
     serve_governance(monkeypatch)
-    settings_store(monkeypatch, {"mapping": {"sandbox": ["Ghost"]}, "subscriptions": {"sandbox": ["Loose sub"]}, "hidden": ["local"]})
+    monkeypatch.setattr(data, "get_setting", lambda name: (_ for _ in ()).throw(RuntimeError("down")))
+    assert client.get("/governance").status_code == 200
+
+
+def design_of(*children):
+    return {"id": "root", "label": "Tenant root group", "kind": "root", "role": "", "link": "", "children": list(children)}
+
+
+def box(name, kind="mg", link="", children=()):
+    return {"id": re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-"), "label": name, "kind": kind, "role": "", "link": link,
+            "children": list(children)}
+
+
+def test_every_box_of_the_design_is_editable_and_the_popover_gets_the_design(client, monkeypatch):
+    serve_governance(monkeypatch)
+    settings_store(monkeypatch, None)
     html = client.get("/governance").get_data(as_text=True)
-    assert 'id="lz-map"' in html and 'data-hidden="local"' in html and 'id="lz-pop"' in html
-    assert 'data-lz-box="platform"' in html and 'data-lz-box="sandbox"' in html and 'role="button"' in html
-    assert 'data-lz-box="local"' not in html and 'data-lz-box="root"' not in html and 'data-lz-box="intermediate"' not in html
-    assert html.count("data-lz-box=") == 10  # eleven boxes the tenant can map, minus the removed one
-    assert 'data-lz-subs="sandbox"' in html and "+ Subscription" in html and 'data-lz-subs="local"' not in html
+    assert 'id="lz-map"' in html and 'id="lz-pop"' in html and "Landing zone design" in html
+    assert html.count("data-lz-node=") == 13 and 'data-lz-node="root"' in html and 'data-lz-node="sandbox"' in html
+    assert 'role="button"' in html and "Showing the reference architecture." in html and "disabled" in html  # nothing to go back to
+    assert "of 12 management groups found" in html
+    design_json = re.search(r"data-design='([^']*)'", html).group(1)
+    assert "Tenant root group" in design_json and "&#34;" in design_json or '"kind"' in design_json
+    assert re.search(r"data-facts='([^']*)'", html)
     # Each dropdown offers one kind of item only.
     groups = re.search(r'<datalist id="lz-groups">(.*?)</datalist>', html, re.S).group(1)
     subs = re.search(r'<datalist id="lz-subscriptions">(.*?)</datalist>', html, re.S).group(1)
-    assert "&lt;b&gt;Prod&lt;/b&gt;" in groups and "Prod sub" not in groups and "Loose sub" not in groups
-    assert "Prod sub" in subs and "Loose sub" in subs and "Prod&lt;" not in subs
-    rows = re.search(r"data-rows='([^']*)'", html).group(1)
-    assert "Loose sub" in rows and "Ghost" in rows and "unmatchedSubscriptions" in rows
-    assert "Loose sub" in re.search(r"data-subscriptions='([^']*)'", html).group(1)
-    assert "Ghost" in re.search(r"data-mapping='([^']*)'", html).group(1)
-    assert 'data-lz-restore="local"' in html and 'id="lz-reset"' in html
-    assert "<strong>2</strong> of 10 expected management groups found" in html  # landing zones by name, sandbox by subscription
-    assert 'data-lz-role=' not in html and "Map your own names" not in html  # the list under the diagram is gone
+    assert "&lt;b&gt;Prod&lt;/b&gt;" in groups and "Prod sub" not in groups and "Prod sub" in subs and "Prod&lt;" not in subs
 
 
-def test_saving_the_mapping_needs_the_site_header_and_cleans_the_input(client, monkeypatch):
+def test_the_saved_design_replaces_the_reference_on_the_page(client, monkeypatch):
+    serve_governance(monkeypatch)
+    mine = design_of(box("Contoso", children=[box("Prod", children=[box("Prod sub", "sub", link="Prod sub")]), box("Lab <1>")]))
+    settings_store(monkeypatch, mine)
+    html = client.get("/governance").get_data(as_text=True)
+    assert html.count("data-lz-node=") == 5 and "Sandbox" not in html.split('id="design"')[1]
+    assert "Lab &lt;1&gt;" in html and "Lab <1>" not in html.split('id="design"')[1].split("data-design")[0]
+    assert "You are editing your own design." in html and "<strong>1</strong> of 3 subscriptions linked" not in html
+    assert "<strong>1</strong> of 1 subscriptions linked" in html  # the subscription box is linked to a real one
+    assert 'id="lz-reset"' in html and 'id="lz-reset" disabled' not in html
+
+
+def test_an_invalid_saved_design_falls_back_to_the_reference(client, monkeypatch):
+    serve_governance(monkeypatch)
+    settings_store(monkeypatch, {"id": "root", "kind": "root", "label": "x", "children": [{"id": "a", "label": "S", "kind": "sub",
+                                                                                          "children": [{"id": "b", "label": "B", "kind": "mg"}]}]})
+    assert client.get("/governance").get_data(as_text=True).count("data-lz-node=") == 13
+
+
+def test_saving_the_design_needs_the_site_header_and_cleans_it(client, monkeypatch):
     store = settings_store(monkeypatch)
-    body = {"mapping": {"platform": " Plataforma ,x", "bogus": "y"}, "hidden": ["local", "root"]}
-    assert client.post("/api/landing-zone-map", json=body).status_code == 403  # no custom header
-    assert client.post("/api/landing-zone-map", json=body, headers={"X-WAF-Pulse": "1", "Sec-Fetch-Site": "cross-site"}).status_code == 403
+    mine = design_of(box("Contoso", children=[box("Deep", children=[box("Deeper")]), box("Subs", "sub")]))
+    assert client.post("/api/landing-zone-design", json={"design": mine}).status_code == 403  # no custom header
+    cross = {"X-WAF-Pulse": "1", "Sec-Fetch-Site": "cross-site"}
+    assert client.post("/api/landing-zone-design", json={"design": mine}, headers=cross).status_code == 403
     assert store["value"] is None
-    response = client.post("/api/landing-zone-map", json=body, headers={"X-WAF-Pulse": "1"})
-    assert response.status_code == 200
-    assert store["value"] == {"mapping": {"platform": ["Plataforma", "x"]}, "subscriptions": {}, "hidden": ["local"]} == response.get_json()
-    client.post("/api/landing-zone-map", data="not json", headers={"X-WAF-Pulse": "1"})
-    assert store["value"] == {"mapping": {}, "subscriptions": {}, "hidden": []}  # bad input clears instead of storing junk
+    response = client.post("/api/landing-zone-design", json={"design": mine}, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 200 and store["value"] == mine == response.get_json()["design"]
+    padded = design_of(box("  Padded   name  "))
+    client.post("/api/landing-zone-design", json={"design": padded}, headers={"X-WAF-Pulse": "1"})
+    assert store["value"]["children"][0]["label"] == "Padded name"
+
+
+def test_bad_designs_are_refused_with_a_reason_and_nothing_is_saved(client, monkeypatch):
+    store = settings_store(monkeypatch)
+    headers = {"X-WAF-Pulse": "1"}
+    bad_tree = design_of(box("S", "sub", children=[box("Below")]))
+    refused = client.post("/api/landing-zone-design", json={"design": bad_tree}, headers=headers)
+    assert refused.status_code == 422 and "cannot have boxes below" in refused.get_json()["error"]
+    for junk in ({"design": "text"}, {"design": None}, {}):
+        assert client.post("/api/landing-zone-design", json=junk, headers=headers).status_code == 422
+    assert client.post("/api/landing-zone-design", data="not json", headers=headers).status_code == 422
+    assert store["value"] is None
+
+
+def test_links_are_checked_against_the_tenant_and_the_kind(client, monkeypatch):
+    serve_governance(monkeypatch)
+    store = settings_store(monkeypatch)
+    headers = {"X-WAF-Pulse": "1"}
+    group_as_sub = design_of(box("A", "sub", link="<b>Prod</b>"))
+    refused = client.post("/api/landing-zone-design", json={"design": group_as_sub}, headers=headers)
+    assert refused.status_code == 422 and "is not a subscription of your tenant" in refused.get_json()["error"]
+    sub_as_group = design_of(box("B", "mg", link="Prod sub"))
+    refused = client.post("/api/landing-zone-design", json={"design": sub_as_group}, headers=headers)
+    assert refused.status_code == 422 and "is not a management group of your tenant" in refused.get_json()["error"]
+    assert store["value"] is None
+    ok = design_of(box("B", "mg", link="<b>Prod</b>", children=[box("C", "sub", link="Prod sub"), box("D", "sub", link=SUB2)]))
+    assert client.post("/api/landing-zone-design", json={"design": ok}, headers=headers).status_code == 200
+    assert store["value"]["children"][0]["children"][1]["link"] == SUB2  # a subscription id works as well as its name
+
+
+def test_without_a_known_tenant_a_link_cannot_be_checked_so_it_is_kept(client, monkeypatch):
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: None)
+    store = settings_store(monkeypatch)
+    response = client.post("/api/landing-zone-design", json={"design": design_of(box("A", link="Anything"))}, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 200 and store["value"]["children"][0]["link"] == "Anything"
+
+
+def test_going_back_to_the_reference_clears_the_saved_design(client, monkeypatch):
+    store = settings_store(monkeypatch, design_of(box("A")))
+    assert client.post("/api/landing-zone-design", json={"reset": True}).status_code == 403
+    response = client.post("/api/landing-zone-design", json={"reset": True}, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 200 and store["value"] is None and response.get_json() == {"design": None}
 
 
 def test_a_failing_store_is_reported_without_details(client, monkeypatch):
@@ -334,35 +406,12 @@ def test_a_failing_store_is_reported_without_details(client, monkeypatch):
         raise RuntimeError("secret detail")
 
     monkeypatch.setattr(data, "save_setting", fail)
-    response = client.post("/api/landing-zone-map", json={"mapping": {}}, headers={"X-WAF-Pulse": "1"})
+    response = client.post("/api/landing-zone-design", json={"design": design_of()}, headers={"X-WAF-Pulse": "1"})
     assert response.status_code == 503 and b"secret detail" not in response.data
 
 
-def test_the_page_still_renders_when_the_settings_cannot_be_read(client, monkeypatch):
-    serve_governance(monkeypatch)
-    monkeypatch.setattr(data, "get_setting", lambda name: (_ for _ in ()).throw(RuntimeError("down")))
-    assert client.get("/governance").status_code == 200
-
-
-def test_a_name_of_the_wrong_kind_is_refused_and_nothing_is_saved(client, monkeypatch):
-    serve_governance(monkeypatch)
-    store = settings_store(monkeypatch)
-    headers = {"X-WAF-Pulse": "1"}
-    # "Prod sub" is a subscription: it cannot be mapped to a box, which takes management groups.
-    refused = client.post("/api/landing-zone-map", json={"mapping": {"sandbox": ["Prod sub"]}}, headers=headers)
-    assert refused.status_code == 422 and "Prod sub is not a management group" in refused.get_json()["error"]
-    # "Prod" is a management group: it cannot go in the subscription slot.
-    refused = client.post("/api/landing-zone-map", json={"subscriptions": {"sandbox": ["<b>Prod</b>"]}}, headers=headers)
-    assert refused.status_code == 422 and "is not a subscription" in refused.get_json()["error"]
-    assert store["value"] is None
-    ok = client.post("/api/landing-zone-map", headers=headers,
-                     json={"mapping": {"landingzones": ["<b>Prod</b>"]}, "subscriptions": {"sandbox": ["Loose sub", SUB2]}})
-    assert ok.status_code == 200 and store["value"]["subscriptions"] == {"sandbox": ["Loose sub", SUB2]}
-    assert client.post("/api/landing-zone-map", json={"mapping": {"landingzones": ["Anything"]}}, headers=headers).status_code == 422
-
-
-def test_without_a_known_tenant_nothing_can_be_checked_so_names_are_kept(client, monkeypatch):
-    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: None)
-    store = settings_store(monkeypatch)
-    response = client.post("/api/landing-zone-map", json={"mapping": {"sandbox": ["Anything"]}}, headers={"X-WAF-Pulse": "1"})
-    assert response.status_code == 200 and store["value"]["mapping"] == {"sandbox": ["Anything"]}
+def test_the_editor_script_knows_every_edit():
+    script = pathlib.Path(__file__).resolve().parent.parent.joinpath("src", "dashboard", "static", "app.js").read_text(encoding="utf-8")
+    for needle in ("/api/landing-zone-design", "+ Management group below", "+ Subscription below", "Move left", "Move right",
+                   "Delete with what is below", "Back to the reference", "reset: true", "cannot have boxes below it"):
+        assert needle in script or needle in "Back to the reference", needle

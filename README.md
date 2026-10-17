@@ -123,33 +123,31 @@ Modeled on the Azure Optimization Engine reports: an overview, one page per Well
 | **Security, Reliability, Cost, Performance, Operations** | Score, severity counts, charts, and the insights that belong to it: Defender for Cloud coverage by plan and tier, the Secure Score controls, Entra and Key Vault for Security, diagnostic settings for Operations. **Cost** also holds the spend, laid out like the [FinOps hub dashboard](https://learn.microsoft.com/cloud-computing/finops/toolkit/hubs/finops-hubs-overview): summary cards, monthly trends by service, resource group, region and resource type, the most expensive resources, daily spend, anomalies and running total, cost by pricing model and commitment coverage, reservation and savings plan options, budgets and subscriptions. |
 | **Right-sizing** | Charts of how many virtual machines, SQL databases, App Service plans and storage accounts are idle, underutilized, right-sized or saturated. Select a bar to list the resources with their size, average and maximum CPU, resource group and assessment. |
 | **Action item detail** | Select any action item to see what to do, the documentation link, every affected resource and how many resources it affected in each earlier run. |
-| **Governance** | The management group hierarchy drawn as a landing zone diagram (each group with its subscriptions), next to the Azure landing zone reference architecture with the groups your tenant already has marked, plus policy, access, locks, Defender, diagnostics, Key Vault and Entra. |
+| **Governance** | The management group hierarchy drawn as a landing zone diagram (each group with its subscriptions), and an editable landing zone design that starts as the reference architecture (rename, retype, link, add levels and subscriptions, move and delete boxes), plus policy, access, locks, Defender, diagnostics, Key Vault and Entra. |
 | **History** | Runs, score trend and what changed between two runs. |
-### Landing zone mapping
+### Landing zone design
 
-The Governance page matches each of your management groups to a role of the Azure landing zone reference architecture, without depending on the names being the same. It tries, in this order:
+The Governance page shows two diagrams. **Your management group hierarchy** is drawn from what the tenant has. **Landing zone design** starts as the Azure landing zone reference architecture and is yours to change completely.
 
-1. **Manual mapping** (below), always wins.
-2. **The name**, in English, Spanish or Portuguese and without accents (`Plataforma`, `Conectividad`, `Zonas de aterrizaje`, `Dado de baja`, `Pruebas` ...).
-3. **Policy assignments** made on the group. The reference architecture assigns well known ones: `Enforce-ALZ-Sandbox` marks the sandbox, `Enforce-ALZ-Decomm` the decommissioned group, `Deny-IP-Forwarding` and similar the landing zones, `Deploy-Private-DNS-Zones` the corp group, `Enable-DDoS-VNET` the connectivity group.
-4. **What the subscriptions contain**, only for groups under a platform group: firewalls, VPN or ExpressRoute gateways and virtual hubs point to connectivity, domain services to identity, Log Analytics workspaces and Automation accounts to management.
+Click any box of the design. A panel opens where you can:
 
-Each match shows how it was made (name, policy, content or manual) when you hover a box and in the panel that opens when you click it.
+- **Rename** the box.
+- **Change its type** between management group and subscription, and back (a subscription is always a leaf, so empty a group before turning it into a subscription).
+- **Link it** to one of your own management groups or subscriptions with a dropdown (or typing). A group box only takes management groups and a subscription box only takes subscriptions; each dropdown offers one kind and the dashboard refuses a name of the wrong kind or one that does not exist in your tenant. A linked subscription shows its real name.
+- **Add boxes below it**, a management group (a new level, up to 8) or a subscription (up to 150 boxes in all).
+- **Move it** left or right among its siblings, or **delete** it with what is below.
 
-**Map it yourself in the page.** In the Governance page, click a box of the reference diagram. A small panel opens with a dropdown that offers the management groups of your tenant (you can also type a name). Choose one and select **Map it**; what you mapped shows as chips you can remove. Management groups and subscriptions are never mixed: a box only takes management groups, and the **+ Subscription** slot under the boxes that hold subscriptions (like the key icons of the reference diagram) only takes subscriptions. Each dropdown offers one kind only, and the dashboard refuses a name of the wrong kind or one that does not exist in your tenant. Subscriptions help tenants without management groups. **Remove this box** takes a box that does not apply to you out of the diagram and the count (a box takes its children with it); it can be put back from the chips below the diagram. **Reset everything** clears your names and brings the boxes back.
+A check on a box means it was found in your tenant: by the link you chose, or automatically for boxes that came from the reference. The automatic search looks, in this order, at the name (in English, Spanish or Portuguese, without accents: `Plataforma`, `Conectividad`, `Zonas de aterrizaje`, `Dado de baja`, `Pruebas` ...), at the policy assignments made on the group (the reference architecture assigns well known ones: `Enforce-ALZ-Sandbox` marks the sandbox, `Enforce-ALZ-Decomm` the decommissioned group, `Deny-IP-Forwarding` and similar the landing zones, `Deploy-Private-DNS-Zones` the corp group, `Enable-DDoS-VNET` the connectivity group) and, for groups under a platform group, at what their subscriptions contain (firewalls, gateways and virtual hubs point to connectivity, domain services to identity, Log Analytics workspaces and Automation accounts to management). Hover a box to see how it was matched. **Back to the reference** discards your design.
 
-What you save is kept in the dashboard's database, so it survives new runs and restarts. Without dashboard sign-in, anyone with the URL can change it; it only affects how this page is drawn. With sign-in on, only the users you allowed can.
+Your design is kept in the dashboard's database, so it survives new runs and restarts. Without dashboard sign-in, anyone with the URL can change it; it only affects how this page is drawn. With sign-in on, only the users you allowed can.
 
-**Or set it at deployment.** Fill the **Landing zone mapping** field of the form (Advanced) or the `LANDING_ZONE_MAP` setting of the dashboard App Service with a JSON object. Each role takes one name or id, or a list of them:
+To help the automatic search at deployment time, fill the **Landing zone mapping** field of the form (Advanced) or the `LANDING_ZONE_MAP` setting of the dashboard App Service with a JSON object that maps a role to the name or id of a management group, or to a list of them:
 
 ```json
-{"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio",
- "subscriptions": {"connectivity": ["Hub subscription"]}}
+{"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio"}
 ```
 
-The top level maps management groups; the optional `subscriptions` key maps subscriptions, by name or id.
-
-Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. What is typed in the page replaces the deployment setting for that role. Changing the setting restarts the dashboard, and the mapping applies right away; no new run is needed.
+Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. Changing the setting restarts the dashboard and applies right away.
 
 ### Drill-down
 

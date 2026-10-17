@@ -383,7 +383,7 @@ svg.lz { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 .align-list .no::before { content: "– "; color: var(--muted); }
 .lz-wrap { position: relative; margin-top: 12px; }
 .lz-click { cursor: pointer; }
-.lz-click rect:first-of-type { transition: stroke 150ms ease; }
+.lz-click > rect:first-of-type { transition: stroke 150ms ease; }
 .lz-click:hover > rect:first-of-type, .lz-click:focus-visible > rect:first-of-type, .lz-click.selected > rect:first-of-type { stroke: var(--accent); stroke-width: 2.2; }
 .lz-click:focus-visible { outline: none; }
 .lz-click-sub { cursor: pointer; }
@@ -426,3 +426,13 @@ a.azure-link:active { transform: scale(0.97); }
   button.loading::before { animation-duration: 1.6s; }
   button:active:not(:disabled), a.card:active, .side-link:active, a.chip:active { transform: none; }
 }
+
+.lz-node.kind-sub rect { fill: var(--panel-2); stroke: #b9831f; stroke-width: 1.4; }
+.lz-node.kind-sub .lz-subtext { font-size: 12px; font-weight: 500; fill: var(--text); }
+.lz-node.kind-sub.status-missing rect { stroke-dasharray: 4 3; }
+.lz-node.kind-root rect { stroke: var(--accent); stroke-width: 2; }
+.lz-pop label { display: block; font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+.lz-pop select { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel-2); color: var(--text); font: inherit; font-size: 0.9rem; margin-top: 4px; }
+.lz-pop .lz-error { color: var(--bad); margin: 6px 0; }
+.lz-pop .lz-row.tight button { padding: 6px 10px; font-size: 0.85rem; }

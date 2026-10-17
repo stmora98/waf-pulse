@@ -96,25 +96,11 @@
   if (!box) { return; }
   var pop = document.getElementById("lz-pop");
   var status = document.getElementById("lz-status");
-  var rows = JSON.parse(box.getAttribute("data-rows") || "[]");
-  var groups = JSON.parse(box.getAttribute("data-mapping") || "{}");
-  var subscriptions = JSON.parse(box.getAttribute("data-subscriptions") || "{}");
-  var hidden = (box.getAttribute("data-hidden") || "").split(",").filter(Boolean);
+  var design = JSON.parse(box.getAttribute("data-design") || "null");
+  var facts = JSON.parse(box.getAttribute("data-facts") || "{}");
   var selected = null;
-
-  function save(message) {
-    status.textContent = message;
-    fetch("/api/landing-zone-map", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
-      body: JSON.stringify({ mapping: groups, subscriptions: subscriptions, hidden: hidden })
-    }).then(function (response) {
-      if (response.ok) { window.location.reload(); return null; }
-      return response.json().then(function (body) { throw new Error(body.error || "failed"); });
-    }).catch(function (error) {
-      status.textContent = error.message === "failed" ? "The changes could not be saved." : error.message;
-    });
-  }
+  var KIND = { mg: "management group", sub: "subscription", root: "tenant root" };
+  var MAX_DEPTH = 8;
 
   function element(tag, text, className) {
     var node = document.createElement(tag);
@@ -123,113 +109,204 @@
     return node;
   }
 
+  function find(id, node, parent) {
+    if (node.id === id) { return { node: node, parent: parent }; }
+    for (var i = 0; i < node.children.length; i += 1) {
+      var found = find(id, node.children[i], node);
+      if (found) { return found; }
+    }
+    return null;
+  }
+
+  function depthOf(id) {
+    var depth = 0;
+    var current = find(id, design, null);
+    while (current && current.parent) { depth += 1; current = find(current.parent.id, design, null); }
+    return depth;
+  }
+
+  function newId() { return "n" + Math.random().toString(36).slice(2, 9); }
+
+  function save(body, message) {
+    status.textContent = message;
+    return fetch("/api/landing-zone-design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (response.ok) { window.location.reload(); return null; }
+      return response.json().then(function (result) { throw new Error(result.error || "failed"); });
+    }).catch(function (error) {
+      var text = error.message === "failed" ? "The diagram could not be saved." : error.message;
+      status.textContent = text;
+      var shown = pop.querySelector(".lz-error");
+      if (shown) { shown.textContent = text; }
+    });
+  }
+
+  function persist(message) { return save({ design: design }, message); }
+
   function close() {
     pop.hidden = true;
     if (selected) { selected.classList.remove("selected"); selected = null; }
   }
 
-  // kind is "group" for a box (management groups only) or "subscription" for the slot under it.
-  function open(target, kind) {
-    var role = target.getAttribute(kind === "group" ? "data-lz-box" : "data-lz-subs");
-    var row = rows.filter(function (item) { return item.role === role; })[0];
-    if (!row) { return; }
+  function button(label, handler, className) {
+    var item = element("button", label, className);
+    item.type = "button";
+    item.addEventListener("click", handler);
+    return item;
+  }
+
+  function open(target) {
+    var id = target.getAttribute("data-lz-node");
+    var found = find(id, design, null);
+    if (!found) { return; }
+    var node = found.node;
+    var parent = found.parent;
+    var fact = facts[id] || { status: "missing", matches: [] };
     if (selected) { selected.classList.remove("selected"); }
     selected = target;
     target.classList.add("selected");
-    var store = kind === "group" ? groups : subscriptions;
-    var names = (store[role] || []).slice();
-    var noun = kind === "group" ? "management group" : "subscription";
+    var isRoot = node.kind === "root";
 
     pop.textContent = "";
-    pop.appendChild(element("h4", kind === "group" ? row.label : "Subscriptions of " + row.label));
-    var found = kind === "group" ? row.matches : row.subscriptionMatches;
-    pop.appendChild(element("p", found.length ? "Found: " + found.join(", ") : "No " + noun + " mapped yet.", "muted"));
-    var list = element("div", "", "lz-names");
-    names.forEach(function (name) {
-      var chip = element("button", name, "chip-button");
-      chip.type = "button";
-      chip.title = "Stop using this name";
-      chip.addEventListener("click", function () {
-        store[role] = names.filter(function (item) { return item !== name; });
-        if (!store[role].length) { delete store[role]; }
-        save("Saving...");
-      });
-      list.appendChild(chip);
-    });
-    pop.appendChild(list);
-    (kind === "group" ? row.unmatched : row.unmatchedSubscriptions || []).forEach(function (name) {
-      pop.appendChild(element("p", "Nothing in your tenant is a " + noun + " called " + name + ".", "muted"));
-    });
-    var input = element("input", "", "lz-input");
-    input.type = "text";
-    input.setAttribute("list", kind === "group" ? "lz-groups" : "lz-subscriptions");
-    input.setAttribute("autocomplete", "off");
-    input.maxLength = 100;
-    input.placeholder = "Pick or type a " + noun;
-    input.setAttribute("aria-label", noun.charAt(0).toUpperCase() + noun.slice(1) + " for " + row.label);
-    pop.appendChild(input);
+    pop.appendChild(element("h4", node.label));
+    pop.appendChild(element("p", isRoot ? "The top of every tenant." :
+      (fact.status === "present" ? "Found: " + fact.matches.join(", ") : "Not found in your tenant yet."), "muted"));
 
-    var actions = element("div", "", "lz-row");
-    var add = element("button", "Map it");
-    add.type = "button";
-    function commit() {
-      var value = input.value.trim();
-      if (!value) { input.focus(); return; }
-      if (names.indexOf(value) === -1) { names.push(value); }
-      store[role] = names;
-      save("Saving...");
+    var name = element("input", "", "lz-input");
+    name.type = "text";
+    name.value = node.label;
+    name.maxLength = 60;
+    name.setAttribute("aria-label", "Name of the box");
+    pop.appendChild(element("label", "Name"));
+    pop.lastChild.appendChild(name);
+
+    var kind = element("select");
+    kind.setAttribute("aria-label", "Type of the box");
+    [["mg", "Management group"], ["sub", "Subscription"]].forEach(function (option) {
+      var item = element("option", option[1]);
+      item.value = option[0];
+      kind.appendChild(item);
+    });
+    kind.value = node.kind === "sub" ? "sub" : "mg";
+    var link = element("input", "", "lz-input");
+    link.type = "text";
+    link.maxLength = 100;
+    link.autocomplete = "off";
+    link.value = node.link || "";
+    link.setAttribute("aria-label", "The real management group or subscription");
+
+    function syncLink() {
+      link.setAttribute("list", kind.value === "sub" ? "lz-subscriptions" : "lz-groups");
+      link.placeholder = "Pick or type a " + (kind.value === "sub" ? "subscription" : "management group");
     }
-    add.addEventListener("click", commit);
-    input.addEventListener("keydown", function (event) { if (event.key === "Enter") { commit(); } });
-    actions.appendChild(add);
-    if (kind === "group") {
-      var remove = element("button", "Remove this box", "icon-button");
-      remove.type = "button";
-      remove.addEventListener("click", function () {
-        if (hidden.indexOf(role) === -1) { hidden.push(role); }
-        save("Removing...");
-      });
-      actions.appendChild(remove);
+    syncLink();
+    kind.addEventListener("change", syncLink);
+
+    if (!isRoot) {
+      var kindLabel = element("label", "Type");
+      kindLabel.appendChild(kind);
+      pop.appendChild(kindLabel);
+      var linkLabel = element("label", "Linked to (optional, one of your own, of the same type)");
+      linkLabel.appendChild(link);
+      pop.appendChild(linkLabel);
     }
-    var cancel = element("button", "Close", "icon-button");
-    cancel.type = "button";
-    cancel.addEventListener("click", close);
-    actions.appendChild(cancel);
-    pop.appendChild(actions);
+    pop.appendChild(element("p", "", "lz-error"));
+
+    var main = element("div", "", "lz-row");
+    if (!isRoot) {
+      main.appendChild(button("Apply", function () {
+        var chosen = kind.value;
+        var text = name.value.trim();
+        if (!text) { pop.querySelector(".lz-error").textContent = "The box needs a name."; return; }
+        if (chosen === "sub" && node.children.length) {
+          pop.querySelector(".lz-error").textContent = "A subscription cannot have boxes below it. Delete or move them first.";
+          return;
+        }
+        var typed = link.value.trim();
+        var changedKind = chosen !== node.kind;
+        // A link of the old type makes no sense for the new one: it is dropped unless a new one was typed.
+        node.link = changedKind && typed === (node.link || "") ? "" : typed;
+        if (changedKind && chosen === "sub") { node.role = ""; }
+        node.kind = chosen;
+        node.label = text;
+        persist("Saving...");
+      }));
+    } else {
+      main.appendChild(button("Rename", function () {
+        var text = name.value.trim();
+        if (!text) { return; }
+        node.label = text;
+        persist("Saving...");
+      }));
+    }
+    pop.appendChild(main);
+
+    if (node.kind !== "sub") {
+      var add = element("div", "", "lz-row tight");
+      var tooDeep = depthOf(id) >= MAX_DEPTH;
+      var addGroup = button("+ Management group below", function () {
+        node.children.push({ id: newId(), label: "New management group", kind: "mg", role: "", link: "", children: [] });
+        persist("Adding...");
+      }, "icon-button");
+      var addSub = button("+ Subscription below", function () {
+        node.children.push({ id: newId(), label: "Subscription", kind: "sub", role: "", link: "", children: [] });
+        persist("Adding...");
+      }, "icon-button");
+      addGroup.disabled = tooDeep;
+      addSub.disabled = tooDeep;
+      add.appendChild(addGroup);
+      add.appendChild(addSub);
+      pop.appendChild(add);
+    }
+
+    if (parent) {
+      var move = element("div", "", "lz-row tight");
+      var index = parent.children.indexOf(node);
+      var left = button("Move left", function () {
+        parent.children.splice(index, 1);
+        parent.children.splice(index - 1, 0, node);
+        persist("Moving...");
+      }, "icon-button");
+      var right = button("Move right", function () {
+        parent.children.splice(index, 1);
+        parent.children.splice(index + 1, 0, node);
+        persist("Moving...");
+      }, "icon-button");
+      left.disabled = index === 0;
+      right.disabled = index === parent.children.length - 1;
+      var remove = button(node.children.length ? "Delete with what is below" : "Delete", function () {
+        parent.children.splice(index, 1);
+        persist("Deleting...");
+      }, "icon-button");
+      move.appendChild(left);
+      move.appendChild(right);
+      move.appendChild(remove);
+      pop.appendChild(move);
+    }
+    var last = element("div", "", "lz-row tight");
+    last.appendChild(button("Close", close, "icon-button"));
+    pop.appendChild(last);
 
     pop.hidden = false;
     var wrap = box.getBoundingClientRect();
     var rect = target.getBoundingClientRect();
     pop.style.left = Math.max(4, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth - 4)) + "px";
     pop.style.top = (rect.bottom - wrap.top + 8) + "px";
-    input.focus();
+    name.focus();
   }
 
-  function wire(selector, attribute, kind) {
-    Array.prototype.forEach.call(box.querySelectorAll(selector), function (target) {
-      target.addEventListener("click", function (event) { event.stopPropagation(); open(target, kind); });
-      target.addEventListener("keydown", function (event) {
-        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); open(target, kind); }
-      });
+  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-node]"), function (target) {
+    target.addEventListener("click", function (event) { event.stopPropagation(); open(target); });
+    target.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); open(target); }
     });
-  }
-  wire("[data-lz-box]", "data-lz-box", "group");
-  wire("[data-lz-subs]", "data-lz-subs", "subscription");
+  });
   pop.addEventListener("click", function (event) { event.stopPropagation(); });
   document.addEventListener("click", close);
   document.addEventListener("keydown", function (event) { if (event.key === "Escape") { close(); } });
-
-  document.getElementById("lz-reset").addEventListener("click", function () {
-    groups = {};
-    subscriptions = {};
-    hidden = [];
-    save("Resetting...");
-  });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-lz-restore]"), function (button) {
-    button.addEventListener("click", function () {
-      var role = button.getAttribute("data-lz-restore");
-      hidden = hidden.filter(function (item) { return item !== role; });
-      save("Putting it back...");
-    });
-  });
+  var reset = document.getElementById("lz-reset");
+  if (reset) { reset.addEventListener("click", function () { save({ reset: true }, "Going back to the reference..."); }); }
 })();
