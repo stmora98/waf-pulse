@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -292,16 +293,21 @@ def serve_governance(monkeypatch):
     monkeypatch.setattr(data, "summary", lambda run_id: {"runId": "r1", "governance": GOVERNANCE})
 
 
-def test_the_mapping_form_lists_the_tenant_names_and_shows_what_was_typed(client, monkeypatch):
+def test_the_reference_boxes_are_clickable_and_carry_what_the_popover_needs(client, monkeypatch):
     serve_governance(monkeypatch)
     settings_store(monkeypatch, {"mapping": {"sandbox": ["Loose sub", "Ghost"]}, "hidden": ["local"]})
     html = client.get("/governance").get_data(as_text=True)
-    assert 'id="lz-map"' in html and 'data-hidden="local"' in html and 'data-lz-role="sandbox"' in html
+    assert 'id="lz-map"' in html and 'data-hidden="local"' in html and 'id="lz-pop"' in html
+    assert 'data-lz-box="platform"' in html and 'data-lz-box="sandbox"' in html and 'role="button"' in html
+    assert 'data-lz-box="local"' not in html and 'data-lz-box="root"' not in html and 'data-lz-box="intermediate"' not in html
+    assert html.count("data-lz-box=") == 10  # eleven boxes the tenant can map, minus the removed one
     assert '<option value="&lt;b&gt;Prod&lt;/b&gt;">' in html and '<option value="Prod sub">' in html  # groups and subscriptions
-    assert 'value="Loose sub, Ghost"' in html and "No management group or subscription is called Ghost" in html
-    assert "Loose sub (subscription)" in html  # the subscription typed for the role is found
-    assert 'data-lz-restore="local"' in html and 'data-lz-remove="platform"' in html and 'data-lz-role="local"' not in html
-    assert "<strong>2</strong> of 10 expected management groups found" in html  # landing zones by name, sandbox by subscription; one box removed
+    rows = re.search(r"data-rows='([^']*)'", html).group(1)
+    assert "Loose sub (subscription)" in rows and "Ghost" in rows and "unmatched" in rows
+    assert "Loose sub" in re.search(r"data-mapping='([^']*)'", html).group(1)
+    assert 'data-lz-restore="local"' in html and 'id="lz-reset"' in html
+    assert "<strong>2</strong> of 10 expected management groups found" in html  # landing zones by name, sandbox by subscription
+    assert 'data-lz-role=' not in html and "Map your own names" not in html  # the list under the diagram is gone
 
 
 def test_saving_the_mapping_needs_the_site_header_and_cleans_the_input(client, monkeypatch):

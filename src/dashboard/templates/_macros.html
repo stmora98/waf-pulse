@@ -95,12 +95,13 @@
   </div>
 {% endmacro %}
 
-{% macro lz_diagram(d, label) %}
+{% macro lz_diagram(d, label, interactive=false) %}
   <div class="diagram-scroll">
     <svg class="lz" viewBox="0 0 {{ d.width }} {{ d.height }}" width="{{ d.width }}" height="{{ d.height }}" role="img" aria-label="{{ label }}">
       {% for link in d.links %}<path class="lz-link" d="{{ link.d }}"></path>{% endfor %}
       {% for n in d.nodes %}
-        <g class="lz-node role-{{ n.role or 'plain' }}{% if n.status %} status-{{ n.status }}{% endif %}">
+        <g class="lz-node role-{{ n.role or 'plain' }}{% if n.status %} status-{{ n.status }}{% endif %}{% if interactive and n.role not in ('root', 'intermediate') %} lz-click{% endif %}"
+           {%- if interactive and n.role not in ('root', 'intermediate') %} data-lz-box="{{ n.role }}" tabindex="0" role="button" aria-label="Map {{ n.label }} to your own management group or subscription"{% endif %}>
           <title>{{ n.label }}{% if n.status %} · {{ 'present' if n.status == 'present' else 'not found in your tenant' }}{% endif %}{% if n.how %} · matched by {{ n.how }}{% endif %}</title>
           <rect x="{{ n.x }}" y="{{ n.y }}" width="{{ n.width }}" height="{{ n.height }}" rx="8"></rect>
           <text x="{{ n.cx }}" y="{{ n.y + 22 }}" text-anchor="middle">{{ n.label }}</text>

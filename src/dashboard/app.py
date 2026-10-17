@@ -385,7 +385,7 @@ def governance_page():
             "hierarchy": landing_zone.actual(tree, subscriptions, names, unassigned, classification),
             "reference": landing_zone.reference(found, has_hierarchy, hidden),
             "alignment": landing_zone.alignment(found, typed, known, hidden),
-            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy,
+            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy, "typed": typed,
             "options": group_names + sorted({s.get("name") for s in subscriptions if s.get("name")}),
         }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,

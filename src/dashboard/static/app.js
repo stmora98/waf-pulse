@@ -94,28 +94,19 @@
 (function () {
   var box = document.getElementById("lz-map");
   if (!box) { return; }
+  var pop = document.getElementById("lz-pop");
   var status = document.getElementById("lz-status");
+  var rows = JSON.parse(box.getAttribute("data-rows") || "[]");
+  var mapping = JSON.parse(box.getAttribute("data-mapping") || "{}");
+  var hidden = (box.getAttribute("data-hidden") || "").split(",").filter(Boolean);
+  var selected = null;
 
-  function hidden() {
-    var value = box.getAttribute("data-hidden");
-    return value ? value.split(",") : [];
-  }
-
-  function mapping() {
-    var result = {};
-    Array.prototype.forEach.call(box.querySelectorAll("[data-lz-role]"), function (input) {
-      var text = input.value.trim();
-      if (text) { result[input.getAttribute("data-lz-role")] = text; }
-    });
-    return result;
-  }
-
-  function save(body, message) {
+  function save(message) {
     status.textContent = message;
     fetch("/api/landing-zone-map", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
-      body: JSON.stringify(body)
+      body: JSON.stringify({ mapping: mapping, hidden: hidden })
     }).then(function (response) {
       if (!response.ok) { throw new Error("failed"); }
       window.location.reload();
@@ -124,21 +115,108 @@
     });
   }
 
-  document.getElementById("lz-save").addEventListener("click", function () {
-    save({ mapping: mapping(), hidden: hidden() }, "Saving...");
-  });
-  document.getElementById("lz-reset").addEventListener("click", function () {
-    save({ mapping: {}, hidden: [] }, "Resetting...");
-  });
-  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-remove]"), function (button) {
-    button.addEventListener("click", function () {
-      save({ mapping: mapping(), hidden: hidden().concat(button.getAttribute("data-lz-remove")) }, "Removing...");
+  function element(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text) { node.textContent = text; }
+    if (className) { node.className = className; }
+    return node;
+  }
+
+  function close() {
+    pop.hidden = true;
+    if (selected) { selected.classList.remove("selected"); selected = null; }
+  }
+
+  function open(group) {
+    var role = group.getAttribute("data-lz-box");
+    var row = rows.filter(function (item) { return item.role === role; })[0];
+    if (!row) { return; }
+    if (selected) { selected.classList.remove("selected"); }
+    selected = group;
+    group.classList.add("selected");
+    var names = (mapping[role] || []).slice();
+
+    pop.textContent = "";
+    pop.appendChild(element("h4", row.label));
+    pop.appendChild(element("p", row.found ? "Found: " + row.matches.join(", ") : "Not found in your tenant yet.", "muted"));
+    var list = element("div", "", "lz-names");
+    names.forEach(function (name) {
+      var chip = element("button", name, "chip-button");
+      chip.type = "button";
+      chip.title = "Stop using this name";
+      chip.addEventListener("click", function () {
+        mapping[role] = names.filter(function (item) { return item !== name; });
+        if (!mapping[role].length) { delete mapping[role]; }
+        save("Saving...");
+      });
+      list.appendChild(chip);
+    });
+    pop.appendChild(list);
+    (row.unmatched || []).forEach(function (name) {
+      pop.appendChild(element("p", "No management group or subscription is called " + name + ".", "muted"));
+    });
+    var input = element("input", "", "lz-input");
+    input.type = "text";
+    input.setAttribute("list", "lz-options");
+    input.setAttribute("autocomplete", "off");
+    input.maxLength = 100;
+    input.placeholder = "Pick or type a management group or subscription";
+    input.setAttribute("aria-label", "Management group or subscription for " + row.label);
+    pop.appendChild(input);
+
+    var actions = element("div", "", "lz-row");
+    var add = element("button", "Map it");
+    add.type = "button";
+    function commit() {
+      var value = input.value.trim();
+      if (!value) { input.focus(); return; }
+      if (names.indexOf(value) === -1) { names.push(value); }
+      mapping[role] = names;
+      save("Saving...");
+    }
+    add.addEventListener("click", commit);
+    input.addEventListener("keydown", function (event) { if (event.key === "Enter") { commit(); } });
+    var remove = element("button", "Remove this box", "icon-button");
+    remove.type = "button";
+    remove.addEventListener("click", function () {
+      if (hidden.indexOf(role) === -1) { hidden.push(role); }
+      save("Removing...");
+    });
+    var cancel = element("button", "Close", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    [add, remove, cancel].forEach(function (button) { actions.appendChild(button); });
+    pop.appendChild(actions);
+
+    pop.hidden = false;
+    var wrap = box.getBoundingClientRect();
+    var rect = group.getBoundingClientRect();
+    var left = Math.max(4, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth - 4));
+    pop.style.left = left + "px";
+    pop.style.top = (rect.bottom - wrap.top + 8) + "px";
+    input.focus();
+  }
+
+  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-box]"), function (group) {
+    group.addEventListener("click", function (event) { event.stopPropagation(); open(group); });
+    group.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(group); }
     });
   });
-  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-restore]"), function (button) {
+  pop.addEventListener("click", function (event) { event.stopPropagation(); });
+  document.addEventListener("click", close);
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { close(); } });
+
+  document.getElementById("lz-reset").addEventListener("click", function () {
+    mapping = {};
+    hidden = [];
+    save("Resetting...");
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-lz-restore]"), function (button) {
     button.addEventListener("click", function () {
       var role = button.getAttribute("data-lz-restore");
-      save({ mapping: mapping(), hidden: hidden().filter(function (item) { return item !== role; }) }, "Putting it back...");
+      hidden = hidden.filter(function (item) { return item !== role; });
+      save("Putting it back...");
     });
   });
 })();
