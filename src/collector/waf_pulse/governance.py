@@ -4,7 +4,7 @@ Produces a dataset for the dashboard plus a few checks that feed the pillar scor
 """
 from datetime import datetime, timezone
 
-from . import graph
+from . import graph, rest
 from .findings import make_finding
 
 OWNER_ROLE_ID = "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
@@ -267,6 +267,44 @@ def evaluate(run_id, results, now=None):
     return findings, stats, dataset
 
 
+PRICING_API = "2024-01-01"
+PRICING_WORKERS = 4
+
+
+def parse_pricings(body, subscription):
+    """Defender for Cloud plans from the ARM pricings API: [{subscriptionId, plan, tier, subPlan}]."""
+    return [{"subscriptionId": subscription, "plan": item.get("name", ""),
+             "tier": (item.get("properties") or {}).get("pricingTier", ""),
+             "subPlan": (item.get("properties") or {}).get("subPlan") or ""}
+            for item in (body or {}).get("value", [])]
+
+
+def fetch_pricings(credential, subscription_ids):
+    """Resource Graph does not always carry the Defender plans, so they are also read from ARM (Reader is enough).
+    Returns (rows, errors); a subscription that cannot be read is reported and skipped."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    token = credential.get_token("https://management.azure.com/.default").token
+    errors = []
+
+    def read(sub):
+        try:
+            response = rest.get(f"https://management.azure.com/subscriptions/{sub}/providers/Microsoft.Security/pricings",
+                                token, {"api-version": PRICING_API})
+        except Exception:
+            return sub, None
+        return sub, parse_pricings(response.json(), sub) if response.status_code == 200 else None
+
+    rows = []
+    with ThreadPoolExecutor(max_workers=PRICING_WORKERS) as pool:
+        for sub, items in pool.map(read, subscription_ids):
+            if items is None:
+                errors.append({"ruleId": "governance-defender-arm", "error": f"Defender plans of {sub} could not be read."})
+            else:
+                rows.extend(items)
+    return rows, errors[:5]
+
+
 def collect(credential, run_id, subscription_ids):
     """Runs every governance query over all subscriptions. A query that fails is reported, not raised."""
     results, errors = {}, []
@@ -278,5 +316,11 @@ def collect(credential, run_id, subscription_ids):
         except Exception as exc:
             errors.append({"ruleId": f"governance-{name}", "error": str(exc).splitlines()[0][:200]})
         results[name] = rows
+    if not results.get("defender"):
+        try:
+            results["defender"], pricing_errors = fetch_pricings(credential, subscription_ids)
+            errors.extend(pricing_errors)
+        except Exception as exc:
+            errors.append({"ruleId": "governance-defender-arm", "error": str(exc).splitlines()[0][:200]})
     findings, stats, dataset = evaluate(run_id, results)
     return findings, stats, dataset, errors

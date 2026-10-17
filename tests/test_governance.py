@@ -163,6 +163,7 @@ def test_collect_reports_a_failing_query_and_keeps_the_rest(monkeypatch):
         return []
 
     monkeypatch.setattr(graph, "query", fake_query)
+    monkeypatch.setattr(governance, "fetch_pricings", lambda credential, subs: ([], []))
     findings, stats, dataset, errors = governance.collect(None, "r", [SUB])
     assert [e["ruleId"] for e in errors] == ["governance-compliance"]
     assert "GOV-LOCK-001" in {s["ruleId"] for s in stats}
@@ -230,3 +231,30 @@ def test_governance_page_shows_diagnostics_and_key_vault_panels(client, monkeypa
     html = client.get("/governance").get_data(as_text=True)
     assert "25.0%" in html and "&lt;Key Vault&gt;" in html and "3 of 4 without" in html and "1 resource(s) could not be read" in html
     assert "v/old" in html and "expired 2026-10-01" in html and "1 vault(s) could not be listed" in html
+
+def test_defender_plans_are_read_from_arm_when_resource_graph_has_none(monkeypatch):
+    class Cred:
+        def get_token(self, scope):
+            return type("T", (), {"token": "t"})()
+
+    class Resp:
+        def __init__(self, status, body):
+            self.status_code, self._body = status, body
+
+        def json(self):
+            return self._body
+
+    def fake_get(url, token, params=None, headers=None):
+        if SUB in url:
+            return Resp(200, {"value": [{"name": "VirtualMachines", "properties": {"pricingTier": "Standard", "subPlan": "P2"}},
+                                        {"name": "Dns", "properties": {"pricingTier": "Free"}}]})
+        return Resp(403, {})
+
+    monkeypatch.setattr(governance.graph, "chunks", lambda ids: [ids])
+    monkeypatch.setattr(governance.graph, "query", lambda *a, **k: [])
+    monkeypatch.setattr(governance.rest, "get", fake_get)
+    findings, stats, dataset, errors = governance.collect(Cred(), "r1", [SUB, "denied-sub"])
+    assert [(d["plan"], d["tier"], d["subPlan"]) for d in dataset["defender"]["detail"]] == [
+        ("VirtualMachines", "Standard", "P2"), ("Dns", "Free", "")]
+    assert [f["resourceName"] for f in findings if f["ruleId"] == "GOV-DEF-001"] == ["Dns"]
+    assert any("denied-sub" in e["error"] for e in errors)
