@@ -9,6 +9,7 @@
   {%- elif name == 'operations' %}<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>
   {%- elif name == 'governance' %}<path d="M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>
   {%- elif name == 'history' %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+  {%- elif name == 'rightsizing' %}<path d="M5 20V10M12 20V4M19 20v-7"/><path d="M3 20h18"/>
   {%- elif name == 'findings' %}<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>
   {%- endif %}
 </svg>
@@ -37,6 +38,8 @@
         {% for slug, page in nav_pillars %}
           {{ link('pillar_page', page[1], slug if slug != 'cost' else 'cost', request.endpoint == 'pillar_page' and request.view_args.slug == slug, slug) }}
         {% endfor %}
+        <p class="side-group">Optimize</p>
+        {{ link('rightsizing_page', 'Right-sizing', 'rightsizing', request.endpoint == 'rightsizing_page') }}
         <p class="side-group">Manage</p>
         {{ link('governance_page', 'Governance', 'governance', request.endpoint == 'governance_page') }}
         {{ link('history_page', 'History', 'history', request.endpoint in ('history_page', 'compare_page')) }}

@@ -1,0 +1,27 @@
+{% from "_macros.html" import hbar_chart %}
+{% set defender = summary.governance.defender if summary and summary.governance else None %}
+{% if defender and defender.detail %}
+  <section class="panel" id="defender">
+    <h3>Defender for Cloud coverage</h3>
+    <p class="muted">{{ defender.enabled }} of {{ defender.plans }} plan(s) across your subscriptions are on. A plan on the Free tier only gives recommendations, without threat protection.</p>
+    <div class="insights two">
+      <div>{{ hbar_chart(defender_chart, "Defender plans by tier") }}</div>
+      <div class="table-wrap">
+        <table class="narrow">
+          <thead><tr><th>Defender plan</th><th>Tier</th><th>Sub-plan</th><th>Subscription</th></tr></thead>
+          <tbody>
+            {% for p in defender.detail[:60] %}
+              <tr>
+                <td>{{ p.plan }}</td>
+                <td><span class="chip {{ 'as-right' if p.tier | lower != 'free' else 'as-under' }}">{{ p.tier or 'n/a' }}</span></td>
+                <td>{{ p.subPlan or '–' }}</td>
+                <td><span class="muted">{{ names.get(p.subscriptionId, p.subscriptionId) }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% if defender.detail | length > 60 %}<p class="muted">Showing 60 of {{ defender.detail | length }} plans.</p>{% endif %}
+  </section>
+{% endif %}

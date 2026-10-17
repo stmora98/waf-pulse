@@ -19,5 +19,6 @@
       </ul>
     {% endif %}
     {% if not summary.metrics.topUnderutilized and not summary.metrics.topSaturated %}<p class="muted">No idle or saturated resources.</p>{% endif %}
+    <p><a href="{{ url_for('rightsizing_page') }}">Open the right-sizing details</a></p>
   </div>
 {% endif %}

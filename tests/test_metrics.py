@@ -105,6 +105,37 @@ def test_evaluate_builds_findings_stats_and_dataset():
     assert [i["name"] for i in dataset["topSaturated"]] == ["busy"]
 
 
+def test_evaluate_keeps_every_measured_resource_with_its_cpu_and_assessment():
+    vm = "Microsoft.Compute/virtualMachines"
+    resources = {"vm": [row(vm, "idle"), row(vm, "busy"), row(vm, "fine"), row(vm, "nodata")],
+                 "plan": [row("Microsoft.Web/serverfarms", "plan1")]}
+    measurements = {
+        rid(vm, "idle").lower(): {"Percentage CPU": points("average", 1, 2)},
+        rid(vm, "busy").lower(): {"Percentage CPU": [{"average": 90, "maximum": 99}, {"average": 95, "maximum": 100}]},
+        rid(vm, "fine").lower(): {"Percentage CPU": [{"average": 40, "maximum": 70}]},
+        rid("Microsoft.Web/serverfarms", "plan1").lower(): {"CpuPercentage": points("average", 10), "MemoryPercentage": points("average", 55)},
+    }
+    _, _, dataset = metrics.evaluate("run1", resources, measurements)
+
+    assert dataset["distribution"]["vm"] == {"idle": 1, "under": 0, "right": 1, "saturated": 1, "nodata": 1}
+    assert dataset["distribution"]["plan"]["under"] == 1
+    by_name = {r["name"]: r for r in dataset["resources"]}
+    assert by_name["busy"]["assessment"] == "saturated" and by_name["busy"]["avg"] == 92.5 and by_name["busy"]["max"] == 100
+    assert by_name["fine"]["assessment"] == "right" and by_name["idle"]["detail"] == "size"
+    assert by_name["idle"]["resourceGroup"] == "rg" and "max" not in by_name["idle"]  # no daily maximum was reported
+    assert by_name["plan1"]["memory"] == 55.0 and "nodata" not in by_name
+    # idle first, then underutilized, saturated and right-sized
+    assert [r["assessment"] for r in dataset["resources"]] == ["idle", "under", "saturated", "right"]
+
+
+def test_the_inventory_is_capped(monkeypatch):
+    monkeypatch.setattr(metrics, "MAX_INVENTORY", 2)
+    vm = "Microsoft.Compute/virtualMachines"
+    resources = {"vm": [row(vm, f"v{i}") for i in range(4)]}
+    measurements = {rid(vm, f"v{i}").lower(): {"Percentage CPU": points("average", 1)} for i in range(4)}
+    _, _, dataset = metrics.evaluate("r", resources, measurements)
+    assert len(dataset["resources"]) == 2 and dataset["distribution"]["vm"]["idle"] == 4
+
 def test_evaluate_with_nothing_measured():
     findings, stats, dataset = metrics.evaluate("r", {"vm": [row("x/y", "a")]}, {})
     assert findings == [] and stats == [] and dataset["measured"]["vm"] == 0

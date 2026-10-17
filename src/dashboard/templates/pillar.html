@@ -58,6 +58,11 @@
         {% endif %}
       </section>
 
+      {% if slug == 'security' %}
+        {% include "_p_defender.html" %}
+        {% include "_p_controls.html" %}
+      {% endif %}
+
       <section class="panel" id="recommendations">
         <h3>Recommendations</h3>
         {% if rules %}

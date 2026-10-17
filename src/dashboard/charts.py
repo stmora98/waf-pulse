@@ -10,15 +10,15 @@ def _shorten(text, limit):
 
 
 def hbars(items, width=520, label_limit=28, row_height=26, label_width=190, value_width=44):
-    """Horizontal bars. items: [(label, value, href or None)], largest first."""
-    items = list(items)
-    top = max((value for _, value, _ in items), default=0) or 1
+    """Horizontal bars. items: [(label, value, href or None[, css class])], largest first."""
+    items = [tuple(item) + (None,) * (4 - len(item)) for item in items]
+    top = max((item[1] for item in items), default=0) or 1
     track = max(width - label_width - value_width, 40)
     rows = []
-    for index, (label, value, href) in enumerate(items):
+    for index, (label, value, href, css) in enumerate(items):
         rows.append({
             "y": index * row_height, "label": _shorten(label, label_limit), "full": str(label), "value": value,
-            "bar": round(max(track * value / top, 2 if value else 0), 1), "href": href,
+            "bar": round(max(track * value / top, 2 if value else 0), 1), "href": href, "css": css or "",
         })
     return {"width": width, "height": max(len(rows) * row_height, row_height), "rows": rows,
             "label_width": label_width, "bar_height": row_height - 10, "text_y": row_height / 2 + 4}

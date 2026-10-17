@@ -13,6 +13,7 @@ import data
 import governance_view
 import history
 import insights
+import rightsizing
 
 app = Flask(__name__)
 
@@ -80,6 +81,57 @@ def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS):
     return data.all_findings(summary["runId"], pillar, rule_id, limit) if summary else []
 
 
+def _data_sources(summary):
+    """What each source could read in the last run, so a missing permission is visible instead of silent.
+    Returns [{name, status, records, detail}] with status available, partial, missing or empty."""
+    sources = summary.get("sources") or {}
+    errors = summary.get("errors") or []
+
+    def records(key):
+        return (sources.get(key) or {}).get("findings")
+
+    rows = []
+
+    def add(name, status, count=None, detail=""):
+        rows.append({"name": name, "status": status, "records": count, "detail": detail})
+
+    add("Resource Graph inventory and built-in rules", "available" if "builtin" in sources else "empty", records("builtin"),
+        f"{summary.get('resourceCount', 0)} resources in {summary.get('subscriptionCount', 0)} subscription(s).")
+    failed = sum(1 for e in errors if str(e.get("ruleId", "")).startswith("CHK-"))
+    add("Review checklists", "partial" if failed else ("available" if "checklist" in sources else "empty"), records("checklist"),
+        f"{failed} check(s) could not run." if failed else "Every check ran.")
+    add("Azure Advisor", "available" if "advisor" in sources else "empty", records("advisor"), "Recommendations of the five categories.")
+    add("Defender for Cloud", "available" if "defender" in sources or summary.get("secureScore") else "empty",
+        records("defender"), "Secure score, controls and assessments." if summary.get("secureScore") else "Needs the Security Reader role.")
+    measured = sum(((summary.get("metrics") or {}).get("measured") or {}).values())
+    add("Azure Monitor metrics", "available" if measured else "empty", measured or None, "Utilization of the last 30 days.")
+    finops = summary.get("finops") or {}
+    coverage = finops.get("coverage") or {}
+    if finops.get("months"):
+        status = "partial" if coverage.get("denied") or coverage.get("error") else "available"
+        add("Cost Management", status, coverage.get("ok"),
+            f"{coverage.get('denied', 0)} subscription(s) need the Cost Management Reader role." if coverage.get("denied") else "Cost read for every subscription.")
+    else:
+        add("Cost Management", "missing", None, "Needs the Cost Management Reader role.")
+    diagnostics = summary.get("diagnostics")
+    add("Diagnostic settings", "available" if diagnostics and diagnostics.get("checked") else "empty",
+        (diagnostics or {}).get("checked"), "Resources of the supported types.")
+    keyvault = summary.get("keyvault")
+    if keyvault:
+        denied = keyvault.get("denied", 0)
+        add("Key Vault expirations", "partial" if denied else "available", keyvault.get("readable"),
+            f"{denied} vault(s) could not be listed (Key Vault Reader role or firewall)." if denied else "Every vault was read.")
+    else:
+        add("Key Vault expirations", "empty", None, "No vaults found.")
+    entra = (summary.get("entra") or {}).get("available") or {}
+    labels = {"apps": "app registrations", "guests": "guest users", "incidents": "Defender XDR incidents"}
+    missing = [labels[k] for k in labels if k in entra and not entra[k]]
+    add("Microsoft Entra", "missing" if entra and len(missing) == len(entra) else "partial" if missing else
+        ("available" if entra else "empty"), None,
+        ("Needs Graph permissions for " + ", ".join(missing) + ".") if missing else "App credentials, guests and incidents.")
+    add("Governance", "available" if summary.get("governance") else "empty", records("governance"), "Policy, access, locks and Defender plans.")
+    return rows
+
 @app.get("/")
 def index():
     if any(request.args.get(name) for name in ("pillar", "severity", "source")):
@@ -107,7 +159,7 @@ def index():
         type_chart=charts.hbars([(name, count, None) for name, count in
                                  insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
         resource_chart=charts.hbars([(name, count, None) for name, _, count in insights.worst_resources(findings, 8)]),
-        top_rules=rules[:10],
+        top_rules=rules[:10], data_sources=_data_sources(summary or {}),
     )
 
 
@@ -138,6 +190,8 @@ def pillar_page(slug):
                                source_labels=data.SOURCE_LABELS), 503
     rules = insights.group_rules(findings)
     spend = _spend_context(summary, rules) if slug == "cost" else {}
+    if slug == "security":
+        spend = _security_context(summary)
     return render_template(
         "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
@@ -151,6 +205,18 @@ def pillar_page(slug):
 
 BREAKDOWN_PANELS = (("byService", "Service"), ("byResourceGroup", "Resource group"), ("byLocation", "Region"),
                     ("byResourceType", "Resource type"))
+
+
+def _security_context(summary):
+    """Defender plan tiers for the coverage chart, and subscription names for its table."""
+    governance = (summary or {}).get("governance") or {}
+    detail = (governance.get("defender") or {}).get("detail") or []
+    on = sum(1 for p in detail if str(p.get("tier", "")).lower() != "free")
+    return {
+        "defender_chart": charts.hbars([("Standard (threat protection on)", on, None, "as-right"),
+                                        ("Free (recommendations only)", len(detail) - on, None, "as-under")], width=420, label_width=210, label_limit=34),
+        "names": {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])},
+    }
 
 
 def _spend_context(summary, rules):
@@ -186,6 +252,42 @@ def _spend_context(summary, rules):
         "coverage_last": coverage["percent"] if coverage else None,
         "ahb": [rule for rule in rules if rule["ruleId"].startswith("COST-AHB")],
     }
+
+SUBSCRIPTION_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
+MAX_TABLE_ROWS = 500
+
+
+@app.get("/rightsizing")
+def rightsizing_page():
+    kind = _allowed(request.args.get("kind"), rightsizing.KINDS) or "vm"
+    assessment = _allowed(request.args.get("assessment"), rightsizing.ASSESSMENTS)
+    subscription = request.args.get("subscription", "")
+    subscription = subscription.lower() if SUBSCRIPTION_ID.match(subscription) else None
+    try:
+        _, summary = _latest()
+    except Exception:
+        logging.exception("Could not load right-sizing data")
+        return render_template("rightsizing.html", error="The data store is not reachable right now.", metrics=None), 503
+    metrics = (summary or {}).get("metrics")
+    if not metrics:
+        return render_template("rightsizing.html", error=None, metrics=None)
+    cards = []
+    for key, (title, _, labels) in rightsizing.KINDS.items():
+        totals = rightsizing.counts(metrics, key)
+        if not any(totals.values()):
+            continue
+        bars = [(labels[name], totals[name], url_for("rightsizing_page", kind=key, assessment=name, subscription=subscription) + "#resources",
+                 f"as-{name}") for name in rightsizing.visible_assessments(key, totals)]
+        cards.append({"key": key, "title": title, "chart": charts.hbars(bars, width=440, label_width=210, label_limit=34),
+                      "measured": sum(totals[n] for n in rightsizing.ASSESSMENTS), "nodata": totals["nodata"]})
+    rows = rightsizing.resources(metrics, kind, assessment, subscription)
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    return render_template(
+        "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, assessment=assessment,
+        subscription=subscription, title=rightsizing.KINDS[kind][0], labels=rightsizing.KINDS[kind][2],
+        assessments=rightsizing.ASSESSMENTS, rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), names=names,
+        lookback=metrics.get("lookbackDays", 30), kinds=rightsizing.KINDS,
+    )
 
 RULE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 MAX_RULE_RESOURCES = 1000

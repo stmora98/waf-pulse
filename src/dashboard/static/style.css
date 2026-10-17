@@ -352,6 +352,14 @@ html[data-nav="collapsed"] .side-nav { margin-top: 10px; }
   html[data-nav="collapsed"] .side-label, html[data-nav="collapsed"] .side-group { display: initial; }
   .mobile-only { display: grid; }
 }
+/* Right-sizing assessments */
+:root { --as-idle: #5aa2e6; --as-under: #e6c14a; --as-right: #43c28a; --as-saturated: #d64545; }
+.bar.as-idle { fill: var(--as-idle); } .bar.as-under { fill: var(--as-under); }
+.bar.as-right { fill: var(--as-right); } .bar.as-saturated { fill: var(--as-saturated); }
+.chip.as-idle { background: color-mix(in srgb, var(--as-idle) 22%, transparent); color: var(--text); }
+.chip.as-under { background: color-mix(in srgb, var(--as-under) 26%, transparent); color: var(--text); }
+.chip.as-right { background: color-mix(in srgb, var(--as-right) 24%, transparent); color: var(--text); }
+.chip.as-saturated { background: color-mix(in srgb, var(--as-saturated) 26%, transparent); color: var(--text); }
 @media (max-width: 640px) {
   main, .top { padding: 0 12px; }
   .card-score { font-size: 1.8rem; }

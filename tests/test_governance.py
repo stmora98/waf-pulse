@@ -129,7 +129,9 @@ def test_defender_plans_not_enabled():
     findings, stats, dataset = governance.evaluate("r", {"subscriptions": [sub_row(SUB)], "defender": plans}, NOW)
     row = stats_for(stats, "GOV-DEF-001")[SUB]
     assert (row["affected"], row["applicable"]) == (1, 2)
-    assert dataset["defender"] == {"plans": 2, "enabled": 1, "notEnabled": ["SqlServers"]}
+    assert {k: v for k, v in dataset["defender"].items() if k != "detail"} == {"plans": 2, "enabled": 1, "notEnabled": ["SqlServers"]}
+    # enabled plans first, then the ones that are off, each with its tier and sub-plan
+    assert [(d["plan"], d["tier"]) for d in dataset["defender"]["detail"]] == [("VirtualMachines", "Standard"), ("SqlServers", "Free")]
     assert [f["resourceName"] for f in findings if f["ruleId"] == "GOV-DEF-001"] == ["SqlServers"]
 
 

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_macros.html" import hbar_chart %}
+{% block title %}Right-sizing · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Right-sizing</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not metrics %}
+      <section class="notice">No utilization data yet. It comes from Azure Monitor metrics: select <strong>Refresh now</strong> to collect it.</section>
+    {% else %}
+      <p class="muted">Average and peak utilization of the last {{ lookback }} days, from Azure Monitor. Select a bar to list the resources behind it.</p>
+      <section class="insights two">
+        {% for card in cards %}
+          <div class="panel">
+            <h3>{{ card.title }}</h3>
+            {{ hbar_chart(card.chart, card.title ~ " by utilization") }}
+            <p class="muted">{{ card.measured }} measured{% if card.nodata %} · {{ card.nodata }} without metrics (stopped or just created){% endif %}</p>
+          </div>
+        {% endfor %}
+      </section>
+
+      <section class="panel" id="resources">
+        <h3>{{ title }}{% if assessment %} · {{ labels[assessment] }}{% endif %}</h3>
+        <section class="severity">
+          <span class="muted">Type</span>
+          {% for key, definition in kinds.items() %}
+            <a class="chip {% if key == kind %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=key, subscription=subscription) }}#resources">{{ definition[0] }}</a>
+          {% endfor %}
+        </section>
+        <section class="severity">
+          <span class="muted">Show</span>
+          <a class="chip {% if not assessment %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=kind, subscription=subscription) }}#resources">All</a>
+          {% for name in assessments %}
+            <a class="chip {% if assessment == name %}active{% endif %}" href="{{ url_for('rightsizing_page', kind=kind, assessment=name, subscription=subscription) }}#resources">{{ labels[name] }}</a>
+          {% endfor %}
+        </section>
+        {% if rows %}
+          <p class="filter"><label>Filter <input type="search" id="rs-filter" data-filter-table="rs" placeholder="Type a name, size or resource group" autocomplete="off"></label></p>
+          <div class="table-wrap">
+            <table id="rs">
+              <thead>
+                <tr>
+                  <th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
+                  {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ 'DTU' if kind == 'sql' else 'CPU' }} %</th><th>Max %</th>{% endif %}
+                  {% if kind == 'plan' %}<th>Avg memory %</th>{% endif %}
+                  <th>Assessment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in rows %}
+                  <tr>
+                    <td><span title="{{ r.id }}">{{ r.name }}</span></td>
+                    <td>{{ names.get(r.subscriptionId, r.subscriptionId) }}</td>
+                    <td>{{ r.resourceGroup }}</td>
+                    <td>{{ r.detail }}</td>
+                    {% if kind == 'storage' %}
+                      <td>{{ '{:,.0f}'.format(r.avg) }}</td>
+                    {% else %}
+                      <td>{{ r.avg }}</td><td>{{ r.max if r.max is defined else '–' }}</td>
+                    {% endif %}
+                    {% if kind == 'plan' %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
+                    <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if total_rows > rows | length %}<p class="muted">Showing {{ rows | length }} of {{ total_rows }}.</p>{% endif %}
+        {% else %}
+          <p class="muted">No resources for this selection.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+{% endblock %}

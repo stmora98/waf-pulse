@@ -74,7 +74,7 @@ resources
     "defender": """
 securityresources
 | where type =~ 'microsoft.security/pricings'
-| project subscriptionId, plan = name, tier = tostring(properties.pricingTier)
+| project subscriptionId, plan = name, tier = tostring(properties.pricingTier), subPlan = tostring(properties.subPlan)
 """,
 }
 
@@ -258,6 +258,10 @@ def evaluate(run_id, results, now=None):
             "plans": len(plans),
             "enabled": sum(1 for p in plans if str(p.get("tier", "")).lower() != "free"),
             "notEnabled": sorted({p.get("plan", "") for p in plans if str(p.get("tier", "")).lower() == "free"}),
+            "detail": sorted(
+                ({"plan": p.get("plan", ""), "tier": p.get("tier", ""), "subPlan": p.get("subPlan", ""),
+                  "subscriptionId": _sub(p)} for p in plans),
+                key=lambda p: (str(p["tier"]).lower() == "free", p["plan"], p["subscriptionId"]))[:1500],
         },
     }
     return findings, stats, dataset

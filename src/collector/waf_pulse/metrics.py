@@ -172,10 +172,33 @@ def classify(kind, metrics):
     return None, None
 
 
+ASSESSMENT = {
+    "MET-VM-001": "idle", "MET-VM-002": "under", "MET-VM-003": "saturated",
+    "MET-SQL-001": "under", "MET-SQL-002": "saturated",
+    "MET-APP-001": "under", "MET-APP-002": "saturated",
+    "MET-STG-001": "idle",
+}
+ASSESSMENT_ORDER = {"idle": 0, "under": 1, "saturated": 2, "right": 3}
+MAX_INVENTORY = 1500
+PEAK_METRIC = {"vm": "Percentage CPU", "sql_dtu": "dtu_consumption_percent", "sql_vcore": "cpu_percent", "plan": "CpuPercentage"}
+
+
+def peak(kind, metrics):
+    """Highest daily maximum of the main metric (CPU or DTU), or None."""
+    name = PEAK_METRIC.get(kind)
+    return summarize(metrics.get(name, []), "maximum") if name else None
+
+
+def resource_group_of(resource_id):
+    parts = str(resource_id).split("/")
+    lowered = [p.lower() for p in parts]
+    return parts[lowered.index("resourcegroups") + 1] if "resourcegroups" in lowered[:-1] else ""
+
 def evaluate(run_id, resources, measurements):
     """resources: {kind: [ARG rows]}; measurements: {resourceid (lower): {metric: points}}.
     Returns (findings, stats, dataset)."""
     findings, counts, measured_totals = [], {}, {}
+    inventory, distribution = [], {}
     top = {"idle": [], "saturated": []}
     for kind, rows in resources.items():
         for row in rows:
@@ -187,6 +210,19 @@ def evaluate(run_id, resources, measurements):
                 continue
             sub = str(row.get("subscriptionId", "")).lower()
             measured_totals[(kind, sub)] = measured_totals.get((kind, sub), 0) + 1
+            assessment = ASSESSMENT.get(rule, "right")
+            distribution.setdefault(kind, {"idle": 0, "under": 0, "right": 0, "saturated": 0})[assessment] += 1
+            record = {"kind": kind, "id": row["id"], "name": row.get("name", ""), "subscriptionId": sub,
+                      "resourceGroup": resource_group_of(row["id"]), "detail": row.get("detail", ""),
+                      "avg": round(value, 2), "assessment": assessment}
+            top_value = peak(kind, metrics)
+            if top_value is not None:
+                record["max"] = round(top_value, 2)
+            if kind == "plan":
+                memory = summarize(metrics.get("MemoryPercentage", []), "average")
+                if memory is not None:
+                    record["memory"] = round(memory, 1)
+            inventory.append(record)
             if rule is None:
                 continue
             pillar, severity, title, recommendation = RULES[rule]
@@ -226,6 +262,10 @@ def evaluate(run_id, resources, measurements):
         "listed": {kind: len(rows) for kind, rows in resources.items()},
         "topUnderutilized": top["idle"],
         "topSaturated": top["saturated"],
+        "distribution": {kind: {**distribution.get(kind, {"idle": 0, "under": 0, "right": 0, "saturated": 0}),
+                                "nodata": max(len(rows) - sum(distribution.get(kind, {}).values()), 0)}
+                         for kind, rows in resources.items()},
+        "resources": sorted(inventory, key=lambda r: (ASSESSMENT_ORDER[r["assessment"]], r["avg"]))[:MAX_INVENTORY],
     }
     return findings, list(merged.values()), dataset
 
