@@ -229,17 +229,17 @@ def _short(text, limit):
 
 def _measure(node):
     """Width of the space a subtree needs: the widest of its own box and its children side by side."""
-    own = max(node["width"], 140 if node["chips"] or node["hidden"] else 0)
+    own = max(node["width"], 140 if node["chips"] or node["hidden"] or node["slot"] else 0)
     kids = [_measure(child) for child in node["children"]]
     node["span"] = max(own, sum(kids) + H_GAP * max(len(kids) - 1, 0)) if kids else own
     return node["span"]
 
 
-def normalize(label, role="", children=(), subs=(), status="", key="", how=""):
+def normalize(label, role="", children=(), subs=(), status="", key="", how="", slot=False):
     chips = [_short(s, 24) for s in subs[:MAX_CHIPS]]
     hidden = max(len(subs) - MAX_CHIPS, 0)
     return {"label": label, "role": role, "children": list(children), "chips": chips, "hidden": hidden,
-            "status": status, "key": key or label, "width": _label_width(label), "subscriptions": len(subs), "how": how}
+            "status": status, "key": key or label, "width": _label_width(label), "subscriptions": len(subs), "how": how, "slot": slot}
 
 
 def layout(roots):
@@ -250,7 +250,7 @@ def layout(roots):
     level_height = {}
 
     def height_of(node):
-        chips = len(node["chips"]) + (1 if node["hidden"] else 0)
+        chips = len(node["chips"]) + (1 if node["hidden"] else 0) + (1 if node["slot"] else 0)
         return NODE_HEIGHT + (chips * (CHIP_HEIGHT + CHIP_GAP) + CHIP_GAP if chips else 0)
 
     def depths(node, depth=0):
@@ -277,6 +277,10 @@ def layout(roots):
         if node["hidden"]:
             entry["more"] = {"label": f"+{node['hidden']} more", "x": round(cx - 70, 1), "width": 140,
                              "y": top + NODE_HEIGHT + CHIP_GAP + len(node["chips"]) * (CHIP_HEIGHT + CHIP_GAP)}
+        if node["slot"]:
+            rows = len(node["chips"]) + (1 if node["hidden"] else 0)
+            entry["add"] = {"label": "+ Subscription", "x": round(cx - 70, 1), "width": 140,
+                            "y": top + NODE_HEIGHT + CHIP_GAP + rows * (CHIP_HEIGHT + CHIP_GAP)}
         nodes.append(entry)
         if node["children"]:
             total = sum(c["span"] for c in node["children"]) + H_GAP * (len(node["children"]) - 1)
@@ -302,25 +306,35 @@ def layout(roots):
     return {"width": round(width), "height": round(y - LEVEL_GAP + 12), "nodes": nodes, "links": links}
 
 
-def assign_subscriptions(subscriptions, override, taken=()):
-    """Subscriptions named in the manual mapping, for tenants that have no management groups (or keep platform
-    subscriptions outside of them). `taken` holds the lower case names already matched to a management group.
+def parse_subscription_override(text):
+    """The "subscriptions" key of LANDING_ZONE_MAP: {role: {lower names or ids of subscriptions}}."""
+    try:
+        raw = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return parse_override(json.dumps(raw["subscriptions"])) if isinstance(raw, dict) and isinstance(raw.get("subscriptions"), dict) else {}
+
+
+def subscription_override_from_environment():
+    return parse_subscription_override(os.environ.get("LANDING_ZONE_MAP", ""))
+
+
+def assign_subscriptions(subscriptions, override):
+    """Subscriptions named for a role, by name or id. Only subscriptions are looked at, never management groups.
     Returns {role: [{label, how, kind, id}]}."""
     found = {}
     for role, names in (override or {}).items():
         for sub in subscriptions:
             label = sub.get("name") or sub.get("id", "")
-            keys = {str(label).lower(), str(sub.get("id", "")).lower()}
-            if keys & set(names) and not keys & set(taken):
+            if {str(label).lower(), str(sub.get("id", "")).lower()} & set(names):
                 found.setdefault(role, []).append({"label": label, "how": "manual", "kind": "subscription", "id": sub.get("id", "")})
     return found
 
 
-def merge_found(found, extra):
-    merged = {role: list(items) for role, items in found.items()}
-    for role, items in (extra or {}).items():
-        merged.setdefault(role, []).extend(items)
-    return merged
+def rejected_names(mapping, allowed):
+    """The typed names that are not in `allowed` (lower case), so a subscription cannot be mapped as a management
+    group or the other way around. Returns [(role, name)]."""
+    return [(role, name) for role, names in mapping.items() for name in names if name.lower() not in allowed]
 
 
 def actual(tree, subscriptions, names, outside, classification=None):
@@ -342,10 +356,16 @@ def actual(tree, subscriptions, names, outside, classification=None):
     return layout(roots)
 
 
-def reference(found, has_hierarchy, hidden=()):
+SLOT_ROLES = {"security", "management", "identity", "connectivity", "corp", "online", "local", "decommissioned", "sandbox"}
+
+
+def reference(found, has_hierarchy, hidden=(), subscriptions=None, interactive=False):
     """The reference architecture, each box marked present or missing in the tenant. `found` is the second value of
-    `classify`. Boxes that only organize the tree (tenant root, intermediate root) are marked present when any
-    hierarchy is visible."""
+    `classify` and `subscriptions` what `assign_subscriptions` returned. Boxes that only organize the tree (tenant
+    root, intermediate root) are marked present when any hierarchy is visible. Subscriptions hang under the boxes that
+    hold them, like the key icons of the reference image."""
+    subscriptions = subscriptions or {}
+
     def convert(item):
         label, role, kids = item
         kids = [kid for kid in kids if kid[1] not in hidden]
@@ -353,29 +373,35 @@ def reference(found, has_hierarchy, hidden=()):
             status = "present" if has_hierarchy or role == "root" else "missing"
             how = ""
         else:
-            status = "present" if found.get(role) else "missing"
-            how = found[role][0]["how"] if found.get(role) else ""
-        subs = [m["label"] for m in found.get(role, []) if m.get("kind") == "subscription"] if status == "present" else []
-        return normalize(label, role, [convert(k) for k in kids], subs, status=status, key=role, how=how)
+            status = "present" if found.get(role) or subscriptions.get(role) else "missing"
+            how = (found.get(role) or subscriptions.get(role) or [{"how": ""}])[0]["how"]
+        subs = [m["label"] for m in subscriptions.get(role, [])]
+        return normalize(label, role, [convert(k) for k in kids], subs, status=status, key=role, how=how,
+                         slot=interactive and role in SLOT_ROLES)
 
     return layout([convert(REFERENCE)])
 
 
-def alignment(found, typed=None, known=(), hidden=()):
-    """One row per box of the reference architecture that a tenant is expected to have: what was found, the names
-    typed for it and which of those names match no management group. `known` is every name of the tenant, lower case."""
-    expected, typed = [], typed or {}
+def alignment(found, typed=None, known=(), hidden=(), subscriptions=None, typed_subscriptions=None, known_subscriptions=()):
+    """One row per box of the reference architecture that a tenant is expected to have: the management groups
+    found for it, the names typed for it and which of those match no management group, and the same for
+    subscriptions. `known` and `known_subscriptions` hold the lower case names of the tenant."""
+    expected, typed, subscriptions, typed_subscriptions = [], typed or {}, subscriptions or {}, typed_subscriptions or {}
 
     def walk(item):
         label, role, kids = item
         if role in hidden:
             return  # a removed box takes its children with it
         if role not in ("root", "intermediate"):
-            matches = [f"{m['label']} ({'subscription' if m.get('kind') == 'subscription' else m['how']})"
-                       for m in found.get(role, [])]
-            names = list(typed.get(role, []))
-            expected.append({"label": label, "role": role, "found": bool(matches), "matches": matches, "names": names,
-                             "unmatched": [n for n in names if n.lower() not in known]})
+            matches = [f"{m['label']} ({m['how']})" for m in found.get(role, [])]
+            sub_matches = [m["label"] for m in subscriptions.get(role, [])]
+            names, sub_names = list(typed.get(role, [])), list(typed_subscriptions.get(role, []))
+            expected.append({
+                "label": label, "role": role, "found": bool(matches or sub_matches), "matches": matches,
+                "subscriptionMatches": sub_matches, "names": names, "subscriptionNames": sub_names,
+                "unmatched": [n for n in names if n.lower() not in known],
+                "unmatchedSubscriptions": [n for n in sub_names if n.lower() not in known_subscriptions],
+                "holdsSubscriptions": role in SLOT_ROLES})
         for kid in kids:
             walk(kid)
 

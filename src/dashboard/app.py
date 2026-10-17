@@ -368,25 +368,26 @@ def governance_page():
     diagrams = {}
     if governance:
         names = {sub["id"]: sub.get("name") or sub["id"] for sub in governance.get("subscriptions", [])}
-        mapping, hidden = _landing_zone_settings()
+        mapping, sub_mapping, hidden = _landing_zone_settings()
         environment = landing_zone.override_from_environment()
-        override = landing_zone.merge_override(environment, mapping)
+        sub_environment = landing_zone.subscription_override_from_environment()
         classification, found = landing_zone.classify(
-            tree, governance.get("policyByGroup"), governance.get("signals"), override)
+            tree, governance.get("policyByGroup"), governance.get("signals"), landing_zone.merge_override(environment, mapping))
         group_names = sorted({name for node in _walk_groups(tree) for name in (node.get("displayName"), node.get("name")) if name})
         subscriptions = governance.get("subscriptions", [])
-        found = landing_zone.merge_found(found, landing_zone.assign_subscriptions(
-            subscriptions, override, taken={n.lower() for n in group_names}))
+        sub_found = landing_zone.assign_subscriptions(subscriptions, landing_zone.merge_override(sub_environment, sub_mapping))
         has_hierarchy = any(node.get("children") for node in tree)
         typed = {role: mapping.get(role) or sorted(environment.get(role, ())) for role in {*mapping, *environment}}
-        known = {n.lower() for n in group_names} | {str(s.get("name", "")).lower() for s in subscriptions} | {
-            str(s.get("id", "")).lower() for s in subscriptions}
+        typed_subs = {role: sub_mapping.get(role) or sorted(sub_environment.get(role, ())) for role in {*sub_mapping, *sub_environment}}
+        known_groups = {n.lower() for n in group_names}
+        known_subs = {str(s.get("name", "")).lower() for s in subscriptions} | {str(s.get("id", "")).lower() for s in subscriptions}
         diagrams = {
             "hierarchy": landing_zone.actual(tree, subscriptions, names, unassigned, classification),
-            "reference": landing_zone.reference(found, has_hierarchy, hidden),
-            "alignment": landing_zone.alignment(found, typed, known, hidden),
-            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy, "typed": typed,
-            "options": group_names + sorted({s.get("name") for s in subscriptions if s.get("name")}),
+            "reference": landing_zone.reference(found, has_hierarchy, hidden, sub_found, interactive=True),
+            "alignment": landing_zone.alignment(found, typed, known_groups, hidden, sub_found, typed_subs, known_subs),
+            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy,
+            "typed": typed, "typed_subscriptions": typed_subs,
+            "group_options": group_names, "subscription_options": sorted({s.get("name") for s in subscriptions if s.get("name")}),
         }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
                            summary=summary, **diagrams)
@@ -530,24 +531,49 @@ MAPPING_SETTING = "landing-zone-map"
 
 
 def _landing_zone_settings():
-    """What was typed in the Governance page: ({role: [names]}, [removed roles])."""
+    """What was typed in the Governance page: ({role: [management groups]}, {role: [subscriptions]}, [removed roles])."""
     try:
         saved = data.get_setting(MAPPING_SETTING)
     except Exception:
         logging.exception("Could not read the landing zone settings")
-        return {}, []
+        return {}, {}, []
     saved = saved if isinstance(saved, dict) else {}
-    return landing_zone.sanitize_mapping(saved.get("mapping")), landing_zone.sanitize_hidden(saved.get("hidden"))
+    return (landing_zone.sanitize_mapping(saved.get("mapping")), landing_zone.sanitize_mapping(saved.get("subscriptions")),
+            landing_zone.sanitize_hidden(saved.get("hidden")))
+
+
+def _tenant_names():
+    """(management group names, subscription names and ids), lower case, from the latest run; (None, None) when the
+    tenant is not known yet, in which case nothing can be checked."""
+    try:
+        governance = (_latest()[1] or {}).get("governance")
+    except Exception:
+        return None, None
+    if not governance:
+        return None, None
+    groups = {str(n).lower() for g in governance.get("managementGroups", []) for n in (g.get("name"), g.get("displayName")) if n}
+    subs = {str(n).lower() for s in governance.get("subscriptions", []) for n in (s.get("name"), s.get("id")) if n}
+    return groups, subs
 
 
 @app.post("/api/landing-zone-map")
 def api_landing_zone_map():
-    """Saves the names typed for each landing zone role and the boxes removed from the reference."""
+    """Saves the management groups and subscriptions typed for each landing zone role and the boxes removed from
+    the reference. A management group is only accepted for a box and a subscription only under it, never the other
+    way around."""
     if _cross_site():
         return jsonify(error="Forbidden"), 403
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
-    saved = {"mapping": landing_zone.sanitize_mapping(body.get("mapping")), "hidden": landing_zone.sanitize_hidden(body.get("hidden"))}
+    saved = {"mapping": landing_zone.sanitize_mapping(body.get("mapping")),
+             "subscriptions": landing_zone.sanitize_mapping(body.get("subscriptions")),
+             "hidden": landing_zone.sanitize_hidden(body.get("hidden"))}
+    groups, subs = _tenant_names()
+    if groups is not None:
+        wrong = [f"{name} is not a management group of your tenant" for _, name in landing_zone.rejected_names(saved["mapping"], groups)]
+        wrong += [f"{name} is not a subscription of your tenant" for _, name in landing_zone.rejected_names(saved["subscriptions"], subs)]
+        if wrong:
+            return jsonify(error="; ".join(wrong[:3]) + "."), 422
     try:
         data.save_setting(MAPPING_SETTING, saved)
     except Exception:

@@ -134,15 +134,18 @@ The Governance page matches each of your management groups to a role of the Azur
 
 Each match shows how it was made (name, policy, content or manual) when you hover a box and in the panel that opens when you click it.
 
-**Map it yourself in the page.** In the Governance page, click a box of the reference diagram. A small panel opens with a dropdown that offers every management group and subscription of your tenant (you can also type a name). Choose one and select **Map it**; the names you mapped show as chips you can remove. A subscription works too, which helps tenants without management groups: it appears under the box like the key icons of the reference diagram. Names that match nothing are flagged. **Remove this box** takes a box that does not apply to you out of the diagram and the count (a box takes its children with it); it can be put back from the chips below the diagram. **Reset everything** clears your names and brings the boxes back.
+**Map it yourself in the page.** In the Governance page, click a box of the reference diagram. A small panel opens with a dropdown that offers the management groups of your tenant (you can also type a name). Choose one and select **Map it**; what you mapped shows as chips you can remove. Management groups and subscriptions are never mixed: a box only takes management groups, and the **+ Subscription** slot under the boxes that hold subscriptions (like the key icons of the reference diagram) only takes subscriptions. Each dropdown offers one kind only, and the dashboard refuses a name of the wrong kind or one that does not exist in your tenant. Subscriptions help tenants without management groups. **Remove this box** takes a box that does not apply to you out of the diagram and the count (a box takes its children with it); it can be put back from the chips below the diagram. **Reset everything** clears your names and brings the boxes back.
 
 What you save is kept in the dashboard's database, so it survives new runs and restarts. Without dashboard sign-in, anyone with the URL can change it; it only affects how this page is drawn. With sign-in on, only the users you allowed can.
 
 **Or set it at deployment.** Fill the **Landing zone mapping** field of the form (Advanced) or the `LANDING_ZONE_MAP` setting of the dashboard App Service with a JSON object. Each role takes one name or id, or a list of them:
 
 ```json
-{"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio"}
+{"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio",
+ "subscriptions": {"connectivity": ["Hub subscription"]}}
 ```
+
+The top level maps management groups; the optional `subscriptions` key maps subscriptions, by name or id.
 
 Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. What is typed in the page replaces the deployment setting for that role. Changing the setting restarts the dashboard, and the mapping applies right away; no new run is needed.
 

@@ -107,12 +107,19 @@
           <text x="{{ n.cx }}" y="{{ n.y + 22 }}" text-anchor="middle">{{ n.label }}</text>
           {% if n.status == 'present' %}<circle class="lz-ok" cx="{{ n.x + n.width }}" cy="{{ n.y }}" r="8"></circle><path class="lz-tick" d="M{{ n.x + n.width - 4 }},{{ n.y }} l3,3 l5,-6"></path>{% endif %}
           {% for c in n.chips %}
-            <g class="lz-sub">
+            <g class="lz-sub{% if interactive and n.role not in ('root', 'intermediate') %} lz-click-sub{% endif %}"
+               {%- if interactive and n.role not in ('root', 'intermediate') %} data-lz-subs="{{ n.role }}" tabindex="0" role="button" aria-label="Subscriptions of {{ n.label }}"{% endif %}>
               <rect x="{{ c.x }}" y="{{ c.y }}" width="{{ c.width }}" height="22" rx="11"></rect>
               <circle class="lz-key" cx="{{ c.x + 12 }}" cy="{{ c.y + 11 }}" r="5"></circle>
               <text x="{{ c.x + 23 }}" y="{{ c.y + 15 }}">{{ c.label }}</text>
             </g>
           {% endfor %}
+          {% if n.add %}
+            <g class="lz-sub lz-add lz-click-sub" data-lz-subs="{{ n.role }}" tabindex="0" role="button" aria-label="Add a subscription to {{ n.label }}">
+              <rect x="{{ n.add.x }}" y="{{ n.add.y }}" width="{{ n.add.width }}" height="22" rx="11"></rect>
+              <text x="{{ n.cx }}" y="{{ n.add.y + 15 }}" text-anchor="middle">{{ n.add.label }}</text>
+            </g>
+          {% endif %}
           {% if n.more %}<text class="lz-more" x="{{ n.cx }}" y="{{ n.more.y + 15 }}" text-anchor="middle">{{ n.more.label }}</text>{% endif %}
         </g>
       {% endfor %}

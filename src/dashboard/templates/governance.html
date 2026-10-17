@@ -50,12 +50,14 @@
         <p class="muted">The recommended structure: platform subscriptions for shared services, workload landing zones for applications, plus sandbox and decommissioned groups. A box with a check was found in your tenant by name.</p>
         <p><strong>{{ alignment | selectattr('found') | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
         <div class="lz-wrap lz-map" id="lz-map" data-hidden="{{ removed | map(attribute='role') | join(',') }}"
-             data-rows='{{ alignment | tojson }}' data-mapping='{{ typed | tojson }}'>
+             data-rows='{{ alignment | tojson }}' data-mapping='{{ typed | tojson }}'
+             data-subscriptions='{{ typed_subscriptions | tojson }}'>
           {{ lz_diagram(reference, "Azure landing zone reference architecture", interactive=true) }}
           <div class="lz-pop" id="lz-pop" hidden role="dialog" aria-label="Map a box of the reference architecture"></div>
         </div>
-        <datalist id="lz-options">{% for name in options %}<option value="{{ name }}"></option>{% endfor %}</datalist>
-        <p class="muted">Click a box to map it to one of your management groups or subscriptions, or to remove it if it does not apply to you.</p>
+        <datalist id="lz-groups">{% for name in group_options %}<option value="{{ name }}"></option>{% endfor %}</datalist>
+        <datalist id="lz-subscriptions">{% for name in subscription_options %}<option value="{{ name }}"></option>{% endfor %}</datalist>
+        <p class="muted">Click a box to map it to one of your management groups, or the <strong>+ Subscription</strong> under it to add subscriptions. A box only takes management groups and the subscription slot only takes subscriptions. Remove a box that does not apply to you from its panel.</p>
         <p class="lz-actions">
           <button type="button" class="icon-button" id="lz-reset">Reset everything</button>
           <span class="muted" id="lz-status" role="status" aria-live="polite"></span>

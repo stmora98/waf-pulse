@@ -386,6 +386,11 @@ svg.lz { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 .lz-click rect:first-of-type { transition: stroke 150ms ease; }
 .lz-click:hover > rect:first-of-type, .lz-click:focus-visible > rect:first-of-type, .lz-click.selected > rect:first-of-type { stroke: var(--accent); stroke-width: 2.2; }
 .lz-click:focus-visible { outline: none; }
+.lz-click-sub { cursor: pointer; }
+.lz-click-sub:hover > rect, .lz-click-sub:focus-visible > rect, .lz-click-sub.selected > rect { stroke: var(--accent); stroke-width: 1.6; }
+.lz-click-sub:focus-visible { outline: none; }
+.lz-node .lz-add rect { fill: transparent; stroke-dasharray: 4 3; }
+.lz-node .lz-add text { fill: var(--muted); font-size: 11px; }
 .lz-pop { position: absolute; z-index: 10; width: 320px; max-width: calc(100% - 8px); background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-lift); padding: 14px; font-size: 0.9rem; }
 .lz-pop[hidden] { display: none; }

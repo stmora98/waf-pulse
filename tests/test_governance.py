@@ -295,16 +295,22 @@ def serve_governance(monkeypatch):
 
 def test_the_reference_boxes_are_clickable_and_carry_what_the_popover_needs(client, monkeypatch):
     serve_governance(monkeypatch)
-    settings_store(monkeypatch, {"mapping": {"sandbox": ["Loose sub", "Ghost"]}, "hidden": ["local"]})
+    settings_store(monkeypatch, {"mapping": {"sandbox": ["Ghost"]}, "subscriptions": {"sandbox": ["Loose sub"]}, "hidden": ["local"]})
     html = client.get("/governance").get_data(as_text=True)
     assert 'id="lz-map"' in html and 'data-hidden="local"' in html and 'id="lz-pop"' in html
     assert 'data-lz-box="platform"' in html and 'data-lz-box="sandbox"' in html and 'role="button"' in html
     assert 'data-lz-box="local"' not in html and 'data-lz-box="root"' not in html and 'data-lz-box="intermediate"' not in html
     assert html.count("data-lz-box=") == 10  # eleven boxes the tenant can map, minus the removed one
-    assert '<option value="&lt;b&gt;Prod&lt;/b&gt;">' in html and '<option value="Prod sub">' in html  # groups and subscriptions
+    assert 'data-lz-subs="sandbox"' in html and "+ Subscription" in html and 'data-lz-subs="local"' not in html
+    # Each dropdown offers one kind of item only.
+    groups = re.search(r'<datalist id="lz-groups">(.*?)</datalist>', html, re.S).group(1)
+    subs = re.search(r'<datalist id="lz-subscriptions">(.*?)</datalist>', html, re.S).group(1)
+    assert "&lt;b&gt;Prod&lt;/b&gt;" in groups and "Prod sub" not in groups and "Loose sub" not in groups
+    assert "Prod sub" in subs and "Loose sub" in subs and "Prod&lt;" not in subs
     rows = re.search(r"data-rows='([^']*)'", html).group(1)
-    assert "Loose sub (subscription)" in rows and "Ghost" in rows and "unmatched" in rows
-    assert "Loose sub" in re.search(r"data-mapping='([^']*)'", html).group(1)
+    assert "Loose sub" in rows and "Ghost" in rows and "unmatchedSubscriptions" in rows
+    assert "Loose sub" in re.search(r"data-subscriptions='([^']*)'", html).group(1)
+    assert "Ghost" in re.search(r"data-mapping='([^']*)'", html).group(1)
     assert 'data-lz-restore="local"' in html and 'id="lz-reset"' in html
     assert "<strong>2</strong> of 10 expected management groups found" in html  # landing zones by name, sandbox by subscription
     assert 'data-lz-role=' not in html and "Map your own names" not in html  # the list under the diagram is gone
@@ -318,9 +324,9 @@ def test_saving_the_mapping_needs_the_site_header_and_cleans_the_input(client, m
     assert store["value"] is None
     response = client.post("/api/landing-zone-map", json=body, headers={"X-WAF-Pulse": "1"})
     assert response.status_code == 200
-    assert store["value"] == {"mapping": {"platform": ["Plataforma", "x"]}, "hidden": ["local"]} == response.get_json()
+    assert store["value"] == {"mapping": {"platform": ["Plataforma", "x"]}, "subscriptions": {}, "hidden": ["local"]} == response.get_json()
     client.post("/api/landing-zone-map", data="not json", headers={"X-WAF-Pulse": "1"})
-    assert store["value"] == {"mapping": {}, "hidden": []}  # bad input clears instead of storing junk
+    assert store["value"] == {"mapping": {}, "subscriptions": {}, "hidden": []}  # bad input clears instead of storing junk
 
 
 def test_a_failing_store_is_reported_without_details(client, monkeypatch):
@@ -336,3 +342,27 @@ def test_the_page_still_renders_when_the_settings_cannot_be_read(client, monkeyp
     serve_governance(monkeypatch)
     monkeypatch.setattr(data, "get_setting", lambda name: (_ for _ in ()).throw(RuntimeError("down")))
     assert client.get("/governance").status_code == 200
+
+
+def test_a_name_of_the_wrong_kind_is_refused_and_nothing_is_saved(client, monkeypatch):
+    serve_governance(monkeypatch)
+    store = settings_store(monkeypatch)
+    headers = {"X-WAF-Pulse": "1"}
+    # "Prod sub" is a subscription: it cannot be mapped to a box, which takes management groups.
+    refused = client.post("/api/landing-zone-map", json={"mapping": {"sandbox": ["Prod sub"]}}, headers=headers)
+    assert refused.status_code == 422 and "Prod sub is not a management group" in refused.get_json()["error"]
+    # "Prod" is a management group: it cannot go in the subscription slot.
+    refused = client.post("/api/landing-zone-map", json={"subscriptions": {"sandbox": ["<b>Prod</b>"]}}, headers=headers)
+    assert refused.status_code == 422 and "is not a subscription" in refused.get_json()["error"]
+    assert store["value"] is None
+    ok = client.post("/api/landing-zone-map", headers=headers,
+                     json={"mapping": {"landingzones": ["<b>Prod</b>"]}, "subscriptions": {"sandbox": ["Loose sub", SUB2]}})
+    assert ok.status_code == 200 and store["value"]["subscriptions"] == {"sandbox": ["Loose sub", SUB2]}
+    assert client.post("/api/landing-zone-map", json={"mapping": {"landingzones": ["Anything"]}}, headers=headers).status_code == 422
+
+
+def test_without_a_known_tenant_nothing_can_be_checked_so_names_are_kept(client, monkeypatch):
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: None)
+    store = settings_store(monkeypatch)
+    response = client.post("/api/landing-zone-map", json={"mapping": {"sandbox": ["Anything"]}}, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 200 and store["value"]["mapping"] == {"sandbox": ["Anything"]}

@@ -140,13 +140,38 @@ def test_a_subscription_can_play_a_role_when_there_is_no_management_group_for_it
     assert [m["label"] for m in found["management"]] == ["Mgmt Sub"]  # an id works too
     assert [m["label"] for m in found["identity"]] == ["Mgmt Sub"]
     assert "Other" not in str(found)
-    assert lz.assign_subscriptions(subs, {"connectivity": {"hub sub"}}, taken={"hub sub"}) == {}  # a group has that name
-    combined = lz.merge_found({"platform": [{"label": "P", "how": "name"}]}, found)
-    assert set(combined) == {"platform", "connectivity", "management", "identity"}
-    reference = {n["label"]: n for n in lz.reference(combined, True)["nodes"]}
+    reference = {n["label"]: n for n in lz.reference({}, True, subscriptions=found)["nodes"]}
     assert [c["label"] for c in reference["Connectivity"]["chips"]] == ["Hub Sub"]  # shown under the box, like the image
-    row = {r["label"]: r for r in lz.alignment(combined)}["Connectivity"]
-    assert row["matches"] == ["Hub Sub (subscription)"]
+    assert reference["Connectivity"]["status"] == "present"
+    row = {r["label"]: r for r in lz.alignment({}, subscriptions=found)}["Connectivity"]
+    assert row["subscriptionMatches"] == ["Hub Sub"] and row["matches"] == [] and row["found"]
+
+
+def test_subscriptions_and_management_groups_never_match_each_other():
+    tree_ = [node("root", "Root", children=[node("mg-hub", "Hub", ["s1"])])]
+    subs = [{"id": "s1", "name": "Hub Sub"}]
+    # A subscription name typed as a management group does nothing, and the other way around.
+    _, found = lz.classify(tree_, {}, {}, {"sandbox": {"hub sub"}})
+    assert "sandbox" not in found
+    assert lz.assign_subscriptions(subs, {"sandbox": {"mg-hub", "hub"}}) == {}
+    assert lz.rejected_names({"sandbox": ["Hub Sub", "Hub"]}, {"hub"}) == [("sandbox", "Hub Sub")]
+    assert lz.rejected_names({}, {"hub"}) == []
+
+
+def test_only_the_boxes_that_hold_subscriptions_get_a_slot_and_only_when_interactive():
+    plain = {n["label"]: n for n in lz.reference({}, True)["nodes"]}
+    assert not any("add" in n for n in plain.values())
+    slots = {n["label"] for n in lz.reference({}, True, interactive=True)["nodes"] if "add" in n}
+    assert slots == {"Security", "Management", "Identity", "Connectivity", "Internal (Corp)", "Online", "Local",
+                     "Decommissioned", "Sandbox"}  # not Platform or the landing zones group: they only hold groups
+    assert not any("add" in n for n in lz.reference({}, True, hidden=["sandbox"], interactive=True)["nodes"] if n["label"] == "Sandbox")
+
+
+def test_the_subscriptions_key_of_the_deployment_setting_is_read_apart():
+    text = '{"connectivity": "mg-hub", "subscriptions": {"connectivity": ["Hub Sub"], "bogus": "x"}}'
+    assert lz.parse_override(text) == {"connectivity": {"mg-hub"}}
+    assert lz.parse_subscription_override(text) == {"connectivity": {"hub sub"}}
+    assert lz.parse_subscription_override("{bad") == {} and lz.parse_subscription_override('{"subscriptions": 3}') == {}
 
 
 def test_removed_boxes_leave_the_reference_and_the_count_but_can_be_put_back():
