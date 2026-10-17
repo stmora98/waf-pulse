@@ -1,0 +1,21 @@
+{% if summary.secureScore %}
+  <div class="panel">
+    <h3>Defender for Cloud Secure Score</h3>
+    {% if summary.secureScore.average is not none %}<p class="big">{{ summary.secureScore.average }}%<span class="muted"> average</span></p>{% endif %}
+    {% if summary.secureScore.subscriptions %}
+      <ul class="plain">
+        {% for sub in summary.secureScore.subscriptions[:5] %}
+          <li>{{ sub.name }}: <strong>{{ sub.percentage if sub.percentage is not none else 'n/a' }}{% if sub.percentage is not none %}%{% endif %}</strong></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if summary.secureScore.topControls %}
+      <h4>Controls with the most unhealthy resources</h4>
+      <ul class="plain">
+        {% for control in summary.secureScore.topControls[:5] %}
+          <li>{{ control.control }} <span class="muted">· {{ control.unhealthy }} unhealthy</span></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% endif %}

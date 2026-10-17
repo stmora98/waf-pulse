@@ -110,6 +110,19 @@ az ad app update --id <client-id> \
 - To change who has access later, edit **App Service > Authentication**, or redeploy with a new list.
 - To turn it off again, redeploy with **None**, or disable authentication in the App Service.
 - The `/api/health` path stays anonymous for the health probe. It returns no data.
+## Dashboard pages
+
+Modeled on the Azure Optimization Engine reports: an overview, one page per Well-Architected pillar and drill-through to each recommendation.
+
+| Page | What it shows |
+|---|---|
+| **Overview** | Score and finding count per pillar, findings by pillar and severity, by source, resource types and resources with the most findings, and the top recommendations. |
+| **Security, Reliability, Cost, Performance, Operations** | Score, severity counts, charts, the recommendations of that pillar grouped by rule (searchable) and the insights that belong to it: Defender secure score, Entra and Key Vault for Security, Advisor savings and right-sizing for Cost, diagnostic settings for Operations. |
+| **Recommendation** | Select any recommendation to see what to do, the documentation link, every affected resource and how many resources it affected in each earlier run. |
+| **Spend** | Billed and effective cost, daily anomalies, budgets and reservation options. |
+| **Governance** | Management groups, policy, access, locks, diagnostics, Key Vault and Entra. |
+| **History** | Runs, score trend and what changed between two runs. |
+| **All findings** | The flat list with pillar, source and severity filters (`/findings`). |
 ## Refresh modes
 
 | Mode | Behavior |

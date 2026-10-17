@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import hbar_chart, stacked_chart, severity_legend, recommendations_table %}
 {% block content %}
     {% if error %}
       <section class="notice error">{{ error }}</section>
@@ -21,122 +22,45 @@
       <section class="cards">
         {% for pillar in pillars %}
           {% set score = summary.scores.get(pillar) %}
+          {% set counts = (summary.counts or {}).get(pillar, {}) %}
           <a class="card {% if score is none %}na{% elif score >= 80 %}good{% elif score >= 50 %}warn{% else %}bad{% endif %}"
-             href="{{ url_for('index', pillar=pillar, severity=selected_severity, source=selected_source) }}">
+             href="{{ url_for('pillar_page', slug=slugs[pillar]) }}">
             <span class="card-title">{{ pillar }}</span>
             <span class="card-score">{% if score is none %}n/a{% else %}{{ score }}{% endif %}</span>
-            {% if score is none %}<span class="muted">Not evaluated</span>{% endif %}
+            <span class="muted">{% if score is none %}Not evaluated{% else %}{{ (counts.values() | sum) }} findings{% if counts.get('critical') or counts.get('high') %} · {{ (counts.get('critical', 0) + counts.get('high', 0)) }} critical or high{% endif %}{% endif %}</span>
           </a>
         {% endfor %}
       </section>
 
-      {% if summary.sources %}
-        <section class="severity">
-          <span class="muted">Source</span>
-          {% for source in sources %}
-            {% if summary.sources.get(source) %}
-              <a class="chip {% if selected_source == source %}active{% endif %}"
-                 href="{{ url_for('index', pillar=selected_pillar, severity=selected_severity, source=source) }}"
-                 title="{{ summary.sources[source].rules }} checks evaluated">
-                {{ source_labels[source] }}: {{ summary.sources[source].findings }}
-              </a>
-            {% endif %}
-          {% endfor %}
-        </section>
-      {% endif %}
-
-      <section class="severity">
-        <span class="muted">Severity</span>
-        {% for severity in severities %}
-          <a class="chip {{ severity }} {% if selected_severity == severity %}active{% endif %}"
-             href="{{ url_for('index', pillar=selected_pillar, severity=severity, source=selected_source) }}">
-            {{ severity }}: {{ summary.severityTotals.get(severity, 0) }}
-          </a>
-        {% endfor %}
-        {% if selected_pillar or selected_severity or selected_source %}<a class="chip clear" href="{{ url_for('index') }}">Clear filters</a>{% endif %}
+      {% if partial %}<p class="muted">Charts show the first {{ cap }} findings of the run.</p>{% endif %}
+      <section class="insights two">
+        <div class="panel">
+          <h3>Findings by pillar and severity</h3>
+          {{ stacked_chart(pillar_chart, "Findings by pillar and severity") }}
+          {{ severity_legend() }}
+        </div>
+        <div class="panel">
+          <h3>Findings by source</h3>
+          {{ hbar_chart(source_chart, "Findings by source") }}
+        </div>
       </section>
 
-      {% if summary.secureScore or summary.advisorSavings or summary.metrics %}
-        <section class="insights">
-          {% if summary.secureScore %}
-            <div class="panel">
-              <h3>Defender for Cloud Secure Score</h3>
-              {% if summary.secureScore.average is not none %}<p class="big">{{ summary.secureScore.average }}%<span class="muted"> average</span></p>{% endif %}
-              {% if summary.secureScore.subscriptions %}
-                <ul class="plain">
-                  {% for sub in summary.secureScore.subscriptions[:5] %}
-                    <li>{{ sub.name }}: <strong>{{ sub.percentage if sub.percentage is not none else 'n/a' }}{% if sub.percentage is not none %}%{% endif %}</strong></li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
-              {% if summary.secureScore.topControls %}
-                <h4>Controls with the most unhealthy resources</h4>
-                <ul class="plain">
-                  {% for control in summary.secureScore.topControls[:5] %}
-                    <li>{{ control.control }} <span class="muted">· {{ control.unhealthy }} unhealthy</span></li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
-            </div>
-          {% endif %}
-          {% if summary.advisorSavings %}
-            <div class="panel">
-              <h3>Azure Advisor potential savings</h3>
-              {% for currency, amount in summary.advisorSavings.items() %}
-                <p class="big">{{ '{:,.0f}'.format(amount) }} {{ currency }}<span class="muted"> per year</span></p>
-              {% endfor %}
-              <p class="muted">Sum of the annual savings of the cost recommendations.</p>
-            </div>
-          {% endif %}
-          {% if summary.metrics %}
-            <div class="panel">
-              <h3>Right-sizing · last {{ summary.metrics.lookbackDays }} days</h3>
-              <p class="muted">Resources measured with Azure Monitor:
-                {% for kind, label in [('vm', 'VMs'), ('sql_dtu', 'SQL DTU'), ('sql_vcore', 'SQL vCore'), ('plan', 'App Service plans'), ('storage', 'Storage')] %}
-                  {% if summary.metrics.measured.get(kind) %}{{ label }} {{ summary.metrics.measured[kind] }} · {% endif %}
-                {% endfor %}
-              </p>
-              {% if summary.metrics.topUnderutilized %}
-                <h4>Idle or underutilized</h4>
-                <ul class="plain">
-                  {% for item in summary.metrics.topUnderutilized[:5] %}<li>{{ item.name }} <span class="muted">· {{ item.detail }} · {{ item.value }}</span></li>{% endfor %}
-                </ul>
-              {% endif %}
-              {% if summary.metrics.topSaturated %}
-                <h4>Saturated</h4>
-                <ul class="plain">
-                  {% for item in summary.metrics.topSaturated[:5] %}<li>{{ item.name }} <span class="muted">· {{ item.detail }} · {{ item.value }}%</span></li>{% endfor %}
-                </ul>
-              {% endif %}
-              {% if not summary.metrics.topUnderutilized and not summary.metrics.topSaturated %}<p class="muted">No idle or saturated resources.</p>{% endif %}
-            </div>
-          {% endif %}
-        </section>
-      {% endif %}
+      <section class="panel">
+        <h3>Top recommendations</h3>
+        <p class="muted">The most severe and most widespread. Select one to see every affected resource.</p>
+        {{ recommendations_table(top_rules, source_labels) }}
+        <p><a href="{{ url_for('findings_page') }}">All findings</a></p>
+      </section>
 
-      <section>
-        <h2>Findings{% if selected_pillar %} · {{ selected_pillar }}{% endif %}{% if selected_severity %} · {{ selected_severity }}{% endif %}{% if selected_source %} · {{ source_labels[selected_source] }}{% endif %}</h2>
-        {% if findings %}
-          <div class="table-wrap">
-          <table>
-            <thead><tr><th>Severity</th><th>Pillar</th><th>Finding</th><th>Resource</th><th>Source</th></tr></thead>
-            <tbody>
-              {% for f in findings %}
-                <tr>
-                  <td><span class="chip {{ f.severity }}">{{ f.severity }}</span></td>
-                  <td>{{ f.pillar }}</td>
-                  <td>{{ f.title }}{% if f.link and f.link.startswith('https://') %} <a href="{{ f.link }}" rel="noopener noreferrer" target="_blank">Docs</a>{% endif %}</td>
-                  <td><span title="{{ f.resourceId }}">{{ f.resourceName }}</span></td>
-                  <td>{{ source_labels.get(f.source, f.source or 'Built-in rules') }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          </div>
-          <p class="muted">Showing up to 200 findings, most severe first.</p>
-        {% else %}
-          <p class="muted">No findings for this filter.</p>
-        {% endif %}
+      <section class="insights two">
+        <div class="panel">
+          <h3>Resource types with the most findings</h3>
+          {{ hbar_chart(type_chart, "Resource types with the most findings") }}
+        </div>
+        <div class="panel">
+          <h3>Resources with the most findings</h3>
+          {{ hbar_chart(resource_chart, "Resources with the most findings") }}
+        </div>
       </section>
 
       <section>

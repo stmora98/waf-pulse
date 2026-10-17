@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Recommendation · WAF Pulse{% endblock %}
+{% block content %}
+    <p><a href="{{ back }}">&larr; Back</a></p>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not rule %}
+      <section class="notice">This recommendation has no findings in the latest run.</section>
+    {% else %}
+      <h2>{{ rule.title }}</h2>
+      <section class="meta">
+        <span class="chip {{ rule.severity }}">{{ rule.severity }}</span>
+        <span>{{ rule.pillar }}</span>
+        <span>{{ source_labels.get(rule.source, rule.source) }}</span>
+        <span>Rule <code>{{ rule.ruleId }}</code></span>
+        <span><strong>{{ rule.resources }}</strong> resource(s) in <strong>{{ rule.subscriptions }}</strong> subscription(s)</span>
+      </section>
+      <section class="panel">
+        <h3>What to do</h3>
+        <p>{{ rule.recommendation }}</p>
+        {% if rule.link and rule.link.startswith('https://') %}<p><a href="{{ rule.link }}" rel="noopener noreferrer" target="_blank">Documentation</a></p>{% endif %}
+      </section>
+      {% if spark and spark.dots | length > 1 %}
+        <section class="panel">
+          <h3>History</h3>
+          <p class="muted">Affected resources in each run that still has its findings.</p>
+          <svg class="chart" viewBox="0 0 {{ spark.width }} {{ spark.height }}" role="img" aria-label="Affected resources per run">
+            <polyline class="line line-security" points="{{ spark.line }}"></polyline>
+            {% for dot in spark.dots %}<circle class="dot" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3.5"><title>{{ dot.label }}: {{ dot.value }}</title></circle>{% endfor %}
+          </svg>
+        </section>
+      {% endif %}
+      <section>
+        <h3>Affected resources</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Resource</th><th>Type</th><th>Subscription</th></tr></thead>
+            <tbody>
+              {% for f in resources %}
+                <tr>
+                  <td>{{ f.resourceName }}<br><span class="muted">{{ f.resourceId }}</span></td>
+                  <td>{{ f.resourceType }}</td>
+                  <td><span class="muted">{{ f.subscriptionId }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if truncated %}<p class="muted">Showing the first {{ resources | length }} resources.</p>{% endif %}
+      </section>
+    {% endif %}
+{% endblock %}

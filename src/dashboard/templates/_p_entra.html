@@ -1,0 +1,38 @@
+{% if summary and summary.entra %}
+<div class="panel">
+  <h3>App registration credentials</h3>
+  {% if summary.entra.available.apps %}
+    <p class="muted">{{ summary.entra.apps.withCredentials }} of {{ summary.entra.apps.apps }} app registrations have secrets or certificates.</p>
+    {% if summary.entra.apps.expiredOrExpiring %}
+      <h4>Expired or expiring within 30 days</h4>
+      <ul class="plain">
+        {% for item in summary.entra.apps.expiredOrExpiring %}
+          <li>{{ item.app }} <span class="muted">· {{ item.kind }} · {% if item.days < 0 %}expired {{ -item.days }} days ago{% else %}in {{ item.days }} days{% endif %}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No credential is expired or about to expire.</p>
+    {% endif %}
+  {% else %}
+    <p class="muted">Not available. Grant the Microsoft Graph application permission {{ summary.entra.permissions.apps }} to the collector.</p>
+  {% endif %}
+</div>
+<div class="panel">
+  <h3>Guest users</h3>
+  {% if summary.entra.available.guests %}
+    <p class="big">{{ summary.entra.guests.total }}</p>
+    <p class="muted">{{ summary.entra.guests.pendingInvitations }} invitation(s) not accepted, {{ summary.entra.guests.staleInvitations }} of them older than 30 days.</p>
+  {% else %}
+    <p class="muted">Not available. Grant the Microsoft Graph application permission {{ summary.entra.permissions.guests }} to the collector.</p>
+  {% endif %}
+</div>
+<div class="panel">
+  <h3>Defender XDR incidents</h3>
+  {% if summary.entra.available.incidents %}
+    <p class="big">{{ summary.entra.incidents.open }}</p>
+    <p class="muted">open incident(s){% for severity, count in summary.entra.incidents.bySeverity.items() %} · {{ count }} {{ severity }}{% endfor %}</p>
+  {% else %}
+    <p class="muted">Not available. Grant the Microsoft Graph application permission {{ summary.entra.permissions.incidents }} to the collector.</p>
+  {% endif %}
+</div>
+{% endif %}

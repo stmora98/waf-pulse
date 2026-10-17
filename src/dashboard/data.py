@@ -91,6 +91,36 @@ def findings(run_id, pillar=None, severity=None, limit=200, source=None):
     return results
 
 
+FINDING_FIELDS = ("c.id, c.key, c.ruleId, c.source, c.pillar, c.severity, c.title, c.recommendation, c.resourceId, "
+                  "c.resourceName, c.resourceType, c.subscriptionId, c.link")
+MAX_FINDINGS = 5000
+
+
+def all_findings(run_id, pillar=None, rule_id=None, limit=MAX_FINDINGS):
+    """Every finding of a run (up to `limit`), optionally for one pillar or one rule, without system fields."""
+    query = f"SELECT {FINDING_FIELDS} FROM c WHERE c.runId = @run"
+    parameters = [{"name": "@run", "value": run_id}]
+    if pillar in PILLARS:
+        query += " AND c.pillar = @pillar"
+        parameters.append({"name": "@pillar", "value": pillar})
+    if rule_id:
+        query += " AND c.ruleId = @rule"
+        parameters.append({"name": "@rule", "value": rule_id})
+    query += " OFFSET 0 LIMIT @limit"
+    parameters.append({"name": "@limit", "value": limit})
+    items = _db().get_container_client("findings").query_items(query, parameters=parameters, partition_key=run_id)
+    return [dict(item) for item in items]
+
+
+def rule_history(rule_id):
+    """How many findings a rule had in each run that still has findings: {run id: count}."""
+    items = _db().get_container_client("findings").query_items(
+        "SELECT c.runId, COUNT(1) AS n FROM c WHERE c.ruleId = @rule GROUP BY c.runId",
+        parameters=[{"name": "@rule", "value": rule_id}],
+        enable_cross_partition_query=True,
+    )
+    return {item["runId"]: item["n"] for item in items}
+
 def history(limit=30):
     """Most recent runs first."""
     items = _db().get_container_client("runs").query_items(

@@ -26,3 +26,16 @@
       });
   });
 })();
+
+(function () {
+  var input = document.querySelector("[data-filter-table]");
+  if (!input) { return; }
+  var table = document.getElementById(input.getAttribute("data-filter-table"));
+  if (!table) { return; }
+  input.addEventListener("input", function () {
+    var needle = input.value.trim().toLowerCase();
+    Array.prototype.forEach.call(table.tBodies[0].rows, function (row) {
+      row.hidden = needle !== "" && row.textContent.toLowerCase().indexOf(needle) === -1;
+    });
+  });
+})();

@@ -1,0 +1,58 @@
+{% macro hbar_chart(chart, label) %}
+  <svg class="chart hbars" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ label }}">
+    {% for row in chart.rows %}
+      {% if row.href %}<a href="{{ row.href }}">{% endif %}
+      <g>
+        <title>{{ row.full }}: {{ row.value }}</title>
+        <text class="axis label" x="0" y="{{ row.y + chart.text_y }}">{{ row.label }}</text>
+        <rect class="bar" x="{{ chart.label_width }}" y="{{ row.y + 5 }}" width="{{ row.bar }}" height="{{ chart.bar_height }}" rx="3"></rect>
+        <text class="axis value" x="{{ chart.label_width + row.bar + 6 }}" y="{{ row.y + chart.text_y }}">{{ row.value }}</text>
+      </g>
+      {% if row.href %}</a>{% endif %}
+    {% endfor %}
+  </svg>
+{% endmacro %}
+
+{% macro stacked_chart(chart, label) %}
+  <svg class="chart hbars" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ label }}">
+    {% for row in chart.rows %}
+      {% if row.href %}<a href="{{ row.href }}">{% endif %}
+      <g>
+        <text class="axis label" x="0" y="{{ row.y + chart.text_y }}">{{ row.label }}</text>
+        {% for seg in row.segments %}
+          <rect class="seg seg-{{ seg.level }}" x="{{ seg.x }}" y="{{ row.y + 6 }}" width="{{ seg.width }}" height="{{ chart.bar_height }}"><title>{{ seg.level }}: {{ seg.count }}</title></rect>
+        {% endfor %}
+        <text class="axis value" x="{{ row.end }}" y="{{ row.y + chart.text_y }}">{{ row.total }}</text>
+      </g>
+      {% if row.href %}</a>{% endif %}
+    {% endfor %}
+  </svg>
+{% endmacro %}
+
+{% macro severity_legend() %}
+  <ul class="legend">
+    <li><span class="swatch seg-critical"></span>Critical</li>
+    <li><span class="swatch seg-high"></span>High</li>
+    <li><span class="swatch seg-medium"></span>Medium</li>
+    <li><span class="swatch seg-low"></span>Low</li>
+  </ul>
+{% endmacro %}
+
+{% macro recommendations_table(rows, source_labels, filter=false) %}
+  {% if filter %}<p class="filter"><label>Filter <input type="search" id="rec-filter" data-filter-table="recs" placeholder="Type to filter recommendations" autocomplete="off"></label></p>{% endif %}
+  <div class="table-wrap">
+    <table id="recs">
+      <thead><tr><th>Severity</th><th>Recommendation</th><th>Source</th><th>Resources</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><span class="chip {{ r.severity }}">{{ r.severity }}</span></td>
+            <td><a href="{{ url_for('rule_page', rule_id=r.ruleId) }}">{{ r.title }}</a></td>
+            <td>{{ source_labels.get(r.source, r.source) }}</td>
+            <td>{{ r.resources }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}

@@ -232,7 +232,7 @@ def test_every_target_has_rules_and_a_query():
 
 # --- dashboard ------------------------------------------------------------------------------------------
 
-def test_overview_renders_the_right_sizing_panel(monkeypatch):
+def test_pillar_pages_render_the_right_sizing_panel(monkeypatch):
     dashboard_app.app.config.update(TESTING=True)
     client = dashboard_app.app.test_client()
     summary = {
@@ -247,9 +247,8 @@ def test_overview_renders_the_right_sizing_panel(monkeypatch):
     }
     monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
     monkeypatch.setattr(data, "summary", lambda run_id: summary)
-    monkeypatch.setattr(data, "findings", lambda *a, **k: [])
-    html = client.get("/").get_data(as_text=True)
+    monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
+    html = client.get("/pillar/performance").get_data(as_text=True)
     assert "Right-sizing" in html and "VMs 4" in html and "busy-vm" in html
     assert "<i>idle-vm</i>" not in html and "&lt;i&gt;idle-vm&lt;/i&gt;" in html
-    assert "Azure Monitor metrics: 1" in html
-    assert "<h2>Findings" in html and "<h2>Subscriptions" in html  # the rest of the page is intact
+    assert "Right-sizing" in client.get("/pillar/cost").get_data(as_text=True)

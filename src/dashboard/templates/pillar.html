@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_macros.html" import hbar_chart, severity_legend, recommendations_table %}
+{% block title %}{{ pillar }} · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>{{ pillar }}</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not summary %}
+      <section class="notice">No assessment has completed yet. Select <strong>Refresh now</strong> to start the first one.</section>
+    {% else %}
+      {% set score = summary.scores.get(pillar) %}
+      <section class="cards">
+        <div class="card {% if score is none %}na{% elif score >= 80 %}good{% elif score >= 50 %}warn{% else %}bad{% endif %}">
+          <span class="card-title">{{ pillar }} score</span>
+          <span class="card-score">{% if score is none %}n/a{% else %}{{ score }}{% endif %}</span>
+          <span class="muted">out of 100</span>
+        </div>
+        {% for level in severities %}
+          <div class="card {{ 'bad' if level in ('critical', 'high') and totals[level] else 'na' }}">
+            <span class="card-title">{{ level | capitalize }}</span>
+            <span class="card-score">{{ totals[level] }}</span>
+            <span class="muted">finding(s)</span>
+          </div>
+        {% endfor %}
+      </section>
+      {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
+
+      {% if rules %}
+        <section class="insights two">
+          <div class="panel">
+            <h3>By source</h3>
+            {{ hbar_chart(source_chart, "Findings by source") }}
+          </div>
+          <div class="panel">
+            <h3>By resource type</h3>
+            {{ hbar_chart(type_chart, "Findings by resource type") }}
+          </div>
+        </section>
+      {% endif %}
+
+      <section class="insights">
+        {% if slug == 'security' %}
+          {% include "_p_securescore.html" %}
+          {% include "_p_entra.html" %}
+          {% include "_p_keyvault.html" %}
+        {% elif slug == 'cost' %}
+          {% include "_p_advisor.html" %}
+          {% include "_p_rightsizing.html" %}
+          <div class="panel"><h3>Spend and budgets</h3><p class="muted">Monthly cost, anomalies, budgets and reservation options.</p><p><a href="{{ url_for('cost_page') }}">Open the Spend page</a></p></div>
+        {% elif slug == 'performance' %}
+          {% include "_p_rightsizing.html" %}
+        {% elif slug == 'operations' %}
+          {% include "_p_diagnostics.html" %}
+          <div class="panel"><h3>Governance</h3><p class="muted">Management groups, policy, access and locks.</p><p><a href="{{ url_for('governance_page') }}">Open the Governance page</a></p></div>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h3>Recommendations</h3>
+        {% if rules %}
+          {{ recommendations_table(rules, source_labels, filter=true) }}
+        {% else %}
+          <p class="muted">No findings for this pillar in the last run.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+{% endblock %}

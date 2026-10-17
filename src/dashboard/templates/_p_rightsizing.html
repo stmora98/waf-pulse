@@ -1,0 +1,23 @@
+{% if summary.metrics %}
+  <div class="panel">
+    <h3>Right-sizing · last {{ summary.metrics.lookbackDays }} days</h3>
+    <p class="muted">Resources measured with Azure Monitor:
+      {% for kind, label in [('vm', 'VMs'), ('sql_dtu', 'SQL DTU'), ('sql_vcore', 'SQL vCore'), ('plan', 'App Service plans'), ('storage', 'Storage')] %}
+        {% if summary.metrics.measured.get(kind) %}{{ label }} {{ summary.metrics.measured[kind] }} · {% endif %}
+      {% endfor %}
+    </p>
+    {% if summary.metrics.topUnderutilized %}
+      <h4>Idle or underutilized</h4>
+      <ul class="plain">
+        {% for item in summary.metrics.topUnderutilized[:5] %}<li>{{ item.name }} <span class="muted">· {{ item.detail }} · {{ item.value }}</span></li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% if summary.metrics.topSaturated %}
+      <h4>Saturated</h4>
+      <ul class="plain">
+        {% for item in summary.metrics.topSaturated[:5] %}<li>{{ item.name }} <span class="muted">· {{ item.detail }} · {{ item.value }}%</span></li>{% endfor %}
+      </ul>
+    {% endif %}
+    {% if not summary.metrics.topUnderutilized and not summary.metrics.topSaturated %}<p class="muted">No idle or saturated resources.</p>{% endif %}
+  </div>
+{% endif %}

@@ -13,12 +13,14 @@
       <p class="muted">Well-Architected assessment of your Azure tenant</p>
     </div>
     <div class="actions">
-      <nav class="nav" aria-label="Sections">
-        <a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active" aria-current="page"{% endif %}>Overview</a>
-        <a href="{{ url_for('history_page') }}" {% if request.endpoint == 'history_page' %}class="active" aria-current="page"{% endif %}>History</a>
-        <a href="{{ url_for('compare_page') }}" {% if request.endpoint == 'compare_page' %}class="active" aria-current="page"{% endif %}>Compare</a>
+<nav class="nav" aria-label="Sections">
+        <a href="{{ url_for('index') }}" {% if request.endpoint in ('index', 'findings_page', 'rule_page') %}class="active" aria-current="page"{% endif %}>Overview</a>
+        {% for slug, page in nav_pillars %}
+          <a href="{{ url_for('pillar_page', slug=slug) }}" {% if request.endpoint == 'pillar_page' and request.view_args.slug == slug %}class="active" aria-current="page"{% endif %}>{{ page[1] }}</a>
+        {% endfor %}
+        <a href="{{ url_for('cost_page') }}" {% if request.endpoint == 'cost_page' %}class="active" aria-current="page"{% endif %}>Spend</a>
         <a href="{{ url_for('governance_page') }}" {% if request.endpoint == 'governance_page' %}class="active" aria-current="page"{% endif %}>Governance</a>
-        <a href="{{ url_for('cost_page') }}" {% if request.endpoint == 'cost_page' %}class="active" aria-current="page"{% endif %}>Cost</a>
+        <a href="{{ url_for('history_page') }}" {% if request.endpoint in ('history_page', 'compare_page') %}class="active" aria-current="page"{% endif %}>History</a>
       </nav>
       {% if user %}<span class="muted">{{ user }}</span>{% endif %}
       <button id="refresh" type="button">Refresh now</button>

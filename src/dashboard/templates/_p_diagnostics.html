@@ -1,0 +1,15 @@
+{% if summary.diagnostics %}
+  <div class="panel">
+    <h3>Diagnostic settings</h3>
+    {% if summary.diagnostics.checked %}
+      <p class="big">{{ summary.diagnostics.percent }}%</p>
+      <p class="muted">{{ summary.diagnostics.withLogs }} of {{ summary.diagnostics.checked }} resources send logs somewhere.</p>
+      <ul class="plain">
+        {% for item in summary.diagnostics.byType %}{% if item.checked > item.withLogs %}<li>{{ item.label }} <span class="muted">· {{ item.checked - item.withLogs }} of {{ item.checked }} without</span></li>{% endif %}{% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No resource of the supported types was found.</p>
+    {% endif %}
+    {% if summary.diagnostics.skipped.denied %}<p class="muted">{{ summary.diagnostics.skipped.denied }} resource(s) could not be read.</p>{% endif %}
+  </div>
+{% endif %}

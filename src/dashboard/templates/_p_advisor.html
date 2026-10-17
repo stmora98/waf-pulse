@@ -1,0 +1,9 @@
+{% if summary.advisorSavings %}
+  <div class="panel">
+    <h3>Azure Advisor potential savings</h3>
+    {% for currency, amount in summary.advisorSavings.items() %}
+      <p class="big">{{ '{:,.0f}'.format(amount) }} {{ currency }}<span class="muted"> per year</span></p>
+    {% endfor %}
+    <p class="muted">Sum of the annual savings of the cost recommendations.</p>
+  </div>
+{% endif %}
