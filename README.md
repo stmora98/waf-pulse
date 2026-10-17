@@ -121,7 +121,7 @@ Modeled on the Azure Optimization Engine reports: an overview, one page per Well
 | **Security, Reliability, Cost, Performance, Operations** | Score, severity counts, charts, and the insights that belong to it: Defender for Cloud coverage by plan and tier, the Secure Score controls, Entra and Key Vault for Security, diagnostic settings for Operations. **Cost** also holds the spend, laid out like the [FinOps hub dashboard](https://learn.microsoft.com/cloud-computing/finops/toolkit/hubs/finops-hubs-overview): summary cards, monthly trends by service, resource group, region and resource type, the most expensive resources, daily spend, anomalies and running total, cost by pricing model and commitment coverage, reservation and savings plan options, budgets and subscriptions. |
 | **Right-sizing** | Charts of how many virtual machines, SQL databases, App Service plans and storage accounts are idle, underutilized, right-sized or saturated. Select a bar to list the resources with their size, average and maximum CPU, resource group and assessment. |
 | **Action item detail** | Select any action item to see what to do, the documentation link, every affected resource and how many resources it affected in each earlier run. |
-| **Governance** | Management groups, policy, access, locks, diagnostics, Key Vault and Entra. |
+| **Governance** | The management group hierarchy drawn as a landing zone diagram (each group with its subscriptions), next to the Azure landing zone reference architecture with the groups your tenant already has marked, plus policy, access, locks, Defender, diagnostics, Key Vault and Entra. |
 | **History** | Runs, score trend and what changed between two runs. |
 ## Refresh modes
 

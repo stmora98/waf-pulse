@@ -203,8 +203,10 @@ def test_governance_page_renders_and_escapes(client, monkeypatch):
     monkeypatch.setattr(data, "summary", lambda run_id: {"runId": "r1", "governance": GOVERNANCE})
     html = client.get("/governance").get_data(as_text=True)
     assert "Require tags" in html and "Prod sub" in html and "Loose sub" in html
-    assert "Subscriptions without a visible management group" in html
+    assert "No visible management group" in html and "Your management group hierarchy" in html
     assert "<b>Prod</b>" not in html and "&lt;b&gt;Prod&lt;/b&gt;" in html
+    assert "Alignment with the Azure landing zone reference" in html and "of 11 expected management groups found" in html
+    assert html.count('class="lz-node') >= 15 and "Only the tenant root group is visible" not in html
     assert "1/2" in html and "1 of 2 plan(s) enabled" in html
 
 

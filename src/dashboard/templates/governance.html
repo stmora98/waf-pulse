@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import lz_diagram %}
 {% block title %}Governance · WAF Pulse{% endblock %}
 
 {% macro render_group(node) %}
@@ -31,18 +32,28 @@
       </section>
 
       <section class="panel">
-        <h3>Management groups and subscriptions</h3>
-        {% if tree %}
-          <ul class="tree">{% for root in tree %}{{ render_group(root) }}{% endfor %}</ul>
-        {% else %}
-          <p class="muted">No management group hierarchy is visible to the service principal.</p>
-        {% endif %}
-        {% if unassigned %}
-          <h4>Subscriptions without a visible management group</h4>
-          <ul class="plain">{% for sub in unassigned %}<li>{{ sub.name }} <span class="muted">{{ sub.id }}</span></li>{% endfor %}</ul>
+        <h3>Your management group hierarchy</h3>
+        <div class="lz-legend">
+          <span class="muted">Azure Policy: <strong>{{ governance.policy.assignments }}</strong> assignments</span>
+          <span class="muted">Azure RBAC: <strong>{{ governance.rbac.assignments }}</strong> role assignments</span>
+          <span class="muted">Management groups: <strong>{{ governance.managementGroups | length }}</strong></span>
+          <span class="muted">Subscriptions: <strong>{{ governance.subscriptions | length }}</strong></span>
+        </div>
+        {{ lz_diagram(hierarchy, "Management group hierarchy") }}
+        {% if not has_hierarchy %}
+          <p class="muted">Only the tenant root group is visible. Either no management groups were created, or the service principal lacks Reader on the root management group, which is needed to see them.</p>
         {% endif %}
       </section>
 
+      <section class="panel">
+        <h3>Alignment with the Azure landing zone reference</h3>
+        <p class="muted">The recommended structure: platform subscriptions for shared services, workload landing zones for applications, plus sandbox and decommissioned groups. A box with a check was found in your tenant by name.</p>
+        <p><strong>{{ alignment | selectattr(1) | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
+        {{ lz_diagram(reference, "Azure landing zone reference architecture") }}
+        <ul class="align-list">
+          {% for label, found in alignment %}<li class="{{ 'yes' if found else 'no' }}">{{ label }}</li>{% endfor %}
+        </ul>
+      </section>
       <section class="insights">
         <div class="panel">
           <h3>Azure Policy</h3>

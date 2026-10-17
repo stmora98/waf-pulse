@@ -13,6 +13,7 @@ import data
 import governance_view
 import history
 import insights
+import landing_zone
 import rightsizing
 
 app = Flask(__name__)
@@ -358,8 +359,18 @@ def governance_page():
         tree = governance_view.build_tree(governance.get("managementGroups", []), governance.get("subscriptions", []))
         unassigned = governance_view.subscriptions_outside_groups(
             governance.get("managementGroups", []), governance.get("subscriptions", []))
+    diagrams = {}
+    if governance:
+        names = {sub["id"]: sub.get("name") or sub["id"] for sub in governance.get("subscriptions", [])}
+        roles = landing_zone.present_roles(tree)
+        has_hierarchy = any(node.get("children") for node in tree)
+        diagrams = {
+            "hierarchy": landing_zone.actual(tree, governance.get("subscriptions", []), names, unassigned),
+            "reference": landing_zone.reference(roles, has_hierarchy),
+            "alignment": landing_zone.alignment(roles), "has_hierarchy": has_hierarchy,
+        }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
-                           summary=summary)
+                           summary=summary, **diagrams)
 
 
 @app.get("/cost")
