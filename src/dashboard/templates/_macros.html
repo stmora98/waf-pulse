@@ -56,3 +56,40 @@
     </table>
   </div>
 {% endmacro %}
+
+{% macro stacked_columns(chart, label) %}
+  <svg class="chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="{{ label }}">
+    {% for g in chart.grid %}
+      <line class="grid" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+      <text class="axis" x="{{ chart.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+    {% endfor %}
+    {% for bar in chart.bars %}
+      <g class="column {% if bar.partial %}partial{% endif %}">
+        <title>{{ bar.label }}: {{ '{:,.0f}'.format(bar.total) }}{% if bar.partial %} (in progress){% endif %}</title>
+        {% for seg in bar.segments %}
+          <rect class="col-{{ seg.color }}" x="{{ bar.x }}" y="{{ seg.y }}" width="{{ bar.width }}" height="{{ seg.height }}"><title>{{ seg.name }}: {{ '{:,.2f}'.format(seg.value) }}</title></rect>
+        {% endfor %}
+      </g>
+      {% if bar.show_label %}<text class="axis" x="{{ bar.label_x }}" y="{{ chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>{% endif %}
+    {% endfor %}
+  </svg>
+  <ul class="legend">
+    {% for item in chart.legend %}<li><span class="swatch col-{{ item.color }}"></span>{{ item.name }}</li>{% endfor %}
+  </ul>
+{% endmacro %}
+
+{% macro movers_table(rows, name_label, currency) %}
+  <div class="table-wrap">
+    <table class="narrow">
+      <thead><tr><th>{{ name_label }}</th><th>Last month</th><th>Previous</th><th>Change</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.name }}</td><td>{{ '{:,.0f}'.format(r.last) }}</td><td>{{ '{:,.0f}'.format(r.previous) }}</td>
+            <td>{% if r.change is none %}<span class="muted">n/a</span>{% else %}<span class="delta {{ 'down' if r.change > 0 else 'up' }}">{{ '%+.0f'|format(r.change) }}%</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}

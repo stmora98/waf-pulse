@@ -39,3 +39,29 @@
     });
   });
 })();
+
+(function () {
+  var button = document.getElementById("theme-toggle");
+  if (!button) { return; }
+  var order = ["auto", "light", "dark"];
+  var labels = { auto: "Theme: auto", light: "Theme: light", dark: "Theme: dark" };
+
+  function current() {
+    var value = document.documentElement.getAttribute("data-theme");
+    return value === "light" || value === "dark" ? value : "auto";
+  }
+
+  function show() { button.textContent = labels[current()]; }
+
+  button.addEventListener("click", function () {
+    var next = order[(order.indexOf(current()) + 1) % order.length];
+    if (next === "auto") { document.documentElement.removeAttribute("data-theme"); }
+    else { document.documentElement.setAttribute("data-theme", next); }
+    try {
+      if (next === "auto") { localStorage.removeItem("wafpulse-theme"); }
+      else { localStorage.setItem("wafpulse-theme", next); }
+    } catch (e) { /* storage can be blocked; the choice lasts until the page closes */ }
+    show();
+  });
+  show();
+})();

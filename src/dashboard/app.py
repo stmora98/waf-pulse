@@ -1,7 +1,7 @@
 """WAF Pulse dashboard."""
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
@@ -136,10 +136,11 @@ def pillar_page(slug):
         logging.exception("Could not load the %s page", pillar)
         return render_template("pillar.html", pillar=pillar, slug=slug, summary=None, error="The data store is not reachable right now.",
                                source_labels=data.SOURCE_LABELS), 503
-    spend = _spend_context(summary) if slug == "cost" else {}
+    rules = insights.group_rules(findings)
+    spend = _spend_context(summary, rules) if slug == "cost" else {}
     return render_template(
         "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
-        source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=insights.group_rules(findings),
+        source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("findings_page", pillar=pillar, source=name))
                                    for name, count in insights.top_counts(findings, "source", 10)]),
@@ -148,16 +149,43 @@ def pillar_page(slug):
     )
 
 
-def _spend_context(summary):
+BREAKDOWN_PANELS = (("byService", "Service"), ("byResourceGroup", "Resource group"), ("byLocation", "Region"),
+                    ("byResourceType", "Resource type"))
+
+
+def _spend_context(summary, rules):
+    """Everything the Cost page draws, from the finops dataset of the latest run."""
     finops = (summary or {}).get("finops")
-    months = finops.get("months") if finops else None
-    daily = (finops or {}).get("daily") or []
+    if not finops:
+        return {"finops": None}
+    months = finops.get("months") or []
+    complete = [m["month"] for m in months if not m.get("partial")]
+    last, previous = (complete[-1] if complete else None), (complete[-2] if len(complete) > 1 else None)
+    current = datetime.now(timezone.utc).strftime("%Y-%m")
+    breakdowns = finops.get("breakdowns") or {}
+    daily = finops.get("daily") or []
+    panels = [{"title": title, "chart": cost_view.stacked_columns(breakdowns[key], partial_from=current),
+               "rows": cost_view.movers(breakdowns[key], last, previous)}
+              for key, title in BREAKDOWN_PANELS if breakdowns.get(key) and breakdowns[key].get("series")]
+    resources = breakdowns.get("topResources") or []
+    previous_month = (datetime.strptime(current + "-01", "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m")
+    lines = cost_view.running_totals(daily, current, previous_month) if daily else {}
+    daily_service = breakdowns.get("dailyByService")
+    pricing = breakdowns.get("byPricingModel")
+    coverage = (breakdowns.get("commitmentCoverage") or {}).get("lastMonth")
     return {
         "finops": finops,
         "chart": cost_view.chart(months) if months else None,
         "daily_chart": cost_view.chart([{"month": p["date"], "cost": p["cost"]} for p in daily]) if daily else None,
+        "daily_service_chart": cost_view.stacked_columns(daily_service) if daily_service and daily_service.get("series") else None,
+        "running_chart": cost_view.line_chart(lines) if any(lines.values()) else None,
+        "breakdown_panels": panels,
+        "resources_chart": charts.hbars([(r["name"], r["cost"], None) for r in resources[:10]]) if resources else None,
+        "resource_days": 30,
+        "pricing_chart": cost_view.stacked_columns(pricing, partial_from=current) if pricing and pricing.get("series") else None,
+        "coverage_last": coverage["percent"] if coverage else None,
+        "ahb": [rule for rule in rules if rule["ruleId"].startswith("COST-AHB")],
     }
-
 
 RULE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 MAX_RULE_RESOURCES = 1000

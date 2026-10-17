@@ -1,4 +1,5 @@
-<h3 class="spend">Spend and budgets</h3>
+{% from "_macros.html" import stacked_columns, movers_table, hbar_chart %}
+<h3 class="spend" id="summary">Spend</h3>
 {% if not finops or not finops.months %}
   <section class="notice">
     No cost data yet.
@@ -9,7 +10,17 @@
     {% endif %}
   </section>
 {% else %}
-  <section class="cards">
+  <nav class="page-links" aria-label="On this page">
+    <a href="#summary">Summary</a>
+    {% if breakdown_panels %}<a href="#trends">Trends</a>{% endif %}
+    <a href="#anomalies">Anomalies</a>
+    <a href="#rates">Rate optimization</a>
+    {% if ahb %}<a href="#licensing">Licensing</a>{% endif %}
+    <a href="#budgets">Budgets</a>
+    <a href="#recommendations">Recommendations</a>
+  </nav>
+
+  <section class="cards compact">
     <div class="card na">
       <span class="card-title">{{ finops.lastMonth }} · billed cost</span>
       <span class="card-score">{{ '{:,.0f}'.format(finops.lastMonthCost) if finops.lastMonthCost is not none else 'n/a' }}</span>
@@ -19,7 +30,7 @@
       <div class="card na">
         <span class="card-title">{{ finops.lastMonth }} · effective cost</span>
         <span class="card-score">{{ '{:,.0f}'.format(finops.lastMonthEffective) }}</span>
-        <span class="muted">{{ finops.currency }} · reservations and savings plans spread over their term</span>
+        <span class="muted">{{ finops.currency }} · commitments spread over their term</span>
       </div>
     {% endif %}
     <div class="card {% if finops.monthOverMonthPercent is none %}na{% elif finops.monthOverMonthPercent > 10 %}bad{% elif finops.monthOverMonthPercent > 0 %}warn{% else %}good{% endif %}">
@@ -31,6 +42,13 @@
       <span class="card-score">{{ '{:,.0f}'.format(finops.forecastNextMonth) if finops.forecastNextMonth is not none else 'n/a' }}</span>
       <span class="muted">{{ finops.currency }} · trend of the last full months</span>
     </div>
+    {% if coverage_last is not none %}
+      <div class="card {% if coverage_last >= 60 %}good{% elif coverage_last >= 20 %}warn{% else %}na{% endif %}">
+        <span class="card-title">Covered by commitments</span>
+        <span class="card-score">{{ coverage_last }}%</span>
+        <span class="muted">reservations and savings plans, last month</span>
+      </div>
+    {% endif %}
     {% if summary and summary.advisorSavings %}
       <div class="card good">
         <span class="card-title">Advisor potential savings</span>
@@ -54,25 +72,55 @@
           <text class="axis" x="{{ bar.label_x }}" y="{{ chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>
         {% endfor %}
       </svg>
-      <p class="muted">The lighter bar is the current month, still in progress.{% if finops.scope == 'tenant' %} Read once at the tenant scope.{% endif %}</p>
+      <p class="muted">Billed cost. The lighter bar is the current month, still in progress.{% if finops.scope == 'tenant' %} Read once at the tenant scope.{% endif %}</p>
     </section>
   {% endif %}
 
-  {% if daily_chart %}
+  {% if breakdown_panels %}
+    <h3 class="spend" id="trends">Trends by dimension</h3>
+    <p class="muted">Effective (amortized) cost. The lighter column is the month in progress.{% if finops.breakdowns.partial %} Some scopes could not be read in time, so these totals can be incomplete.{% endif %}</p>
+    <section class="insights two">
+      {% for panel in breakdown_panels %}
+        <div class="panel">
+          <h3>By {{ panel.title | lower }}</h3>
+          {{ stacked_columns(panel.chart, "Monthly cost by " ~ panel.title | lower) }}
+          {{ movers_table(panel.rows, panel.title, finops.currency) }}
+        </div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if resources_chart %}
+    <section class="panel">
+      <h3>Most expensive resources · last {{ resource_days }} days</h3>
+      {{ hbar_chart(resources_chart, "Most expensive resources") }}
+    </section>
+  {% endif %}
+
+  <h3 class="spend" id="anomalies">Anomalies and daily trend</h3>
+  {% if daily_service_chart or daily_chart %}
     <section class="panel">
       <h3>Daily spend · last {{ finops.daily | length }} days ({{ finops.currency }})</h3>
-      <svg class="chart" viewBox="0 0 {{ daily_chart.width }} {{ daily_chart.height }}" role="img" aria-label="Daily spend">
-        {% for g in daily_chart.grid %}
-          <line class="grid" x1="{{ daily_chart.left }}" x2="{{ daily_chart.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
-          <text class="axis" x="{{ daily_chart.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
-        {% endfor %}
-        {% for bar in daily_chart.bars %}
-          <rect class="bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.label }}: {{ '{:,.0f}'.format(bar.cost) }}</title></rect>
-          {% if bar.show_label %}<text class="axis" x="{{ bar.label_x }}" y="{{ daily_chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>{% endif %}
-        {% endfor %}
-      </svg>
+      {% if daily_service_chart %}
+        {{ stacked_columns(daily_service_chart, "Daily cost by service") }}
+      {% else %}
+        <svg class="chart" viewBox="0 0 {{ daily_chart.width }} {{ daily_chart.height }}" role="img" aria-label="Daily spend">
+          {% for g in daily_chart.grid %}
+            <line class="grid" x1="{{ daily_chart.left }}" x2="{{ daily_chart.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+            <text class="axis" x="{{ daily_chart.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+          {% endfor %}
+          {% for bar in daily_chart.bars %}
+            <rect class="bar" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"><title>{{ bar.label }}: {{ '{:,.0f}'.format(bar.cost) }}</title></rect>
+            {% if bar.show_label %}<text class="axis" x="{{ bar.label_x }}" y="{{ daily_chart.label_y }}" text-anchor="middle">{{ bar.short }}</text>{% endif %}
+          {% endfor %}
+        </svg>
+      {% endif %}
+    </section>
+  {% endif %}
+  <section class="insights two">
+    <div class="panel">
+      <h3>Days that cost far more than usual</h3>
       {% if finops.anomalies %}
-        <h4>Days that cost far more than usual</h4>
         <div class="table-wrap">
           <table class="narrow">
             <thead><tr><th>Day</th><th>Spend</th><th>Usual</th><th>Above usual</th></tr></thead>
@@ -84,73 +132,112 @@
       {% else %}
         <p class="muted">No unusual days detected.</p>
       {% endif %}
+    </div>
+    {% if running_chart %}
+      <div class="panel">
+        <h3>Running total · this month and last</h3>
+        <svg class="chart" viewBox="0 0 {{ running_chart.width }} {{ running_chart.height }}" role="img" aria-label="Running total of this month and last">
+          {% for g in running_chart.grid %}
+            <line class="grid" x1="{{ running_chart.left }}" x2="{{ running_chart.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+            <text class="axis" x="{{ running_chart.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+          {% endfor %}
+          {% for d in running_chart.days %}<text class="axis" x="{{ d.x }}" y="{{ running_chart.label_y }}" text-anchor="middle">{{ d.label }}</text>{% endfor %}
+          {% for line in running_chart.lines %}
+            <polyline class="{{ 'line-this' if line.current else 'line-prev' }}" points="{{ line.line }}"></polyline>
+          {% endfor %}
+        </svg>
+        <ul class="legend">
+          {% for line in running_chart.lines %}<li><span class="swatch {{ 'col-0' if line.current else 'col-other' }}"></span>{{ line.month }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  </section>
+
+  <h3 class="spend" id="rates">Rate optimization</h3>
+  <section class="insights two">
+    {% if pricing_chart %}
+      <div class="panel">
+        <h3>Cost by pricing model</h3>
+        {{ stacked_columns(pricing_chart, "Monthly cost by pricing model") }}
+        <p class="muted">
+          {% if coverage_last is not none %}{{ coverage_last }}% of last month was covered by reservations or savings plans.{% endif %}
+          Savings against list price need a FinOps hub or cost exports, which this tool does not require.
+        </p>
+      </div>
+    {% endif %}
+    <div class="panel">
+      <h3>Reservations and savings plans</h3>
+      {% if summary and summary.commitments %}
+        <p class="muted">
+          Azure Advisor options, based on the longest window of recent usage it offers (shown per row).
+          The 1 year and 3 year terms are alternatives, so they are not added together.
+          {% for currency, terms in summary.commitments.totals.items() %}
+            Together: {% for term, amount in terms.items() | sort %}<strong>{{ '{:,.0f}'.format(amount) }}</strong> {{ currency }} per year with {{ '1 year' if term == 'P1Y' else '3 years' if term == 'P3Y' else term }}{{ ', ' if not loop.last else '.' }}{% endfor %}
+          {% endfor %}
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Subscription</th><th>Covers</th><th>Usage window</th><th>1 year</th><th>3 years</th></tr></thead>
+            <tbody>
+              {% for c in summary.commitments['items'] %}
+                <tr>
+                  <td>{{ c.subscriptionName }}</td>
+                  <td>{{ c.resourceType }}</td>
+                  <td>{% if c.lookbackDays %}{{ c.lookbackDays }} days{% else %}<span class="muted">n/a</span>{% endif %}</td>
+                  <td>{% if c.terms.P1Y is defined %}{{ '{:,.0f}'.format(c.terms.P1Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+                  <td>{% if c.terms.P3Y is defined %}{{ '{:,.0f}'.format(c.terms.P3Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">Azure Advisor has no reservation or savings plan recommendation right now.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if ahb %}
+    <h3 class="spend" id="licensing">Licensing · Azure Hybrid Benefit</h3>
+    <section class="panel">
+      <p class="muted">Resources that pay for a license they might already own.</p>
+      <ul class="plain">
+        {% for rule in ahb %}<li><a href="{{ url_for('rule_page', rule_id=rule.ruleId) }}">{{ rule.title }}</a> <span class="muted">· {{ rule.resources }} resource(s)</span></li>{% endfor %}
+      </ul>
     </section>
   {% endif %}
 
-  <section class="insights">
+  <h3 class="spend" id="budgets">Budgets and chargeback</h3>
+  <section class="insights two">
     <div class="panel">
-      <h3>Top services · {{ finops.lastMonth }}</h3>
-      <ul class="plain">
-        {% for item in finops.topServices %}<li>{{ item.service }} <span class="muted">· {{ '{:,.0f}'.format(item.cost) }} {{ finops.currency }}</span></li>{% endfor %}
-      </ul>
+      <h3>Budgets</h3>
+      {% if finops.budgets %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Budget</th><th>Spent</th><th>Budget</th><th>Forecast</th><th>Used</th></tr></thead>
+            <tbody>
+              {% for b in finops.budgets %}
+                <tr>
+                  <td>{{ b.name }}<br><span class="muted">{{ b.timeGrain }}</span></td>
+                  <td>{{ '{:,.0f}'.format(b.spent) }}</td>
+                  <td>{{ '{:,.0f}'.format(b.amount) }} {{ b.currency }}</td>
+                  <td>{{ '{:,.0f}'.format(b.forecast) }}</td>
+                  <td><progress max="100" value="{{ [b.percent, 100] | min }}"></progress> {{ b.percent }}%</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">No budgets were found. Budget findings are listed under Recommendations below.</p>
+      {% endif %}
     </div>
     <div class="panel">
-      <h3>Subscriptions by spend</h3>
+      <h3>Cost by subscription</h3>
       <ul class="plain">
         {% for item in finops.bySubscription %}<li><span class="muted">{{ item.subscriptionId }}</span> · <strong>{{ '{:,.0f}'.format(item.last) }}</strong> <span class="muted">(previous {{ '{:,.0f}'.format(item.previous) }})</span></li>{% endfor %}
       </ul>
     </div>
-  </section>
-
-  {% if summary and summary.commitments %}
-    <section>
-      <h3>Rate optimization · reservations and savings plans</h3>
-      <p class="muted">
-        Azure Advisor options, based on the longest window of recent usage it offers (shown per row). The 1 year and 3 year terms are alternatives, so they are not added together.
-        {% for currency, terms in summary.commitments.totals.items() %}
-          Together: {% for term, amount in terms.items() | sort %}<strong>{{ '{:,.0f}'.format(amount) }}</strong> {{ currency }} per year with {{ '1 year' if term == 'P1Y' else '3 years' if term == 'P3Y' else term }}{{ ', ' if not loop.last else '.' }}{% endfor %}
-        {% endfor %}
-      </p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Subscription</th><th>Covers</th><th>Usage window</th><th>1 year</th><th>3 years</th></tr></thead>
-          <tbody>
-            {% for c in summary.commitments['items'] %}
-              <tr>
-                <td>{{ c.subscriptionName }}</td>
-                <td>{{ c.resourceType }}</td>
-                <td>{% if c.lookbackDays %}{{ c.lookbackDays }} days{% else %}<span class="muted">n/a</span>{% endif %}</td>
-                <td>{% if c.terms.P1Y is defined %}{{ '{:,.0f}'.format(c.terms.P1Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-                <td>{% if c.terms.P3Y is defined %}{{ '{:,.0f}'.format(c.terms.P3Y) }} {{ c.currency }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  {% endif %}
-  <section>
-    <h3>Budgets</h3>
-    {% if finops.budgets %}
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Budget</th><th>Spent</th><th>Budget</th><th>Forecast</th><th>Used</th></tr></thead>
-          <tbody>
-            {% for b in finops.budgets %}
-              <tr>
-                <td>{{ b.name }}<br><span class="muted">{{ b.timeGrain }}</span></td>
-                <td>{{ '{:,.0f}'.format(b.spent) }}</td>
-                <td>{{ '{:,.0f}'.format(b.amount) }} {{ b.currency }}</td>
-                <td>{{ '{:,.0f}'.format(b.forecast) }}</td>
-                <td><progress max="100" value="{{ [b.percent, 100] | min }}"></progress> {{ b.percent }}%</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="muted">No budgets were found. Budget findings are listed on the <a href="{{ url_for('findings_page', source='finops') }}">Overview</a>.</p>
-    {% endif %}
   </section>
 
   {% if finops.coverage and (finops.coverage.denied or finops.coverage.unavailable or finops.coverage.error) %}

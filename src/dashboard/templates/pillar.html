@@ -58,7 +58,7 @@
         {% endif %}
       </section>
 
-      <section class="panel">
+      <section class="panel" id="recommendations">
         <h3>Recommendations</h3>
         {% if rules %}
           {{ recommendations_table(rules, source_labels, filter=true) }}

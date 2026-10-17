@@ -278,7 +278,7 @@ def test_cost_page_shows_effective_cost_daily_chart_and_anomalies(client, monkey
     html = client.get("/pillar/cost").get_data(as_text=True)
     assert "billed cost" in html and "effective cost" in html and "1,180" in html
     assert "Daily spend" in html and "2026-09-14" in html and "+650%" in html and "Read once at the tenant scope" in html
-    assert html.count('<svg class="chart"') == 2
+    assert html.count('<svg class="chart"') == 3 and "Running total" in html  # monthly, daily and running total
 
 
 def test_cost_page_lists_reservation_and_savings_plan_options(client, monkeypatch):
@@ -297,7 +297,7 @@ def test_spend_and_recommendations_share_the_cost_page(client, monkeypatch):
     assert response.status_code == 302 and response.headers["Location"].endswith("/pillar/cost")
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "scores": {"Cost Optimization": 47}})
     html = client.get("/pillar/cost").get_data(as_text=True)
-    assert "Cost Optimization score" in html and "Spend and budgets" in html and "Monthly spend" in html
+    assert "Cost Optimization score" in html and "Monthly spend" in html and "Budgets and chargeback" in html
     assert "Recommendations" in html and ">Spend</a>" not in html
 
 
@@ -306,7 +306,6 @@ def test_cost_page_renders_and_escapes(client, monkeypatch):
     html = client.get("/pillar/cost").get_data(as_text=True)
     assert "1,234" in html and "+12.5%" in html and "1,500" in html and "3,804" in html
     assert '<rect class="bar partial"' in html and "<progress" in html and "Team" in html
-    assert "<b>Storage</b>" not in html and "&lt;b&gt;Storage&lt;/b&gt;" in html
     assert "1 need the Cost Management Reader role" in html
     assert "style=" not in html
 

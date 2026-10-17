@@ -3,6 +3,7 @@
 Spend is read per subscription for the last six months. Cost Management throttles hard, so every call honours the
 retry headers, and the whole step stops starting new subscriptions after a time budget instead of running forever.
 """
+import logging
 import os
 import statistics
 import time
@@ -21,6 +22,7 @@ MAX_ATTEMPTS = 6
 MAX_PAGES = 10
 REQUEST_TIMEOUT = 90
 TIME_BUDGET_SECONDS = 420
+BREAKDOWN_BUDGET_SECONDS = 240
 WORKERS = 3
 DAILY_WINDOW_DAYS = 60
 ANOMALY_RECENT_DAYS = 14
@@ -435,4 +437,17 @@ def collect(credential, run_id, subscription_ids, now=None):
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         results = dict(pool.map(run, subscriptions))
-    return evaluate(run_id, results, now, tenant, mode)
+    findings, stats, dataset, errors = evaluate(run_id, results, now, tenant, mode)
+    if dataset.get("months"):
+        from . import spend  # imported here because spend builds on this module
+
+        scopes = ([f"/providers/Microsoft.Management/managementGroups/{tenant_id}"] if mode == "tenant"
+                  else [f"/subscriptions/{sub}" for sub, item in results.items() if item.get("costStatus") == "ok"])
+        try:
+            section, partial = spend.collect(token, scopes, now, _now() + BREAKDOWN_BUDGET_SECONDS, _now)
+        except Exception:
+            logging.exception("Cost breakdowns could not be read")
+            section, partial = {}, True
+        if section:
+            dataset["breakdowns"] = {**section, "partial": partial}
+    return findings, stats, dataset, errors

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}WAF Pulse{% endblock %}</title>
+  <script src="{{ url_for('static', filename='theme.js') }}"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -22,6 +23,7 @@
         <a href="{{ url_for('history_page') }}" {% if request.endpoint in ('history_page', 'compare_page') %}class="active" aria-current="page"{% endif %}>History</a>
       </nav>
       {% if user %}<span class="muted">{{ user }}</span>{% endif %}
+      <button id="theme-toggle" class="icon-button" type="button" aria-label="Change the color theme" title="Color theme: automatic, light or dark">Theme</button>
       <button id="refresh" type="button">Refresh now</button>
     </div>
   </header>

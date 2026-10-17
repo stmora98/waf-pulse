@@ -173,3 +173,12 @@ def test_findings_page_ignores_invalid_filters_and_blocks_unsafe_links(client, m
     assert seen == {"pillar": "Security", "severity": "high", "source": "checklist"}
     assert 'href="https://learn.microsoft.com/x"' in html and "javascript:alert(1)" not in html
     assert "Review checklists: 2" in html and "Built-in rules: 1" in html
+
+def test_theme_toggle_and_early_theme_script_are_served_without_inline_code(client, monkeypatch):
+    serve(monkeypatch)
+    html = client.get("/").get_data(as_text=True)
+    assert 'id="theme-toggle"' in html and 'src="/static/theme.js"' in html
+    assert html.index("theme.js") < html.index("style.css")  # applied before the page paints
+    assert "<script>" not in html and "style=" not in html
+    css = client.get("/static/style.css").get_data(as_text=True)
+    assert ':root[data-theme="dark"]' in css and ':root:not([data-theme="light"])' in css
