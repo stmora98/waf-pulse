@@ -132,13 +132,20 @@ The Governance page matches each of your management groups to a role of the Azur
 3. **Policy assignments** made on the group. The reference architecture assigns well known ones: `Enforce-ALZ-Sandbox` marks the sandbox, `Enforce-ALZ-Decomm` the decommissioned group, `Deny-IP-Forwarding` and similar the landing zones, `Deploy-Private-DNS-Zones` the corp group, `Enable-DDoS-VNET` the connectivity group.
 4. **What the subscriptions contain**, only for groups under a platform group: firewalls, VPN or ExpressRoute gateways and virtual hubs point to connectivity, domain services to identity, Log Analytics workspaces and Automation accounts to management.
 
-Each match shows how it was made (name, policy, content or manual) when you hover a box and in the list under the reference diagram. To fix a wrong or missing match, set the `LANDING_ZONE_MAP` setting of the dashboard App Service (or fill the **Landing zone mapping** field of the form, under Advanced) with a JSON object. Each role takes one management group name or id, or a list of them:
+Each match shows how it was made (name, policy, content or manual) when you hover a box and in the table under the reference diagram.
+
+**Map it yourself in the page.** In the Governance page, under the reference diagram, type next to each box the name of the management group or subscription that plays that role, or pick it from the list (it offers every management group and subscription of your tenant). Separate several with commas. A subscription works too, which helps tenants without management groups: it appears under the box like the key icons of the reference diagram. Names that match nothing are flagged. Use **Remove** on a box that does not apply to you (a box takes its children with it); it leaves the diagram and the count, and can be put back from the same page. **Reset everything** clears your names and brings the boxes back.
+
+What you save is kept in the dashboard's database, so it survives new runs and restarts. Without dashboard sign-in, anyone with the URL can change it; it only affects how this page is drawn. With sign-in on, only the users you allowed can.
+
+**Or set it at deployment.** Fill the **Landing zone mapping** field of the form (Advanced) or the `LANDING_ZONE_MAP` setting of the dashboard App Service with a JSON object. Each role takes one name or id, or a list of them:
 
 ```json
 {"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio"}
 ```
 
-Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. Changing the setting restarts the dashboard, and the mapping applies right away; no new run is needed.
+Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. What is typed in the page replaces the deployment setting for that role. Changing the setting restarts the dashboard, and the mapping applies right away; no new run is needed.
+
 ## Refresh modes
 
 | Mode | Behavior |

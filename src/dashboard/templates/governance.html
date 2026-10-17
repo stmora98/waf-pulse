@@ -50,9 +50,40 @@
         <p class="muted">The recommended structure: platform subscriptions for shared services, workload landing zones for applications, plus sandbox and decommissioned groups. A box with a check was found in your tenant by name.</p>
         <p><strong>{{ alignment | selectattr(1) | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
         {{ lz_diagram(reference, "Azure landing zone reference architecture") }}
-        <ul class="align-list">
-          {% for label, found, matches in alignment %}<li class="{{ 'yes' if found else 'no' }}">{{ label }}{% if matches %} <span class="muted">· {{ matches | join(', ') }}</span>{% endif %}</li>{% endfor %}
-        </ul>
+        <div class="lz-map" id="lz-map" data-hidden="{{ removed | map(attribute='role') | join(',') }}">
+          <h4>Map your own names</h4>
+          <p class="muted">The names do not have to match the reference. Type the name of one of your management groups or subscriptions (or pick it from the list) next to the role it plays. Separate several with commas. Remove a box that does not apply to you.</p>
+          <datalist id="lz-options">{% for name in options %}<option value="{{ name }}"></option>{% endfor %}</datalist>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Reference box</th><th>Found</th><th>Your management group or subscription</th><th></th></tr></thead>
+              <tbody>
+                {% for row in alignment %}
+                  <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{% if row.found %}<span class="chip as-right">Found</span> <span class="muted">{{ row.matches | join(', ') }}</span>{% else %}<span class="chip as-idle">Not found</span>{% endif %}</td>
+                    <td>
+                      <input type="text" class="lz-input" data-lz-role="{{ row.role }}" list="lz-options" maxlength="300" autocomplete="off"
+                             placeholder="e.g. {{ options[0] if options else 'Plataforma' }}" aria-label="Your name for {{ row.label }}" value="{{ row.names | join(', ') }}">
+                      {% if row.unmatched %}<br><span class="muted">No management group or subscription is called {{ row.unmatched | join(', ') }}.</span>{% endif %}
+                    </td>
+                    <td><button type="button" class="icon-button" data-lz-remove="{{ row.role }}" title="Remove this box from the reference">Remove</button></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p class="lz-actions">
+            <button type="button" id="lz-save">Save names</button>
+            <button type="button" class="icon-button" id="lz-reset">Reset everything</button>
+            <span class="muted" id="lz-status" role="status" aria-live="polite"></span>
+          </p>
+          {% if removed %}
+            <p class="muted">Removed from the reference:
+              {% for box in removed %}<button type="button" class="chip-button" data-lz-restore="{{ box.role }}">{{ box.label }} · put back</button>{% endfor %}
+            </p>
+          {% endif %}
+        </div>
       </section>
       <section class="insights">
         <div class="panel">

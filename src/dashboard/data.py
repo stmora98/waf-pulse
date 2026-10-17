@@ -162,3 +162,21 @@ def request_refresh():
         message_encode_policy=TextBase64EncodePolicy(),
     )
     queue.send_message(json.dumps({"action": "refresh"}))
+
+SETTINGS_PARTITION = "settings"
+
+
+def get_setting(name):
+    """A setting kept by the dashboard (not by a run), or None."""
+    from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
+    try:
+        item = _db().get_container_client("summaries").read_item(f"setting-{name}", partition_key=SETTINGS_PARTITION)
+    except CosmosResourceNotFoundError:
+        return None
+    return public(item).get("value")
+
+
+def save_setting(name, value):
+    _db().get_container_client("summaries").upsert_item(
+        {"id": f"setting-{name}", "runId": SETTINGS_PARTITION, "kind": "setting", "value": value})

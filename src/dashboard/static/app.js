@@ -90,3 +90,55 @@
   });
   sync();
 })();
+
+(function () {
+  var box = document.getElementById("lz-map");
+  if (!box) { return; }
+  var status = document.getElementById("lz-status");
+
+  function hidden() {
+    var value = box.getAttribute("data-hidden");
+    return value ? value.split(",") : [];
+  }
+
+  function mapping() {
+    var result = {};
+    Array.prototype.forEach.call(box.querySelectorAll("[data-lz-role]"), function (input) {
+      var text = input.value.trim();
+      if (text) { result[input.getAttribute("data-lz-role")] = text; }
+    });
+    return result;
+  }
+
+  function save(body, message) {
+    status.textContent = message;
+    fetch("/api/landing-zone-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (!response.ok) { throw new Error("failed"); }
+      window.location.reload();
+    }).catch(function () {
+      status.textContent = "The changes could not be saved.";
+    });
+  }
+
+  document.getElementById("lz-save").addEventListener("click", function () {
+    save({ mapping: mapping(), hidden: hidden() }, "Saving...");
+  });
+  document.getElementById("lz-reset").addEventListener("click", function () {
+    save({ mapping: {}, hidden: [] }, "Resetting...");
+  });
+  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-remove]"), function (button) {
+    button.addEventListener("click", function () {
+      save({ mapping: mapping(), hidden: hidden().concat(button.getAttribute("data-lz-remove")) }, "Removing...");
+    });
+  });
+  Array.prototype.forEach.call(box.querySelectorAll("[data-lz-restore]"), function (button) {
+    button.addEventListener("click", function () {
+      var role = button.getAttribute("data-lz-restore");
+      save({ mapping: mapping(), hidden: hidden().filter(function (item) { return item !== role; }) }, "Putting it back...");
+    });
+  });
+})();

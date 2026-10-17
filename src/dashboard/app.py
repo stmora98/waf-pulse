@@ -238,6 +238,12 @@ def _security_context(summary):
     }
 
 
+def _walk_groups(tree):
+    for node in tree:
+        yield node
+        yield from _walk_groups(node.get("children", []))
+
+
 def _spend_context(summary, rules):
     """Everything the Cost page draws, from the finops dataset of the latest run."""
     finops = (summary or {}).get("finops")
@@ -362,13 +368,25 @@ def governance_page():
     diagrams = {}
     if governance:
         names = {sub["id"]: sub.get("name") or sub["id"] for sub in governance.get("subscriptions", [])}
+        mapping, hidden = _landing_zone_settings()
+        environment = landing_zone.override_from_environment()
+        override = landing_zone.merge_override(environment, mapping)
         classification, found = landing_zone.classify(
-            tree, governance.get("policyByGroup"), governance.get("signals"), landing_zone.override_from_environment())
+            tree, governance.get("policyByGroup"), governance.get("signals"), override)
+        group_names = sorted({name for node in _walk_groups(tree) for name in (node.get("displayName"), node.get("name")) if name})
+        subscriptions = governance.get("subscriptions", [])
+        found = landing_zone.merge_found(found, landing_zone.assign_subscriptions(
+            subscriptions, override, taken={n.lower() for n in group_names}))
         has_hierarchy = any(node.get("children") for node in tree)
+        typed = {role: mapping.get(role) or sorted(environment.get(role, ())) for role in {*mapping, *environment}}
+        known = {n.lower() for n in group_names} | {str(s.get("name", "")).lower() for s in subscriptions} | {
+            str(s.get("id", "")).lower() for s in subscriptions}
         diagrams = {
-            "hierarchy": landing_zone.actual(tree, governance.get("subscriptions", []), names, unassigned, classification),
-            "reference": landing_zone.reference(found, has_hierarchy),
-            "alignment": landing_zone.alignment(found), "has_hierarchy": has_hierarchy,
+            "hierarchy": landing_zone.actual(tree, subscriptions, names, unassigned, classification),
+            "reference": landing_zone.reference(found, has_hierarchy, hidden),
+            "alignment": landing_zone.alignment(found, typed, known, hidden),
+            "removed": landing_zone.removed_boxes(hidden), "has_hierarchy": has_hierarchy,
+            "options": group_names + sorted({s.get("name") for s in subscriptions if s.get("name")}),
         }
     return render_template("governance.html", error=None, governance=governance, tree=tree, unassigned=unassigned,
                            summary=summary, **diagrams)
@@ -500,13 +518,48 @@ def api_compare():
     return jsonify(base=base, target=target, **result)
 
 
+def _cross_site():
+    """True when a write did not come from this site: it lacks the custom header or was sent from another origin."""
+    return request.headers.get(REFRESH_HEADER) != "1" or request.headers.get("Sec-Fetch-Site", "same-origin") not in (
+        "same-origin",
+        "none",
+    )
+
+
+MAPPING_SETTING = "landing-zone-map"
+
+
+def _landing_zone_settings():
+    """What was typed in the Governance page: ({role: [names]}, [removed roles])."""
+    try:
+        saved = data.get_setting(MAPPING_SETTING)
+    except Exception:
+        logging.exception("Could not read the landing zone settings")
+        return {}, []
+    saved = saved if isinstance(saved, dict) else {}
+    return landing_zone.sanitize_mapping(saved.get("mapping")), landing_zone.sanitize_hidden(saved.get("hidden"))
+
+
+@app.post("/api/landing-zone-map")
+def api_landing_zone_map():
+    """Saves the names typed for each landing zone role and the boxes removed from the reference."""
+    if _cross_site():
+        return jsonify(error="Forbidden"), 403
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    saved = {"mapping": landing_zone.sanitize_mapping(body.get("mapping")), "hidden": landing_zone.sanitize_hidden(body.get("hidden"))}
+    try:
+        data.save_setting(MAPPING_SETTING, saved)
+    except Exception:
+        logging.exception("Could not save the landing zone settings")
+        return jsonify(error="The settings could not be saved right now."), 503
+    return jsonify(**saved)
+
+
 @app.post("/api/refresh")
 def api_refresh():
     # A custom header cannot be sent cross-site without a CORS preflight, which blocks CSRF.
-    if request.headers.get(REFRESH_HEADER) != "1" or request.headers.get("Sec-Fetch-Site", "same-origin") not in (
-        "same-origin",
-        "none",
-    ):
+    if _cross_site():
         return jsonify(error="Forbidden"), 403
     try:
         latest = data.latest_run()

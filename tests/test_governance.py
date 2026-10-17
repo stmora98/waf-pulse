@@ -278,3 +278,55 @@ def test_subscription_signals_count_resource_types_per_subscription():
             {"subscriptionId": SUB, "type": "microsoft.automation/automationaccounts", "n": 1}, {"type": "x", "n": 1}]
     assert governance.subscription_signals(rows) == {SUB: {"microsoft.network/azurefirewalls": 2,
                                                           "microsoft.automation/automationaccounts": 1}}
+
+
+def settings_store(monkeypatch, initial=None):
+    store = {"value": initial}
+    monkeypatch.setattr(data, "get_setting", lambda name: store["value"])
+    monkeypatch.setattr(data, "save_setting", lambda name, value: store.update(value=value))
+    return store
+
+
+def serve_governance(monkeypatch):
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
+    monkeypatch.setattr(data, "summary", lambda run_id: {"runId": "r1", "governance": GOVERNANCE})
+
+
+def test_the_mapping_form_lists_the_tenant_names_and_shows_what_was_typed(client, monkeypatch):
+    serve_governance(monkeypatch)
+    settings_store(monkeypatch, {"mapping": {"sandbox": ["Loose sub", "Ghost"]}, "hidden": ["local"]})
+    html = client.get("/governance").get_data(as_text=True)
+    assert 'id="lz-map"' in html and 'data-hidden="local"' in html and 'data-lz-role="sandbox"' in html
+    assert '<option value="&lt;b&gt;Prod&lt;/b&gt;">' in html and '<option value="Prod sub">' in html  # groups and subscriptions
+    assert 'value="Loose sub, Ghost"' in html and "No management group or subscription is called Ghost" in html
+    assert "Loose sub (subscription)" in html  # the subscription typed for the role is found
+    assert 'data-lz-restore="local"' in html and 'data-lz-remove="platform"' in html and 'data-lz-role="local"' not in html
+    assert "of 10 expected management groups found" in html  # one box was removed
+
+
+def test_saving_the_mapping_needs_the_site_header_and_cleans_the_input(client, monkeypatch):
+    store = settings_store(monkeypatch)
+    body = {"mapping": {"platform": " Plataforma ,x", "bogus": "y"}, "hidden": ["local", "root"]}
+    assert client.post("/api/landing-zone-map", json=body).status_code == 403  # no custom header
+    assert client.post("/api/landing-zone-map", json=body, headers={"X-WAF-Pulse": "1", "Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert store["value"] is None
+    response = client.post("/api/landing-zone-map", json=body, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 200
+    assert store["value"] == {"mapping": {"platform": ["Plataforma", "x"]}, "hidden": ["local"]} == response.get_json()
+    client.post("/api/landing-zone-map", data="not json", headers={"X-WAF-Pulse": "1"})
+    assert store["value"] == {"mapping": {}, "hidden": []}  # bad input clears instead of storing junk
+
+
+def test_a_failing_store_is_reported_without_details(client, monkeypatch):
+    def fail(name, value):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(data, "save_setting", fail)
+    response = client.post("/api/landing-zone-map", json={"mapping": {}}, headers={"X-WAF-Pulse": "1"})
+    assert response.status_code == 503 and b"secret detail" not in response.data
+
+
+def test_the_page_still_renders_when_the_settings_cannot_be_read(client, monkeypatch):
+    serve_governance(monkeypatch)
+    monkeypatch.setattr(data, "get_setting", lambda name: (_ for _ in ()).throw(RuntimeError("down")))
+    assert client.get("/governance").status_code == 200

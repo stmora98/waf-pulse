@@ -381,6 +381,13 @@ svg.lz { display: block; margin: 0 auto; max-width: 100%; height: auto; }
 .align-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 4px 16px; list-style: none; padding: 0; margin: 8px 0; font-size: 0.9rem; }
 .align-list .yes::before { content: "✓ "; color: var(--good); font-weight: 700; }
 .align-list .no::before { content: "– "; color: var(--muted); }
+.lz-map { margin-top: 12px; }
+.lz-input { width: 100%; min-width: 220px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); font: inherit; font-size: 0.9rem; }
+.lz-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.chip-button { background: var(--line); color: var(--text); font-size: 0.8rem; font-weight: 500; padding: 3px 10px;
+  border-radius: 999px; margin: 0 6px 4px 0; }
+.chip-button:hover { background: var(--panel-2); }
 @media (max-width: 640px) {
   main, .top { padding: 0 12px; }
   .card-score { font-size: 1.8rem; }

@@ -128,6 +128,44 @@ def parse_override(text):
     return result
 
 
+MAX_NAMES_PER_ROLE = 10
+MAX_NAME_LENGTH = 100
+
+
+def sanitize_mapping(raw):
+    """A mapping typed in the page -> {role: [names]}. Only known roles, a few short names each, no empty ones."""
+    result = {}
+    for role, value in (raw.items() if isinstance(raw, dict) else ()):
+        if role not in ROLE_NAMES:
+            continue
+        parts = value if isinstance(value, list) else re.split(r"[,\n;]", str(value))
+        names = []
+        for part in parts:
+            name = str(part).strip()[:MAX_NAME_LENGTH]
+            if name and name.lower() not in {n.lower() for n in names}:
+                names.append(name)
+        if names:
+            result[role] = names[:MAX_NAMES_PER_ROLE]
+    return result
+
+
+HIDEABLE = {"platform", "security", "management", "identity", "connectivity", "landingzones", "corp", "online", "local",
+            "decommissioned", "sandbox"}
+
+
+def sanitize_hidden(raw):
+    """Roles of the reference architecture that the visitor removed because they do not apply. Unknown ones are dropped."""
+    return sorted({str(role) for role in (raw if isinstance(raw, list) else ()) if str(role) in HIDEABLE})
+
+
+def merge_override(environment, saved):
+    """What the deployment configuration says, role by role, replaced by what was typed in the page."""
+    merged = {role: set(names) for role, names in (environment or {}).items()}
+    for role, names in (saved or {}).items():
+        merged[role] = {str(n).strip().lower() for n in names if str(n).strip()}
+    return merged
+
+
 def override_from_environment():
     return parse_override(os.environ.get("LANDING_ZONE_MAP", ""))
 
@@ -264,6 +302,27 @@ def layout(roots):
     return {"width": round(width), "height": round(y - LEVEL_GAP + 12), "nodes": nodes, "links": links}
 
 
+def assign_subscriptions(subscriptions, override, taken=()):
+    """Subscriptions named in the manual mapping, for tenants that have no management groups (or keep platform
+    subscriptions outside of them). `taken` holds the lower case names already matched to a management group.
+    Returns {role: [{label, how, kind, id}]}."""
+    found = {}
+    for role, names in (override or {}).items():
+        for sub in subscriptions:
+            label = sub.get("name") or sub.get("id", "")
+            keys = {str(label).lower(), str(sub.get("id", "")).lower()}
+            if keys & set(names) and not keys & set(taken):
+                found.setdefault(role, []).append({"label": label, "how": "manual", "kind": "subscription", "id": sub.get("id", "")})
+    return found
+
+
+def merge_found(found, extra):
+    merged = {role: list(items) for role, items in found.items()}
+    for role, items in (extra or {}).items():
+        merged.setdefault(role, []).extend(items)
+    return merged
+
+
 def actual(tree, subscriptions, names, outside, classification=None):
     """The tenant's own hierarchy. tree: roots from governance_view.build_tree."""
     classification = classification or {}
@@ -283,34 +342,58 @@ def actual(tree, subscriptions, names, outside, classification=None):
     return layout(roots)
 
 
-def reference(found, has_hierarchy):
+def reference(found, has_hierarchy, hidden=()):
     """The reference architecture, each box marked present or missing in the tenant. `found` is the second value of
     `classify`. Boxes that only organize the tree (tenant root, intermediate root) are marked present when any
     hierarchy is visible."""
     def convert(item):
         label, role, kids = item
+        kids = [kid for kid in kids if kid[1] not in hidden]
         if role in ("root", "intermediate"):
             status = "present" if has_hierarchy or role == "root" else "missing"
             how = ""
         else:
             status = "present" if found.get(role) else "missing"
             how = found[role][0]["how"] if found.get(role) else ""
-        return normalize(label, role, [convert(k) for k in kids], status=status, key=role, how=how)
+        subs = [m["label"] for m in found.get(role, []) if m.get("kind") == "subscription"] if status == "present" else []
+        return normalize(label, role, [convert(k) for k in kids], subs, status=status, key=role, how=how)
 
     return layout([convert(REFERENCE)])
 
 
-def alignment(found):
-    """[(label, present, [matches])] for the boxes of the reference architecture that a tenant is expected to have."""
-    expected = []
+def alignment(found, typed=None, known=(), hidden=()):
+    """One row per box of the reference architecture that a tenant is expected to have: what was found, the names
+    typed for it and which of those names match no management group. `known` is every name of the tenant, lower case."""
+    expected, typed = [], typed or {}
 
     def walk(item):
         label, role, kids = item
+        if role in hidden:
+            return  # a removed box takes its children with it
         if role not in ("root", "intermediate"):
-            matches = [f"{m['label']} ({m['how']})" for m in found.get(role, [])]
-            expected.append((label, bool(matches), matches))
+            matches = [f"{m['label']} ({'subscription' if m.get('kind') == 'subscription' else m['how']})"
+                       for m in found.get(role, [])]
+            names = list(typed.get(role, []))
+            expected.append({"label": label, "role": role, "found": bool(matches), "matches": matches, "names": names,
+                             "unmatched": [n for n in names if n.lower() not in known]})
         for kid in kids:
             walk(kid)
 
     walk(REFERENCE)
     return expected
+
+
+def removed_boxes(hidden):
+    """The boxes the visitor removed, so they can be put back: [{label, role}]. Children of a removed box are not listed."""
+    removed = []
+
+    def walk(item):
+        label, role, kids = item
+        if role in hidden:
+            removed.append({"label": label, "role": role})
+            return
+        for kid in kids:
+            walk(kid)
+
+    walk(REFERENCE)
+    return removed

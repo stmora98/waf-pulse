@@ -59,8 +59,9 @@ def test_the_reference_marks_what_the_tenant_has():
     assert status["Platform"] == status["Connectivity"] == status["Workload landing zones"] == "present"
     assert status["Sandbox"] == status["Security"] == "missing" and len(status) == 13
     assert lz.reference({}, False)["nodes"][1]["status"] == "missing"  # no hierarchy: no intermediate root either
-    rows = {label: (ok, matches) for label, ok, matches in lz.alignment(found)}
-    assert rows["Platform"] == (True, ["Platform (name)"]) and rows["Sandbox"] == (False, []) and len(rows) == 11
+    rows = {row["label"]: row for row in lz.alignment(found)}
+    assert rows["Platform"]["found"] and rows["Platform"]["matches"] == ["Platform (name)"]
+    assert not rows["Sandbox"]["found"] and rows["Sandbox"]["matches"] == [] and len(rows) == 11
 
 
 def node(name, display, subs=(), children=()):
@@ -116,3 +117,51 @@ def test_the_diagram_carries_how_each_group_was_matched():
     classification, _ = lz.classify(tree(), {}, {})
     by_label = {n["label"]: n for n in lz.actual(tree(), [], NAMES, [], classification)["nodes"]}
     assert by_label["Platform"]["how"] == "name" and by_label["Tenant Root Group"]["how"] == ""
+
+
+def test_typed_names_are_cleaned_before_they_are_saved():
+    raw = {"platform": " Plataforma , mg-plat;Plataforma\n", "nonsense": "x", "sandbox": "", "corp": ["A", "a", "B"],
+           "online": "x" * 300}
+    assert lz.sanitize_mapping(raw) == {"platform": ["Plataforma", "mg-plat"], "corp": ["A", "B"], "online": ["x" * 100]}
+    assert lz.sanitize_mapping(None) == {} and lz.sanitize_mapping("text") == {}
+    assert lz.sanitize_hidden(["sandbox", "root", "nope", "sandbox", "local"]) == ["local", "sandbox"]
+    assert lz.sanitize_hidden("sandbox") == []
+
+
+def test_what_was_typed_replaces_the_deployment_setting_role_by_role():
+    merged = lz.merge_override({"platform": {"a"}, "sandbox": {"b"}}, {"platform": ["X", " y "]})
+    assert merged == {"platform": {"x", "y"}, "sandbox": {"b"}}
+
+
+def test_a_subscription_can_play_a_role_when_there_is_no_management_group_for_it():
+    subs = [{"id": "s1", "name": "Hub Sub"}, {"id": "s2", "name": "Mgmt Sub"}, {"id": "s3", "name": "Other"}]
+    found = lz.assign_subscriptions(subs, {"connectivity": {"hub sub"}, "management": {"s2"}, "identity": {"mgmt sub"}})
+    assert [m["label"] for m in found["connectivity"]] == ["Hub Sub"] and found["connectivity"][0]["kind"] == "subscription"
+    assert [m["label"] for m in found["management"]] == ["Mgmt Sub"]  # an id works too
+    assert [m["label"] for m in found["identity"]] == ["Mgmt Sub"]
+    assert "Other" not in str(found)
+    assert lz.assign_subscriptions(subs, {"connectivity": {"hub sub"}}, taken={"hub sub"}) == {}  # a group has that name
+    combined = lz.merge_found({"platform": [{"label": "P", "how": "name"}]}, found)
+    assert set(combined) == {"platform", "connectivity", "management", "identity"}
+    reference = {n["label"]: n for n in lz.reference(combined, True)["nodes"]}
+    assert [c["label"] for c in reference["Connectivity"]["chips"]] == ["Hub Sub"]  # shown under the box, like the image
+    row = {r["label"]: r for r in lz.alignment(combined)}["Connectivity"]
+    assert row["matches"] == ["Hub Sub (subscription)"]
+
+
+def test_removed_boxes_leave_the_reference_and_the_count_but_can_be_put_back():
+    found = {"platform": [{"label": "P", "how": "name"}]}
+    full = lz.reference(found, True)
+    pruned = lz.reference(found, True, hidden=["platform", "sandbox"])
+    labels = {n["label"] for n in pruned["nodes"]}
+    assert "Platform" not in labels and "Security" not in labels and "Sandbox" not in labels  # a box takes its children
+    assert "Workload landing zones" in labels and len(pruned["nodes"]) < len(full["nodes"])
+    rows = lz.alignment(found, hidden=["platform", "sandbox"])
+    assert {r["role"] for r in rows} == {"landingzones", "corp", "online", "local", "decommissioned"}
+    assert lz.removed_boxes(["platform", "security", "sandbox"]) == [
+        {"label": "Platform", "role": "platform"}, {"label": "Sandbox", "role": "sandbox"}]  # Security goes with its parent
+
+
+def test_names_typed_for_a_role_show_which_ones_match_nothing():
+    rows = {r["role"]: r for r in lz.alignment({}, {"sandbox": ["Lab", "Nope"]}, known={"lab"})}
+    assert rows["sandbox"]["names"] == ["Lab", "Nope"] and rows["sandbox"]["unmatched"] == ["Nope"]
