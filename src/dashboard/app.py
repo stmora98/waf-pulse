@@ -167,9 +167,10 @@ def rule_page(rule_id):
     spark = None
     if rule:
         try:
-            counts = data.rule_history(rule_id)
+            runs = [run for run in data.history(15) if run.get("status") == "completed"]
+            counts = data.rule_history(rule_id, [run["id"] for run in runs])
             spark = charts.sparkline([(history.short_time(run.get("startedUtc")), counts[run["id"]])
-                                      for run in reversed(data.history()) if run["id"] in counts])
+                                      for run in reversed(runs) if run["id"] in counts])
         except Exception:
             logging.exception("Could not load the history of %s", rule_id)
     back = url_for("pillar_page", slug=insights.PILLAR_SLUG[rule["pillar"]]) if rule and rule["pillar"] in insights.PILLAR_SLUG else url_for("index")

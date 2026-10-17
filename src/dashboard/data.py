@@ -112,14 +112,20 @@ def all_findings(run_id, pillar=None, rule_id=None, limit=MAX_FINDINGS):
     return [dict(item) for item in items]
 
 
-def rule_history(rule_id):
-    """How many findings a rule had in each run that still has findings: {run id: count}."""
-    items = _db().get_container_client("findings").query_items(
-        "SELECT c.runId, COUNT(1) AS n FROM c WHERE c.ruleId = @rule GROUP BY c.runId",
-        parameters=[{"name": "@rule", "value": rule_id}],
-        enable_cross_partition_query=True,
-    )
-    return {item["runId"]: item["n"] for item in items}
+def rule_history(rule_id, run_ids):
+    """How many findings a rule had in each of the given runs: {run id: count}. One cheap query per run, each
+    inside a single partition."""
+    container = _db().get_container_client("findings")
+    counts = {}
+    for run_id in run_ids:
+        result = list(container.query_items(
+            "SELECT VALUE COUNT(1) FROM c WHERE c.runId = @run AND c.ruleId = @rule",
+            parameters=[{"name": "@run", "value": run_id}, {"name": "@rule", "value": rule_id}],
+            partition_key=run_id,
+        ))
+        if result and result[0]:
+            counts[run_id] = result[0]
+    return counts
 
 def history(limit=30):
     """Most recent runs first."""

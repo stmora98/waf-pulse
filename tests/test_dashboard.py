@@ -142,9 +142,10 @@ def test_cost_pillar_shows_savings_and_unknown_pillars_are_404(client, monkeypat
 
 def test_rule_page_lists_affected_resources_and_history(client, monkeypatch):
     serve(monkeypatch)
-    monkeypatch.setattr(data, "rule_history", lambda rule_id: {"r0": 1, "r1": 2})
+    monkeypatch.setattr(data, "rule_history", lambda rule_id, run_ids: {"r0": 1, "r1": 2})
     monkeypatch.setattr(data, "history", lambda limit=30: [
-        {"id": "r1", "startedUtc": "2026-10-02T00:00:00+00:00"}, {"id": "r0", "startedUtc": "2026-10-01T00:00:00+00:00"}])
+        {"id": "r1", "status": "completed", "startedUtc": "2026-10-02T00:00:00+00:00"},
+        {"id": "r0", "status": "completed", "startedUtc": "2026-10-01T00:00:00+00:00"}])
     html = client.get("/rule/R-1").get_data(as_text=True)
     assert "acct" in html and "acct2" in html and "Fix it" in html and "History" in html
     assert 'href="https://learn.microsoft.com/x"' in html and "&lt;script&gt;" in html
