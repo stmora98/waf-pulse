@@ -1,3 +1,24 @@
+/* Places a popover next to its anchor and keeps all of it on the screen: it slides up or opens above the anchor when
+   there is no room below, and it is never taller than the window (its list scrolls and its buttons stay in view). */
+function fitPopover(pop, container, anchor) {
+  pop.hidden = false;
+  pop.style.maxHeight = Math.max(window.innerHeight - 16, 160) + "px";
+  var wrap = container.getBoundingClientRect();
+  var rect = anchor.getBoundingClientRect();
+  var left = Math.max(0, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth));
+  var top = rect.bottom - wrap.top + 6;
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  var overflow = pop.getBoundingClientRect().bottom - (window.innerHeight - 8);
+  if (overflow > 0) {
+    var roomAbove = rect.top - 8;
+    top = roomAbove >= pop.offsetHeight + 6 ? rect.top - wrap.top - pop.offsetHeight - 6 : top - overflow;
+    pop.style.top = top + "px";
+  }
+  var shortBy = 8 - pop.getBoundingClientRect().top;
+  if (shortBy > 0) { pop.style.top = (parseFloat(pop.style.top) + shortBy) + "px"; }
+}
+
 (function () {
   var button = document.getElementById("refresh");
   var message = document.getElementById("refresh-message");
@@ -290,11 +311,7 @@
     last.appendChild(button("Close", close, "icon-button"));
     pop.appendChild(last);
 
-    pop.hidden = false;
-    var wrap = box.getBoundingClientRect();
-    var rect = target.getBoundingClientRect();
-    pop.style.left = Math.max(4, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth - 4)) + "px";
-    pop.style.top = (rect.bottom - wrap.top + 8) + "px";
+    fitPopover(pop, box, target);
     name.focus();
   }
 
@@ -331,13 +348,7 @@
 
   function close() { pop.hidden = true; }
 
-  function place(anchor) {
-    pop.hidden = false;
-    var wrap = bar.getBoundingClientRect();
-    var rect = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(0, Math.min(rect.left - wrap.left, wrap.width - pop.offsetWidth)) + "px";
-    pop.style.top = (rect.bottom - wrap.top + 6) + "px";
-  }
+  function place(anchor) { fitPopover(pop, bar, anchor); }
 
   function go(field, op, values) {
     var params = new URLSearchParams(window.location.search);

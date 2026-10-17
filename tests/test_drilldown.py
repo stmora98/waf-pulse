@@ -369,3 +369,14 @@ def test_the_filter_script_offers_the_fields_of_the_portal():
     script = pathlib.Path(__file__).resolve().parent.parent.joinpath("src", "dashboard", "static", "app.js").read_text(encoding="utf-8")
     for needle in ("Add filter", "does not equal", "Subscription", "Resource group", "Resource type", "Location", "With findings", "Name contains", "URLSearchParams"):
         assert needle in script, needle
+
+
+def test_popovers_fit_the_window_and_keep_their_buttons_in_view():
+    root = pathlib.Path(__file__).resolve().parent.parent / "src" / "dashboard" / "static"
+    script = (root / "app.js").read_text(encoding="utf-8")
+    css = (root / "style.css").read_text(encoding="utf-8")
+    assert script.count("fitPopover(") >= 3  # defined once, used by the filters and by the landing zone editor
+    for needle in ("window.innerHeight", "maxHeight", "roomAbove"):
+        assert needle in script, needle
+    for needle in ("calc(100vw - 32px)", "overflow-y: auto", "position: sticky"):
+        assert needle in css, needle
