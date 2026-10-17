@@ -138,7 +138,7 @@ Each match shows how it was made (name, policy, content or manual) when you hove
 {"connectivity": "mg-hub", "platform": ["Plataforma", "mg-plat-prod"], "sandbox": "Laboratorio"}
 ```
 
-Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. Run **Refresh now** is not needed: the dashboard reads the setting on its next restart.
+Roles: `platform`, `security`, `management`, `identity`, `connectivity`, `landingzones`, `corp`, `online`, `local`, `sandbox`, `decommissioned`. Names are compared without caring about case. Changing the setting restarts the dashboard, and the mapping applies right away; no new run is needed.
 ## Refresh modes
 
 | Mode | Behavior |
