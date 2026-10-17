@@ -54,12 +54,12 @@ param subscriptionFilter string = ''
 ])
 param appServiceSku string = 'B1'
 
-@description('Require Microsoft Entra sign-in for the dashboard. It reuses the collector app registration, so add the redirect URI from the outputs after deployment.')
+@description('Microsoft Entra sign-in for the dashboard. Off by default for now. It reuses the collector app registration, so add the redirect URI from the outputs after deployment.')
 @allowed([
   'entra'
   'none'
 ])
-param dashboardSignIn string = 'entra'
+param dashboardSignIn string = 'none'
 
 @description('Object IDs of the users or service principals allowed to open the dashboard, comma separated. Required when sign-in is on: without it every user of the tenant could sign in.')
 param dashboardAllowedUserIds string = ''

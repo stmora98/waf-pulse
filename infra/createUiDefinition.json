@@ -170,12 +170,12 @@
             "type": "Microsoft.Common.DropDown",
             "label": "Dashboard sign-in",
             "toolTip": "Require Microsoft Entra sign-in. It reuses the service principal above as the sign-in app, so after deployment you add one redirect URI to it (shown in the deployment outputs).",
-            "defaultValue": "Microsoft Entra (recommended)",
+            "defaultValue": "None (anyone with the URL sees the data)",
             "constraints": {
               "required": true,
               "allowedValues": [
                 {
-                  "label": "Microsoft Entra (recommended)",
+                  "label": "Microsoft Entra",
                   "value": "entra"
                 },
                 {

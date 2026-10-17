@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "1996008494411930161"
+      "templateHash": "4279430100667301509"
     }
   },
   "parameters": {
@@ -113,13 +113,13 @@
     },
     "dashboardSignIn": {
       "type": "string",
-      "defaultValue": "entra",
+      "defaultValue": "none",
       "allowedValues": [
         "entra",
         "none"
       ],
       "metadata": {
-        "description": "Require Microsoft Entra sign-in for the dashboard. It reuses the collector app registration, so add the redirect URI from the outputs after deployment."
+        "description": "Microsoft Entra sign-in for the dashboard. Off by default for now. It reuses the collector app registration, so add the redirect URI from the outputs after deployment."
       }
     },
     "dashboardAllowedUserIds": {

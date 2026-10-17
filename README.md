@@ -89,13 +89,15 @@ Client secrets expire (`--years 1` above). When it expires, create a new secret 
 ## 3. Deploy
 
 1. Select the **Deploy to Azure** button.
-2. Fill in the form, using the tenant ID, client ID and secret from step 2, and your object ID as an allowed user.
+2. Fill in the form, using the tenant ID, client ID and secret from step 2, (and, only if you turn sign-in on, your object ID as an allowed user).
 3. Select **Review + create**, then **Create**.
-4. When the deployment finishes, open the **Outputs** tab, copy `dashboardUrl` and run the command in `signInSetupCommand` (step 4).
+4. When the deployment finishes, open the **Outputs** tab, and copy `dashboardUrl`. If you turned sign-in on, run the command in `signInSetupCommand` (step 4).
 
-## 4. Finish the dashboard sign-in
+## 4. Dashboard sign-in (optional, off by default)
 
-The dashboard asks for Microsoft Entra sign-in by default, and only the users you listed in the form (object IDs) can open it. It reuses the service principal from step 2 as the sign-in app, so one command is left. Run it once after the deployment (it is also in the **Outputs** tab as `signInSetupCommand`):
+Sign-in is built in but turned off for now: with the default **None**, anyone who has the dashboard URL can see the data. Keep the URL private, or turn sign-in on before sharing it.
+
+To turn it on, choose **Microsoft Entra** in the form and list the object IDs of the users who may open the dashboard (your own: `az ad signed-in-user show --query id -o tsv`). The dashboard then reuses the service principal from step 2 as the sign-in app, so one command is left after the deployment (also in the **Outputs** tab as `signInSetupCommand`):
 
 ```bash
 az ad app update --id <client-id> \
@@ -105,9 +107,8 @@ az ad app update --id <client-id> \
 
 `--web-redirect-uris` replaces the existing list, so include any other redirect URI the app already has. Until you run it, the sign-in page reports a redirect URI mismatch.
 
-- Your own object ID: `az ad signed-in-user show --query id -o tsv`.
-- To change who has access later, edit the allowed principals in **App Service > Authentication > Edit** or redeploy with a new list.
-- Choosing **None** in the form leaves the dashboard open to anyone with the URL. Do that only behind a private network or another gateway.
+- To change who has access later, edit **App Service > Authentication**, or redeploy with a new list.
+- To turn it off again, redeploy with **None**, or disable authentication in the App Service.
 - The `/api/health` path stays anonymous for the health probe. It returns no data.
 ## Refresh modes
 
