@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import hbar_chart, severity_legend, recommendations_table %}
+{% from "_macros.html" import hbar_chart %}
 {% block title %}{{ pillar }} · WAF Pulse{% endblock %}
 {% block content %}
     <h2>{{ pillar }}</h2>
@@ -63,13 +63,6 @@
         {% include "_p_controls.html" %}
       {% endif %}
 
-      <section class="panel" id="recommendations">
-        <h3>Recommendations</h3>
-        {% if rules %}
-          {{ recommendations_table(rules, source_labels, filter=true) }}
-        {% else %}
-          <p class="muted">No findings for this pillar in the last run.</p>
-        {% endif %}
-      </section>
+      <p class="muted">The recommendations for this pillar are in <a href="{{ url_for('actions_page', pillar=pillar) }}">Action items</a>.</p>
     {% endif %}
 {% endblock %}

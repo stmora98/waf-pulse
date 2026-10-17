@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import hbar_chart, stacked_chart, severity_legend, recommendations_table %}
+{% from "_macros.html" import hbar_chart, stacked_chart, severity_legend %}
 {% block content %}
     {% if error %}
       <section class="notice error">{{ error }}</section>
@@ -16,6 +16,7 @@
         <span>Findings: <strong>{{ summary.findingCount }}</strong></span>
         {% if latest and latest.status == 'running' %}<span class="chip running">Refresh running</span>{% endif %}
         {% if latest and latest.status == 'failed' %}<span class="chip failed">Last refresh failed</span>{% endif %}
+        <a href="{{ url_for('actions_page') }}"><strong>{{ action_items }}</strong> action items{% if high_items %} · {{ high_items }} critical or high{% endif %}</a>
         <a href="{{ url_for('compare_page') }}">What changed since the previous run?</a>
       </section>
 
@@ -43,13 +44,6 @@
           <h3>Findings by source</h3>
           {{ hbar_chart(source_chart, "Findings by source") }}
         </div>
-      </section>
-
-      <section class="panel">
-        <h3>Top recommendations</h3>
-        <p class="muted">The most severe and most widespread. Select one to see every affected resource.</p>
-        {{ recommendations_table(top_rules, source_labels) }}
-        <p><a href="{{ url_for('findings_page') }}">All findings</a></p>
       </section>
 
       <section class="insights two">

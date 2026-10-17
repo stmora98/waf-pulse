@@ -15,9 +15,7 @@
     {% if breakdown_panels %}<a href="#trends">Trends</a>{% endif %}
     <a href="#anomalies">Anomalies</a>
     <a href="#rates">Rate optimization</a>
-    {% if ahb %}<a href="#licensing">Licensing</a>{% endif %}
     <a href="#budgets">Budgets</a>
-    <a href="#recommendations">Recommendations</a>
   </nav>
 
   <section class="cards compact">
@@ -197,15 +195,6 @@
     </div>
   </section>
 
-  {% if ahb %}
-    <h3 class="spend" id="licensing">Licensing · Azure Hybrid Benefit</h3>
-    <section class="panel">
-      <p class="muted">Resources that pay for a license they might already own.</p>
-      <ul class="plain">
-        {% for rule in ahb %}<li><a href="{{ url_for('rule_page', rule_id=rule.ruleId) }}">{{ rule.title }}</a> <span class="muted">· {{ rule.resources }} resource(s)</span></li>{% endfor %}
-      </ul>
-    </section>
-  {% endif %}
 
   <h3 class="spend" id="budgets">Budgets and chargeback</h3>
   <section class="insights two">
@@ -229,7 +218,7 @@
           </table>
         </div>
       {% else %}
-        <p class="muted">No budgets were found. Budget findings are listed under Recommendations below.</p>
+        <p class="muted">No budgets were found. Budget findings are listed under Action items.</p>
       {% endif %}
     </div>
     <div class="panel">

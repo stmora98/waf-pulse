@@ -33,7 +33,8 @@
     <aside class="sidebar" id="sidebar">
       <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Show or hide the menu" aria-controls="sidebar" aria-expanded="true" title="Show or hide the menu">{{ icon('menu') }}</button>
       <nav class="side-nav" aria-label="Sections">
-        {{ link('index', 'Overview', 'overview', request.endpoint in ('index', 'rule_page')) }}
+        {{ link('index', 'Overview', 'overview', request.endpoint == 'index') }}
+        {{ link('actions_page', 'Action items', 'findings', request.endpoint in ('actions_page', 'rule_page')) }}
         <p class="side-group">Well-Architected pillars</p>
         {% for slug, page in nav_pillars %}
           {{ link('pillar_page', page[1], slug if slug != 'cost' else 'cost', request.endpoint == 'pillar_page' and request.view_args.slug == slug, slug) }}
@@ -43,7 +44,6 @@
         <p class="side-group">Manage</p>
         {{ link('governance_page', 'Governance', 'governance', request.endpoint == 'governance_page') }}
         {{ link('history_page', 'History', 'history', request.endpoint in ('history_page', 'compare_page')) }}
-        {{ link('findings_page', 'All findings', 'findings', request.endpoint == 'findings_page') }}
       </nav>
     </aside>
 

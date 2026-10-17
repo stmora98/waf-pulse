@@ -298,7 +298,7 @@ def test_spend_and_recommendations_share_the_cost_page(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "finops": FINOPS, "scores": {"Cost Optimization": 47}})
     html = client.get("/pillar/cost").get_data(as_text=True)
     assert "Cost Optimization score" in html and "Monthly spend" in html and "Budgets and chargeback" in html
-    assert "Recommendations" in html and ">Spend</a>" not in html
+    assert 'href="/actions?pillar=Cost+Optimization"' in html and ">Spend</a>" not in html and ">Recommendations<" not in html
 
 
 def test_cost_page_renders_and_escapes(client, monkeypatch):

@@ -106,32 +106,33 @@ def serve(monkeypatch, summary=None, findings=None):
     monkeypatch.setattr(data, "findings", lambda *a, **k: rows)
 
 
-def test_overview_shows_scores_charts_and_top_recommendations(client, monkeypatch):
+def test_overview_shows_scores_charts_and_points_to_the_action_items(client, monkeypatch):
     serve(monkeypatch)
     html = client.get("/").get_data(as_text=True)
     assert "40" in html and "n/a" in html and "2 critical or high" in html
     assert 'href="/pillar/security"' in html and "Findings by pillar and severity" in html
-    assert "Top recommendations" in html and 'href="/rule/R-1"' in html
-    assert "<script>alert(1)</script>" not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert 'href="/actions"' in html and "<strong>2</strong> action items" in html
+    assert "Top recommendations" not in html and 'href="/rule/' not in html  # the lists live in Action items
     assert "storage/storageaccounts" in html and html.count("<svg") >= 4
     assert "1 check(s) could not run" in html and "<b>bad query</b>" not in html and "&lt;b&gt;bad query&lt;/b&gt;" in html
 
 
-def test_old_filter_links_land_on_the_findings_page(client, monkeypatch):
+def test_old_filter_links_land_on_the_action_items(client, monkeypatch):
     serve(monkeypatch)
     response = client.get("/?pillar=Security&severity=high&source=checklist")
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/findings?pillar=Security&severity=high&source=checklist")
+    assert response.headers["Location"].endswith("/actions?pillar=Security&severity=high&source=checklist")
+    response = client.get("/findings?pillar=Security")
+    assert response.status_code == 302 and response.headers["Location"].endswith("/actions?pillar=Security")
 
 
-def test_pillar_page_groups_findings_by_recommendation(client, monkeypatch):
+def test_pillar_page_keeps_its_insights_and_leaves_the_recommendations_to_the_action_items(client, monkeypatch):
     serve(monkeypatch)
     html = client.get("/pillar/security").get_data(as_text=True)
-    assert "Security score" in html
-    assert html.count('href="/rule/R-1"') == 1 and 'href="/rule/R-2"' in html
-    assert "Secure Score" in html and "62.5%" in html and "Enable MFA" in html
+    assert "Security score" in html and "Secure Score" in html and "62.5%" in html and "Enable MFA" in html
+    assert 'href="/rule/' not in html and 'id="rec-filter"' not in html and ">Recommendations<" not in html
+    assert 'href="/actions?pillar=Security"' in html
     assert "Key Vault expirations" not in html  # no data for it in this summary
-    assert 'id="rec-filter"' in html and 'data-filter-table="recs"' in html
 
 
 def test_cost_pillar_shows_savings_and_unknown_pillars_are_404(client, monkeypatch):
@@ -158,21 +159,32 @@ def test_rule_page_without_findings_and_with_a_bad_id(client, monkeypatch):
     assert client.get("/rule/bad%20id!").status_code == 404
 
 
-def test_findings_page_ignores_invalid_filters_and_blocks_unsafe_links(client, monkeypatch):
+def test_action_items_group_findings_by_rule_and_filter(client, monkeypatch):
+    serve(monkeypatch)
+    html = client.get("/actions").get_data(as_text=True)
+    assert "Action items" in html and html.count('href="/rule/R-1"') == 1 and 'href="/rule/R-2"' in html
+    assert "<script>alert(1)</script>" not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert 'id="rec-filter"' in html and "Security" in html and "Review checklists" in html
+    only_high = client.get("/actions?severity=high").get_data(as_text=True)
+    assert 'href="/rule/R-1"' in only_high and 'href="/rule/R-2"' not in only_high
+    only_advisor = client.get("/actions?source=advisor").get_data(as_text=True)
+    assert 'href="/rule/R-2"' in only_advisor and 'href="/rule/R-1"' not in only_advisor
+
+
+def test_action_items_ignore_invalid_filters(client, monkeypatch):
     seen = {}
 
-    def fake_findings(run_id, pillar=None, severity=None, limit=200, source=None):
-        seen.update(pillar=pillar, severity=severity, source=source)
+    def fake(run_id, pillar=None, rule_id=None, limit=5000):
+        seen["pillar"] = pillar
         return FINDINGS
 
     serve(monkeypatch)
-    monkeypatch.setattr(data, "findings", fake_findings)
-    client.get("/findings?pillar=%27%20OR%201%3D1&severity=nope&source=x")
-    assert seen == {"pillar": None, "severity": None, "source": None}
-    html = client.get("/findings?pillar=Security&severity=high&source=checklist").get_data(as_text=True)
-    assert seen == {"pillar": "Security", "severity": "high", "source": "checklist"}
-    assert 'href="https://learn.microsoft.com/x"' in html and "javascript:alert(1)" not in html
-    assert "Review checklists: 2" in html and "Built-in rules: 1" in html
+    monkeypatch.setattr(data, "all_findings", fake)
+    response = client.get("/actions?pillar=%27%20OR%201%3D1&severity=nope&source=x")
+    assert response.status_code == 200 and seen["pillar"] is None and 'href="/rule/R-1"' in response.get_data(as_text=True)
+    client.get("/actions?pillar=Security")
+    assert seen["pillar"] == "Security"
+
 
 def test_theme_toggle_and_early_theme_script_are_served_without_inline_code(client, monkeypatch):
     serve(monkeypatch)
@@ -186,10 +198,10 @@ def test_theme_toggle_and_early_theme_script_are_served_without_inline_code(clie
 def test_left_menu_lists_every_page_marks_the_current_one_and_can_be_hidden(client, monkeypatch):
     serve(monkeypatch)
     html = client.get("/pillar/security").get_data(as_text=True)
-    for label in ("Overview", "Security", "Reliability", "Cost", "Performance", "Operations", "Governance", "History", "All findings"):
+    for label in ("Overview", "Action items", "Security", "Reliability", "Cost", "Performance", "Operations", "Right-sizing", "Governance", "History"):
         assert f'<span class="side-label">{label}</span>' in html
     assert 'class="side-link active" href="/pillar/security"' in html and html.count("side-link active") == 1
     assert 'id="nav-toggle"' in html and 'id="nav-open"' in html and 'aria-controls="sidebar"' in html
     assert 'id="sidebar"' in html and "<script>" not in html and "style=" not in html
     assert "wafpulse-nav" in client.get("/static/theme.js").get_data(as_text=True)
-    assert 'class="side-link active" href="/"' in client.get("/rule/R-1").get_data(as_text=True)
+    assert 'class="side-link active" href="/actions"' in client.get("/rule/R-1").get_data(as_text=True)

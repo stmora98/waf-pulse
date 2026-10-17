@@ -38,16 +38,17 @@
   </ul>
 {% endmacro %}
 
-{% macro recommendations_table(rows, source_labels, filter=false) %}
+{% macro recommendations_table(rows, source_labels, filter=false, show_pillar=false) %}
   {% if filter %}<p class="filter"><label>Filter <input type="search" id="rec-filter" data-filter-table="recs" placeholder="Type to filter recommendations" autocomplete="off"></label></p>{% endif %}
   <div class="table-wrap">
     <table id="recs">
-      <thead><tr><th>Severity</th><th>Recommendation</th><th>Source</th><th>Resources</th></tr></thead>
+      <thead><tr><th>Severity</th><th>Action</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Source</th><th>Resources</th></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
             <td><span class="chip {{ r.severity }}">{{ r.severity }}</span></td>
             <td><a href="{{ url_for('rule_page', rule_id=r.ruleId) }}">{{ r.title }}</a></td>
+            {% if show_pillar %}<td>{{ r.pillar }}</td>{% endif %}
             <td>{{ source_labels.get(r.source, r.source) }}</td>
             <td>{{ r.resources }}</td>
           </tr>

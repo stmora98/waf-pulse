@@ -54,9 +54,11 @@ def test_cost_page_without_breakdowns_keeps_the_totals(client, monkeypatch):
     assert "Monthly spend" in html and "Trends by dimension" not in html and 'href="#trends"' not in html
 
 
-def test_cost_page_lists_hybrid_benefit_rules(client, monkeypatch):
+def test_hybrid_benefit_is_an_action_item_not_a_cost_page_section(client, monkeypatch):
     finding = {"id": "1", "ruleId": "COST-AHB-001", "severity": "low", "pillar": "Cost Optimization", "title": "Windows VM",
                "source": "builtin", "resourceId": "/s/vm", "resourceName": "vm", "subscriptionId": "s1"}
     serve(monkeypatch, FINOPS, [finding])
-    html = client.get("/pillar/cost").get_data(as_text=True)
-    assert "Azure Hybrid Benefit" in html and 'href="/rule/COST-AHB-001"' in html
+    assert "Azure Hybrid Benefit" not in client.get("/pillar/cost").get_data(as_text=True)
+    assert 'href="/rule/COST-AHB-001"' in client.get("/actions?pillar=Cost%20Optimization").get_data(as_text=True)
+
+

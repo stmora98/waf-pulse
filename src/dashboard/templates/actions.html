@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import recommendations_table %}
+{% block title %}Action items · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Action items</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not summary %}
+      <section class="notice">No assessment has completed yet. Select <strong>Refresh now</strong> to start the first one.</section>
+    {% else %}
+      <p class="muted">Everything the assessment recommends, in one place. Each action item groups the resources that share a problem; select one to see them and what to do.</p>
+      <section class="cards compact">
+        <div class="card na"><span class="card-title">Action items</span><span class="card-score">{{ total_items }}</span><span class="muted">{{ total_resources }} resource(s) affected</span></div>
+        {% for level in severities %}
+          <a class="card {{ 'bad' if level in ('critical', 'high') and counts[level] else 'na' }}" href="{{ url_for('actions_page', pillar=selected_pillar, severity=level, source=selected_source) }}">
+            <span class="card-title">{{ level | capitalize }}</span><span class="card-score">{{ counts[level] }}</span><span class="muted">action item(s)</span>
+          </a>
+        {% endfor %}
+      </section>
+      {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
+
+      <section class="severity">
+        <span class="muted">Pillar</span>
+        {% for pillar in pillars %}
+          <a class="chip {% if selected_pillar == pillar %}active{% endif %}"
+             href="{{ url_for('actions_page', pillar=pillar, severity=selected_severity, source=selected_source) }}">{{ pillar }}</a>
+        {% endfor %}
+      </section>
+      <section class="severity">
+        <span class="muted">Source</span>
+        {% for source in sources %}
+          {% if summary.sources and summary.sources.get(source) %}
+            <a class="chip {% if selected_source == source %}active{% endif %}"
+               href="{{ url_for('actions_page', pillar=selected_pillar, severity=selected_severity, source=source) }}">{{ source_labels[source] }}</a>
+          {% endif %}
+        {% endfor %}
+      </section>
+      <section class="severity">
+        <span class="muted">Severity</span>
+        {% for level in severities %}
+          <a class="chip {{ level }} {% if selected_severity == level %}active{% endif %}"
+             href="{{ url_for('actions_page', pillar=selected_pillar, severity=level, source=selected_source) }}">{{ level }}</a>
+        {% endfor %}
+        {% if selected_pillar or selected_severity or selected_source %}<a class="chip clear" href="{{ url_for('actions_page') }}">Clear filters</a>{% endif %}
+      </section>
+
+      <section class="panel">
+        {% if rules %}
+          {{ recommendations_table(rules, source_labels, filter=true, show_pillar=true) }}
+          {% if total_items > rules | length %}<p class="muted">Showing {{ rules | length }} of {{ total_items }} action items.</p>{% endif %}
+        {% else %}
+          <p class="muted">No action items for this filter.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+{% endblock %}

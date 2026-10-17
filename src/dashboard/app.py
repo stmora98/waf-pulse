@@ -136,7 +136,7 @@ def _data_sources(summary):
 def index():
     if any(request.args.get(name) for name in ("pillar", "severity", "source")):
         # Links from earlier versions pointed the filters at the overview.
-        return redirect(url_for("findings_page", **{k: v for k, v in request.args.items() if k in ("pillar", "severity", "source")}))
+        return redirect(url_for("actions_page", **{k: v for k, v in request.args.items() if k in ("pillar", "severity", "source")}))
     try:
         latest, summary = _latest()
         findings = _all_findings(summary)
@@ -154,27 +154,45 @@ def index():
         source_labels=data.SOURCE_LABELS, partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         pillar_chart=charts.stacked(pillar_rows),
         source_chart=charts.hbars(
-            [(data.SOURCE_LABELS.get(name, name), count, url_for("findings_page", source=name))
+            [(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", source=name))
              for name, count in insights.top_counts(findings, "source", 10)]),
         type_chart=charts.hbars([(name, count, None) for name, count in
                                  insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
         resource_chart=charts.hbars([(name, count, None) for name, _, count in insights.worst_resources(findings, 8)]),
-        top_rules=rules[:10], data_sources=_data_sources(summary or {}),
+        action_items=len(rules), high_items=sum(1 for r in rules if r["severity"] in ("critical", "high")),
+        data_sources=_data_sources(summary or {}),
+    )
+
+
+@app.get("/actions")
+def actions_page():
+    pillar = _allowed(request.args.get("pillar"), data.PILLARS)
+    severity = _allowed(request.args.get("severity"), data.SEVERITIES)
+    source = _allowed(request.args.get("source"), data.SOURCES)
+    try:
+        _, summary = _latest()
+        findings = _all_findings(summary, pillar)
+    except Exception:
+        logging.exception("Could not load the action items")
+        return render_template("actions.html", summary=None, error="The data store is not reachable right now."), 503
+    findings = [f for f in findings if (not source or f.get("source") == source)]
+    rules = insights.group_rules(findings)
+    counts = {level: sum(1 for r in rules if r["severity"] == level) for level in data.SEVERITIES}
+    shown = [r for r in rules if not severity or r["severity"] == severity]
+    return render_template(
+        "actions.html", summary=summary, error=None, pillars=data.PILLARS, severities=data.SEVERITIES, sources=data.SOURCES,
+        source_labels=data.SOURCE_LABELS, selected_pillar=pillar, selected_severity=severity, selected_source=source,
+        rules=shown[:MAX_ACTIONS], total_items=len(shown), counts=counts, cap=data.MAX_FINDINGS,
+        total_resources=len({str(f.get("resourceId", "")).lower() for f in findings
+                             if not severity or f.get("severity") == severity}),
+        partial=len(findings) >= data.MAX_FINDINGS,
     )
 
 
 @app.get("/findings")
 def findings_page():
-    pillar = _allowed(request.args.get("pillar"), data.PILLARS)
-    severity = _allowed(request.args.get("severity"), data.SEVERITIES)
-    source = _allowed(request.args.get("source"), data.SOURCES)
-    latest, summary, findings, error = _load_dashboard(pillar, severity, source)
-    return render_template(
-        "findings.html", latest=latest, summary=summary, findings=findings, error=error, pillars=data.PILLARS,
-        severities=data.SEVERITIES, sources=data.SOURCES, source_labels=data.SOURCE_LABELS,
-        selected_pillar=pillar, selected_severity=severity, selected_source=source,
-    )
-
+    # The flat list was replaced by the action items; old links keep working.
+    return redirect(url_for("actions_page", **{k: v for k, v in request.args.items() if k in ("pillar", "severity", "source")}))
 
 @app.get("/pillar/<slug>")
 def pillar_page(slug):
@@ -196,7 +214,7 @@ def pillar_page(slug):
         "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
-        source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("findings_page", pillar=pillar, source=name))
+        source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", pillar=pillar, source=name))
                                    for name, count in insights.top_counts(findings, "source", 10)]),
         type_chart=charts.hbars([(name, count, None) for name, count in
                                  insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
@@ -250,7 +268,6 @@ def _spend_context(summary, rules):
         "resource_days": 30,
         "pricing_chart": cost_view.stacked_columns(pricing, partial_from=current) if pricing and pricing.get("series") else None,
         "coverage_last": coverage["percent"] if coverage else None,
-        "ahb": [rule for rule in rules if rule["ruleId"].startswith("COST-AHB")],
     }
 
 SUBSCRIPTION_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
@@ -291,6 +308,7 @@ def rightsizing_page():
         lookback=metrics.get("lookbackDays", 30), kinds=rightsizing.KINDS,
     )
 
+MAX_ACTIONS = 400
 RULE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 MAX_RULE_RESOURCES = 1000
 
@@ -304,7 +322,7 @@ def rule_page(rule_id):
         findings = _all_findings(summary, rule_id=rule_id, limit=MAX_RULE_RESOURCES + 1)
     except Exception:
         logging.exception("Could not load recommendation %s", rule_id)
-        return render_template("rule.html", rule=None, error="The data store is not reachable right now.", back=url_for("index"),
+        return render_template("rule.html", rule=None, error="The data store is not reachable right now.", back=url_for("actions_page"),
                                source_labels=data.SOURCE_LABELS), 503
     rules = insights.group_rules(findings)
     rule = rules[0] if rules else None
@@ -317,7 +335,7 @@ def rule_page(rule_id):
                                       for run in reversed(runs) if run["id"] in counts])
         except Exception:
             logging.exception("Could not load the history of %s", rule_id)
-    back = url_for("pillar_page", slug=insights.PILLAR_SLUG[rule["pillar"]]) if rule and rule["pillar"] in insights.PILLAR_SLUG else url_for("index")
+    back = url_for("actions_page")
     return render_template(
         "rule.html", rule=rule, error=None, spark=spark, back=back, source_labels=data.SOURCE_LABELS,
         resources=sorted(findings[:MAX_RULE_RESOURCES], key=lambda f: str(f.get("resourceName", "")).lower()),
