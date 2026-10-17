@@ -301,7 +301,7 @@ def test_the_mapping_form_lists_the_tenant_names_and_shows_what_was_typed(client
     assert 'value="Loose sub, Ghost"' in html and "No management group or subscription is called Ghost" in html
     assert "Loose sub (subscription)" in html  # the subscription typed for the role is found
     assert 'data-lz-restore="local"' in html and 'data-lz-remove="platform"' in html and 'data-lz-role="local"' not in html
-    assert "of 10 expected management groups found" in html  # one box was removed
+    assert "<strong>1</strong> of 10 expected management groups found" in html  # one found by subscription, one box removed
 
 
 def test_saving_the_mapping_needs_the_site_header_and_cleans_the_input(client, monkeypatch):

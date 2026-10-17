@@ -48,7 +48,7 @@
       <section class="panel">
         <h3>Alignment with the Azure landing zone reference</h3>
         <p class="muted">The recommended structure: platform subscriptions for shared services, workload landing zones for applications, plus sandbox and decommissioned groups. A box with a check was found in your tenant by name.</p>
-        <p><strong>{{ alignment | selectattr(1) | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
+        <p><strong>{{ alignment | selectattr('found') | list | length }}</strong> of {{ alignment | length }} expected management groups found.</p>
         {{ lz_diagram(reference, "Azure landing zone reference architecture") }}
         <div class="lz-map" id="lz-map" data-hidden="{{ removed | map(attribute='role') | join(',') }}">
           <h4>Map your own names</h4>
