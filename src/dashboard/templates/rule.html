@@ -38,7 +38,7 @@
             <tbody>
               {% for f in resources %}
                 <tr>
-                  <td>{{ f.resourceName }}<br><span class="muted">{{ f.resourceId }}</span></td>
+                  <td><a href="{{ url_for('resource_page', id=f.resourceId) }}">{{ f.resourceName }}</a><br><span class="muted">{{ f.resourceId }}</span></td>
                   <td>{{ f.resourceType }}</td>
                   <td><span class="muted">{{ f.subscriptionId }}</span></td>
                 </tr>

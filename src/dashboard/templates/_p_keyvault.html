@@ -1,6 +1,6 @@
 {% if summary.keyvault %}
   <div class="panel">
-    <h3>Key Vault expirations</h3>
+    <h3><a href="{{ url_for('actions_page', source='keyvault') }}">Key Vault expirations</a></h3>
     <p class="muted">{{ summary.keyvault.readable }} of {{ summary.keyvault.vaults }} vault(s) read, {{ summary.keyvault.objects }} secrets, keys and certificates.</p>
     {% if summary.keyvault.denied %}
       <p class="muted">{{ summary.keyvault.denied }} vault(s) could not be listed. Grant the Key Vault Reader role on them and allow the collector through their firewall.</p>

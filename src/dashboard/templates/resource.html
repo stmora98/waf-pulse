@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ resource.name if resource else 'Resource' }} · WAF Pulse{% endblock %}
+{% block content %}
+    <p><a href="{{ url_for('resources_page', type=resource.type if resource else None) }}">&larr; {{ friendly if resource else 'Resources' }}</a></p>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not resource %}
+      <section class="notice">This resource is not in the latest run.</section>
+    {% else %}
+      <h2>{{ resource.name }}</h2>
+      <section class="panel">
+        <table class="narrow">
+          <tbody>
+            <tr><th>Type</th><td>{{ friendly }} <span class="muted">· {{ resource.type }}</span></td></tr>
+            <tr><th>Resource group</th><td>{% if resource.resourceGroup %}<a href="{{ url_for('resources_page', group=resource.resourceGroup) }}">{{ resource.resourceGroup }}</a>{% else %}–{% endif %}</td></tr>
+            <tr><th>Location</th><td>{{ resource.location or '–' }}</td></tr>
+            <tr><th>Details</th><td>{{ resource.detail or '–' }}</td></tr>
+            <tr><th>Subscription</th><td><a href="{{ url_for('resources_page', subscription=resource.subscriptionId) }}">{{ subscription_name }}</a></td></tr>
+            {% if resource.tags is not none %}<tr><th>Tags</th><td>{{ resource.tags }}{% if not resource.tags %} <span class="muted">· none</span>{% endif %}</td></tr>{% endif %}
+            <tr><th>Resource ID</th><td><code>{{ resource.id }}</code></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <h3>Findings for this resource <span class="muted">· {{ findings | length }}</span></h3>
+      {% if findings %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Severity</th><th>Action</th><th>Pillar</th><th>Source</th></tr></thead>
+            <tbody>
+              {% for f in findings %}
+                <tr>
+                  <td><span class="chip {{ f.severity }}">{{ f.severity }}</span></td>
+                  <td><a href="{{ url_for('rule_page', rule_id=f.ruleId) }}">{{ f.title }}</a><br><span class="muted">{{ f.recommendation }}</span></td>
+                  <td>{{ f.pillar }}</td>
+                  <td>{{ source_labels.get(f.source, f.source) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">No findings for this resource.</p>
+      {% endif %}
+    {% endif %}
+{% endblock %}

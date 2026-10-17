@@ -122,9 +122,15 @@ def act_inventory(payload: dict):
     try:
         store.save_stats(run_id, "inventory", collect.collect_inventory(
             credentials.collector_credential(), payload["subscriptions"]))
-        return {"key": "inventory"}
     except Exception as exc:
         return _record_failure(run_id, "inventory", exc)
+    try:
+        rows, truncated = collect.collect_resource_list(credentials.collector_credential(), payload["subscriptions"])
+        store.save_resources(run_id, rows, truncated)
+    except Exception:
+        # The list is a convenience for drilling down: counts still work without it.
+        logging.exception("The resource list could not be collected")
+    return {"key": "inventory"}
 
 
 @app.activity_trigger(input_name="payload")

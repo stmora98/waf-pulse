@@ -87,3 +87,45 @@ def worst_resources(findings, limit=8):
         counter[resource] += 1
         names.setdefault(resource, finding.get("resourceName") or resource.rsplit("/", 1)[-1])
     return [(names[resource], resource, count) for resource, count in counter.most_common(limit)]
+
+
+FRIENDLY_TYPES = {
+    "microsoft.compute/virtualmachines": "Virtual machines", "microsoft.compute/disks": "Managed disks",
+    "microsoft.compute/snapshots": "Disk snapshots", "microsoft.storage/storageaccounts": "Storage accounts",
+    "microsoft.sql/servers": "SQL servers", "microsoft.sql/servers/databases": "SQL databases",
+    "microsoft.web/sites": "App Service and Function apps", "microsoft.web/serverfarms": "App Service plans",
+    "microsoft.keyvault/vaults": "Key Vaults", "microsoft.network/networksecuritygroups": "Network security groups",
+    "microsoft.network/virtualnetworks": "Virtual networks", "microsoft.network/publicipaddresses": "Public IP addresses",
+    "microsoft.network/networkinterfaces": "Network interfaces", "microsoft.network/loadbalancers": "Load balancers",
+    "microsoft.documentdb/databaseaccounts": "Cosmos DB accounts", "microsoft.containerservice/managedclusters": "AKS clusters",
+    "microsoft.operationalinsights/workspaces": "Log Analytics workspaces",
+}
+
+
+def friendly_type(resource_type):
+    """A readable name for a resource type: the common ones are spelled out, the rest are shown without the provider."""
+    value = str(resource_type or "").lower()
+    return FRIENDLY_TYPES.get(value) or short_type(value)
+
+
+def filter_resources(rows, resource_type=None, subscription=None, group=None, query=None):
+    """Narrows the resource list. Every filter is optional; the text matches name, type, group, location and details."""
+    needle = str(query or "").strip().lower()
+    result = []
+    for row in rows:
+        if resource_type and row.get("type") != resource_type:
+            continue
+        if subscription and row.get("subscriptionId") != subscription:
+            continue
+        if group and str(row.get("resourceGroup", "")).lower() != group.lower():
+            continue
+        if needle and needle not in " ".join(str(row.get(k, "")) for k in ("name", "type", "resourceGroup", "location", "detail")).lower():
+            continue
+        result.append(row)
+    return result
+
+
+def findings_per_resource(findings):
+    """{resource id (lower): number of findings}."""
+    counts = Counter(str(f.get("resourceId", "")).lower() for f in findings if f.get("resourceId"))
+    return dict(counts)

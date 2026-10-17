@@ -21,17 +21,17 @@
       <section class="notice">No governance data yet. Select <strong>Refresh now</strong> to collect it.</section>
     {% else %}
       <section class="cards">
-        <div class="card na"><span class="card-title">Management groups</span><span class="card-score">{{ governance.managementGroups | length }}</span></div>
+        <a class="card na" href="#hierarchy"><span class="card-title">Management groups</span><span class="card-score">{{ governance.managementGroups | length }}</span><span class="muted">see the diagram</span></a>
         <div class="card na"><span class="card-title">Policy assignments</span><span class="card-score">{{ governance.policy.assignments }}</span>
           {% if governance.policy.notEnforced %}<span class="muted">{{ governance.policy.notEnforced }} not enforced</span>{% endif %}</div>
         <div class="card na"><span class="card-title">Role assignments</span><span class="card-score">{{ governance.rbac.assignments }}</span>
           <span class="muted">{{ governance.rbac.customRoles }} custom role(s)</span></div>
-        <div class="card na"><span class="card-title">Resource locks</span><span class="card-score">{{ governance.locks.total }}</span>
-          <span class="muted">{{ governance.locks.subscriptionsWithoutLocks | length }} subscription(s) without locks</span></div>
-        <div class="card na"><span class="card-title">Defender plans on</span><span class="card-score">{{ governance.defender.enabled }}/{{ governance.defender.plans }}</span></div>
+        <a class="card na" href="{{ url_for('actions_page', source='governance') }}"><span class="card-title">Resource locks</span><span class="card-score">{{ governance.locks.total }}</span>
+          <span class="muted">{{ governance.locks.subscriptionsWithoutLocks | length }} subscription(s) without locks · see the actions</span></a>
+        <a class="card na" href="{{ url_for('pillar_page', slug='security') }}#defender"><span class="card-title">Defender plans on</span><span class="card-score">{{ governance.defender.enabled }}/{{ governance.defender.plans }}</span><span class="muted">see each plan</span></a>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="hierarchy">
         <h3>Your management group hierarchy</h3>
         <div class="lz-legend">
           <span class="muted">Azure Policy: <strong>{{ governance.policy.assignments }}</strong> assignments</span>

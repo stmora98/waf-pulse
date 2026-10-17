@@ -96,7 +96,7 @@ FINDING_FIELDS = ("c.id, c.key, c.ruleId, c.source, c.pillar, c.severity, c.titl
 MAX_FINDINGS = 5000
 
 
-def all_findings(run_id, pillar=None, rule_id=None, limit=MAX_FINDINGS):
+def all_findings(run_id, pillar=None, rule_id=None, limit=MAX_FINDINGS, resource_id=None):
     """Every finding of a run (up to `limit`), optionally for one pillar or one rule, without system fields."""
     query = f"SELECT {FINDING_FIELDS} FROM c WHERE c.runId = @run"
     parameters = [{"name": "@run", "value": run_id}]
@@ -106,6 +106,9 @@ def all_findings(run_id, pillar=None, rule_id=None, limit=MAX_FINDINGS):
     if rule_id:
         query += " AND c.ruleId = @rule"
         parameters.append({"name": "@rule", "value": rule_id})
+    if resource_id:
+        query += " AND STRINGEQUALS(c.resourceId, @resource, true)"
+        parameters.append({"name": "@resource", "value": resource_id})
     query += " OFFSET 0 LIMIT @limit"
     parameters.append({"name": "@limit", "value": limit})
     items = _db().get_container_client("findings").query_items(query, parameters=parameters, partition_key=run_id)
@@ -180,3 +183,15 @@ def get_setting(name):
 def save_setting(name, value):
     _db().get_container_client("summaries").upsert_item(
         {"id": f"setting-{name}", "runId": SETTINGS_PARTITION, "kind": "setting", "value": value})
+
+
+def resources(run_id):
+    """The resources of a run, as listed by the collector: (rows, truncated). Empty for runs from before the list existed."""
+    items = _db().get_container_client("summaries").query_items(
+        "SELECT c.rows, c.truncated FROM c WHERE c.runId = @run AND c.kind = 'resources'",
+        parameters=[{"name": "@run", "value": run_id}], partition_key=run_id)
+    rows, truncated = [], False
+    for item in items:
+        rows.extend(item.get("rows", []))
+        truncated = truncated or bool(item.get("truncated"))
+    return rows, truncated

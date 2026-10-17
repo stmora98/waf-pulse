@@ -49,7 +49,7 @@
               <tbody>
                 {% for r in rows %}
                   <tr>
-                    <td><span title="{{ r.id }}">{{ r.name }}</span></td>
+                    <td><a href="{{ url_for('resource_page', id=r.id) }}" title="{{ r.id }}">{{ r.name }}</a></td>
                     <td>{{ names.get(r.subscriptionId, r.subscriptionId) }}</td>
                     <td>{{ r.resourceGroup }}</td>
                     <td>{{ r.detail }}</td>

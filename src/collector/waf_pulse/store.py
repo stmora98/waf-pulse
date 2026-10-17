@@ -62,6 +62,16 @@ def save_dataset(run_id, name, data, key="0"):
     _save_run_document(run_id, "dataset", f"{name}:{key}", {"name": name, "data": data})
 
 
+RESOURCE_CHUNK = 800
+
+
+def save_resources(run_id, rows, truncated=False):
+    """The resource list of a run in documents of RESOURCE_CHUNK rows, apart from the summary so it stays small."""
+    for index in range(0, max(len(rows), 1), RESOURCE_CHUNK):
+        _save_run_document(run_id, "resources", f"inventory:{index // RESOURCE_CHUNK}",
+                           {"rows": rows[index:index + RESOURCE_CHUNK], "truncated": truncated})
+
+
 def _save_run_document(run_id, kind, key, payload):
     document = {"id": f"{run_id}:{kind}:{key}", "runId": run_id, "kind": kind, **payload}
     ttl = retention_seconds()

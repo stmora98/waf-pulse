@@ -38,6 +38,41 @@ def rule_batches():
     return [RULES[i:i + RULES_PER_ACTIVITY] for i in range(0, len(RULES), RULES_PER_ACTIVITY)]
 
 
+RESOURCE_LIST_QUERY = """
+resources
+| extend detail = case(
+    type =~ 'microsoft.compute/virtualmachines',
+      strcat(tostring(properties.hardwareProfile.vmSize), ' · ', tostring(properties.storageProfile.osDisk.osType), ' · ',
+             replace_string(tostring(properties.extended.instanceView.powerState.displayStatus), 'VM ', '')),
+    type =~ 'microsoft.compute/disks',
+      strcat(tostring(sku.name), ' · ', tostring(properties.diskSizeGB), ' GB · ', tostring(properties.diskState)),
+    type =~ 'microsoft.storage/storageaccounts', strcat(tostring(sku.name), ' · ', tostring(kind)),
+    type =~ 'microsoft.web/sites', strcat(tostring(kind), ' · ', tostring(properties.state)),
+    type =~ 'microsoft.web/serverfarms', strcat(tostring(sku.name), ' x', tostring(sku.capacity)),
+    tostring(sku.name))
+| project id, name, type = tolower(type), subscriptionId, resourceGroup, location, detail,
+          tags = array_length(bag_keys(tags))
+"""
+MAX_RESOURCE_LIST = 5000
+
+
+def collect_resource_list(credential, subscription_ids):
+    """The resources themselves, so every count on the dashboard can lead to the list behind it.
+    Returns (rows, truncated): a tenant with more than MAX_RESOURCE_LIST resources keeps the first ones."""
+    rows = []
+    for chunk in graph.chunks(subscription_ids):
+        rows.extend(graph.query(credential, chunk, RESOURCE_LIST_QUERY, max_rows=MAX_RESOURCE_LIST + 1))
+        if len(rows) > MAX_RESOURCE_LIST:
+            break
+    cleaned = [
+        {"id": str(r.get("id", "")), "name": str(r.get("name", "")), "type": str(r.get("type", "")).lower(),
+         "subscriptionId": str(r.get("subscriptionId", "")).lower(), "resourceGroup": str(r.get("resourceGroup", "")),
+         "location": str(r.get("location", "")), "detail": str(r.get("detail") or "").strip(" ·"), "tags": int(r.get("tags") or 0)}
+        for r in rows[:MAX_RESOURCE_LIST]
+    ]
+    return cleaned, len(rows) > MAX_RESOURCE_LIST
+
+
 def collect_inventory(credential, subscription_ids):
     """Resource counts per subscription and type, for the whole tenant."""
     inventory = defaultdict(dict)

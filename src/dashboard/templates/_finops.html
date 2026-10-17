@@ -19,11 +19,11 @@
   </nav>
 
   <section class="cards compact">
-    <div class="card na">
+    <a class="card na"{% if breakdown_panels %} href="#trends"{% endif %}>
       <span class="card-title">{{ finops.lastMonth }} · billed cost</span>
       <span class="card-score">{{ '{:,.0f}'.format(finops.lastMonthCost) if finops.lastMonthCost is not none else 'n/a' }}</span>
-      <span class="muted">{{ finops.currency }}</span>
-    </div>
+      <span class="muted">{{ finops.currency }}{% if breakdown_panels %} · by service, group and region{% endif %}</span>
+    </a>
     {% if finops.lastMonthEffective is defined and finops.lastMonthEffective is not none %}
       <div class="card na">
         <span class="card-title">{{ finops.lastMonth }} · effective cost</span>
@@ -41,17 +41,17 @@
       <span class="muted">{{ finops.currency }} · trend of the last full months</span>
     </div>
     {% if coverage_last is not none %}
-      <div class="card {% if coverage_last >= 60 %}good{% elif coverage_last >= 20 %}warn{% else %}na{% endif %}">
+      <a class="card {% if coverage_last >= 60 %}good{% elif coverage_last >= 20 %}warn{% else %}na{% endif %}" href="#rates">
         <span class="card-title">Covered by commitments</span>
         <span class="card-score">{{ coverage_last }}%</span>
         <span class="muted">reservations and savings plans, last month</span>
-      </div>
+      </a>
     {% endif %}
     {% if summary and summary.advisorSavings %}
-      <div class="card good">
+      <a class="card good" href="{{ url_for('actions_page', pillar='Cost Optimization', source='advisor') }}">
         <span class="card-title">Advisor potential savings</span>
-        {% for currency, amount in summary.advisorSavings.items() %}<span class="card-score">{{ '{:,.0f}'.format(amount) }}</span><span class="muted">{{ currency }} per year</span>{% endfor %}
-      </div>
+        {% for currency, amount in summary.advisorSavings.items() %}<span class="card-score">{{ '{:,.0f}'.format(amount) }}</span><span class="muted">{{ currency }} per year · see the actions</span>{% endfor %}
+      </a>
     {% endif %}
   </section>
 
@@ -224,7 +224,7 @@
     <div class="panel">
       <h3>Cost by subscription</h3>
       <ul class="plain">
-        {% for item in finops.bySubscription %}<li><span class="muted">{{ item.subscriptionId }}</span> · <strong>{{ '{:,.0f}'.format(item.last) }}</strong> <span class="muted">(previous {{ '{:,.0f}'.format(item.previous) }})</span></li>{% endfor %}
+        {% for item in finops.bySubscription %}<li><a href="{{ url_for('resources_page', subscription=item.subscriptionId) }}">{{ item.subscriptionId }}</a> · <strong>{{ '{:,.0f}'.format(item.last) }}</strong> <span class="muted">(previous {{ '{:,.0f}'.format(item.previous) }})</span></li>{% endfor %}
       </ul>
     </div>
   </section>

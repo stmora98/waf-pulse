@@ -1,6 +1,7 @@
 """WAF Pulse dashboard."""
 import logging
 import re
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
@@ -78,8 +79,11 @@ def _latest():
     return latest, (data.summary(completed["id"]) if completed else None)
 
 
-def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS):
-    return data.all_findings(summary["runId"], pillar, rule_id, limit) if summary else []
+def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS, resource_id=None):
+    if not summary:
+        return []
+    extra = {"resource_id": resource_id} if resource_id else {}
+    return data.all_findings(summary["runId"], pillar, rule_id, limit, **extra)
 
 
 def _data_sources(summary):
@@ -157,9 +161,9 @@ def index():
         source_chart=charts.hbars(
             [(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", source=name))
              for name, count in insights.top_counts(findings, "source", 10)]),
-        type_chart=charts.hbars([(name, count, None) for name, count in
-                                 insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
-        resource_chart=charts.hbars([(name, count, None) for name, _, count in insights.worst_resources(findings, 8)]),
+        type_chart=charts.hbars(_type_bars(findings)),
+        resource_chart=charts.hbars([(name, count, url_for("resource_page", id=resource_id))
+                                     for name, resource_id, count in insights.worst_resources(findings, 8)]),
         action_items=len(rules), high_items=sum(1 for r in rules if r["severity"] in ("critical", "high")),
         data_sources=_data_sources(summary or {}),
     )
@@ -217,8 +221,7 @@ def pillar_page(slug):
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("actions_page", pillar=pillar, source=name))
                                    for name, count in insights.top_counts(findings, "source", 10)]),
-        type_chart=charts.hbars([(name, count, None) for name, count in
-                                 insights.top_counts(findings, "resourceType", 8, insights.short_type)]),
+        type_chart=charts.hbars(_type_bars(findings)),
     )
 
 
@@ -236,6 +239,12 @@ def _security_context(summary):
                                         ("Free (recommendations only)", len(detail) - on, None, "as-under")], width=420, label_width=210, label_limit=34),
         "names": {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])},
     }
+
+
+def _type_bars(findings, limit=8):
+    """Bars of the resource types with most findings; each one opens the resources of that type."""
+    counter = Counter(str(f.get("resourceType", "")).lower() for f in findings if f.get("resourceType"))
+    return [(insights.short_type(kind), count, url_for("resources_page", type=kind)) for kind, count in counter.most_common(limit)]
 
 
 def _walk_groups(tree):
@@ -279,6 +288,82 @@ def _spend_context(summary, rules):
 
 SUBSCRIPTION_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 MAX_TABLE_ROWS = 500
+
+
+RESOURCES_PER_PAGE = 100
+TYPE_FILTER = re.compile(r"^[a-z0-9._/-]{1,120}$")
+GROUP_FILTER = re.compile(r"^[A-Za-z0-9._()\-]{1,90}$")
+RESOURCE_ID = re.compile(r"^/[A-Za-z0-9._()/:@ %'+,=-]{1,600}$")
+
+
+def _inventory(summary):
+    """(rows, truncated) of the latest run; empty when the run predates the list or there is no run."""
+    return data.resources(summary["runId"]) if summary else ([], False)
+
+
+@app.get("/resources")
+def resources_page():
+    resource_type = request.args.get("type", "").lower()
+    resource_type = resource_type if TYPE_FILTER.match(resource_type) else None
+    subscription = request.args.get("subscription", "").lower()
+    subscription = subscription if SUBSCRIPTION_ID.match(subscription) else None
+    group = request.args.get("group", "")
+    group = group if GROUP_FILTER.match(group) else None
+    query = request.args.get("q", "")[:80]
+    try:
+        page = max(int(request.args.get("page", "1")), 1)
+    except ValueError:
+        page = 1
+    try:
+        _, summary = _latest()
+        rows, truncated = _inventory(summary)
+        counts = insights.findings_per_resource(_all_findings(summary)) if rows else {}
+    except Exception:
+        logging.exception("Could not load the resources")
+        return render_template("resources.html", error="The data store is not reachable right now.", summary=None), 503
+    scoped = insights.filter_resources(rows, None, subscription, group, query)
+    chosen = [r for r in scoped if not resource_type or r["type"] == resource_type]
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    type_counts = Counter(r["type"] for r in scoped).most_common(14)
+    start = (page - 1) * RESOURCES_PER_PAGE
+    shown = [{**r, "findings": counts.get(r["id"].lower(), 0), "subscription": names.get(r["subscriptionId"], r["subscriptionId"])}
+             for r in chosen[start:start + RESOURCES_PER_PAGE]]
+    return render_template(
+        "resources.html", error=None, summary=summary, has_inventory=bool(rows), truncated=truncated, rows=shown,
+        total=len(chosen), page=page, pages=max((len(chosen) + RESOURCES_PER_PAGE - 1) // RESOURCES_PER_PAGE, 1),
+        resource_type=resource_type, subscription=subscription, group=group, query=query, per_page=RESOURCES_PER_PAGE,
+        type_chips=[(t, insights.friendly_type(t), n) for t, n in type_counts], names=names,
+        title=insights.friendly_type(resource_type) if resource_type else "Resources", filtered=bool(subscription or group or query),
+    )
+
+
+@app.get("/resource")
+def resource_page():
+    resource_id = request.args.get("id", "")
+    if not RESOURCE_ID.match(resource_id):
+        abort(404)
+    try:
+        _, summary = _latest()
+        rows, _ = _inventory(summary)
+        findings = _all_findings(summary, resource_id=resource_id, limit=500)
+    except Exception:
+        logging.exception("Could not load the resource")
+        return render_template("resource.html", error="The data store is not reachable right now.", resource=None, summary=None), 503
+    row = next((r for r in rows if r["id"].lower() == resource_id.lower()), None)
+    if row is None and findings:
+        first = findings[0]
+        row = {"id": resource_id, "name": first.get("resourceName") or resource_id.rsplit("/", 1)[-1],
+               "type": str(first.get("resourceType", "")).lower(), "subscriptionId": first.get("subscriptionId", ""),
+               "resourceGroup": "", "location": "", "detail": "", "tags": None}
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    ordered = sorted(findings, key=lambda f: (insights.RANK.get(f.get("severity"), 9), f.get("title", "")))
+    return render_template(
+        "resource.html", error=None, summary=summary, resource=row, findings=ordered, source_labels=data.SOURCE_LABELS,
+        subscription_name=names.get(row["subscriptionId"], row["subscriptionId"]) if row else "",
+        friendly=insights.friendly_type(row["type"]) if row else "",
+    )
+
+
 
 
 @app.get("/rightsizing")
