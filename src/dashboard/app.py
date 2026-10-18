@@ -437,13 +437,47 @@ def resource_page():
 
 
 
+THRESHOLDS_SETTING = "rightsizing-thresholds"
+
+
+def _thresholds():
+    """The thresholds the visitor saved, or None for the defaults."""
+    try:
+        return data.get_setting(THRESHOLDS_SETTING)
+    except Exception:
+        logging.exception("Could not read the right-sizing thresholds")
+        return None
+
+
+@app.post("/api/rightsizing-thresholds")
+def api_rightsizing_thresholds():
+    """Saves the levels that make a resource idle, underutilized or saturated ({"reset": true} goes back to the defaults).
+    The dashboard applies them at once; the collector uses them for its findings from the next refresh."""
+    if _cross_site():
+        return jsonify(error="Forbidden"), 403
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    if body.get("reset"):
+        value = None
+    else:
+        value, errors = rightsizing.validate_thresholds(body.get("thresholds"))
+        if value is None:
+            return jsonify(error=" ".join(errors)), 422
+    try:
+        data.save_setting(THRESHOLDS_SETTING, value)
+    except Exception:
+        logging.exception("Could not save the right-sizing thresholds")
+        return jsonify(error="The thresholds could not be saved right now."), 503
+    return jsonify(thresholds=value or rightsizing.DEFAULT_THRESHOLDS)
+
+
 def _usage(summary, resource_id):
     """What the right-sizing data knows about one resource: its row (utilization, Advisor advice, cost) and its daily curve.
     None when the resource was not measured or Advisor has nothing on it."""
     if not summary:
         return None
     try:
-        metrics = summary.get("metrics") or {}
+        metrics, limits = rightsizing.reassess(summary.get("metrics") or {}, _thresholds())
         key = resource_id.lower()
         measured = next((r for r in metrics.get("resources") or [] if str(r["id"]).lower() == key), None)
         advice = next((a for a in data.rows_of(summary["runId"], "advice") if str(a["id"]).lower() == key), None)
@@ -455,7 +489,7 @@ def _usage(summary, resource_id):
     if not (measured or advice):
         return None
     kind = (measured or {}).get("kind", "vm")
-    marks = rightsizing.MARKS.get(kind, ())
+    marks = rightsizing.marks(kind, limits)
     return {"row": measured, "advice": advice, "cost": cost, "chart": charts.trend(curve, marks=marks) if curve else None,
             "lookback": metrics.get("lookbackDays", 30)}
 
@@ -475,7 +509,7 @@ def _csv(filename, header, rows):
 def _rightsizing_context(include_all=False):
     """Everything the right-sizing page and its CSV need. Returns a dict, or raises when the data store is down."""
     _, summary = _latest()
-    metrics = (summary or {}).get("metrics")
+    metrics, limits = rightsizing.reassess((summary or {}).get("metrics"), _thresholds())
     if not metrics:
         return {"summary": summary, "metrics": None}
     advice = data.rows_of(summary["runId"], "advice")
@@ -483,12 +517,12 @@ def _rightsizing_context(include_all=False):
     kind = _allowed(request.args.get("kind"), rightsizing.KINDS)
     kind = kind or next((key for key in rightsizing.KINDS if any(rightsizing.counts(metrics, key).values())), "vm")
     names = {sub["id"].lower(): sub["name"] for sub in summary.get("subscriptions", [])}
-    labels = rightsizing.KINDS[kind][2]
+    labels = rightsizing.kind_labels(kind, limits)
     filters = rightsizing.parse_filters(request.args)
     order = _allowed(request.args.get("sort"), rightsizing.SORTS) or "assessment"
     base = rightsizing.build_rows(metrics, kind, advice, costs)
     rows = rightsizing.sort_rows(rightsizing.apply_filters(base, filters), order)
-    return {"summary": summary, "metrics": metrics, "advice": advice, "costs": costs, "kind": kind, "names": names, "labels": labels,
+    return {"summary": summary, "metrics": metrics, "limits": limits, "advice": advice, "costs": costs, "kind": kind, "names": names, "labels": labels,
             "filters": filters, "order": order, "base": base, "rows": rows}
 
 
@@ -503,7 +537,8 @@ def rightsizing_page():
     if not metrics:
         return render_template("rightsizing.html", error=None, metrics=None)
     cards = []
-    for key, (title, _, kind_labels) in rightsizing.KINDS.items():
+    for key, (title, _, _) in rightsizing.KINDS.items():
+        kind_labels = rightsizing.kind_labels(key, ctx["limits"])
         totals = rightsizing.counts(metrics, key)
         if not any(totals.values()):
             continue
@@ -531,6 +566,7 @@ def rightsizing_page():
     return render_template(
         "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, title=rightsizing.KINDS[kind][0], labels=labels,
         rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), everything=len(ctx["base"]), names=names, kinds=rightsizing.KINDS,
+        limits=ctx["limits"], threshold_fields=rightsizing.THRESHOLD_FIELDS, custom=ctx["limits"] != rightsizing.DEFAULT_THRESHOLDS,
         lookback=metrics.get("lookbackDays", 30), totals=rightsizing.totals(metrics, ctx["advice"], ctx["costs"]), active=active,
         facets=facets, page_args=page_args, order=ctx["order"], sorts=rightsizing.SORTS, has_costs=bool(ctx["costs"]),
     )

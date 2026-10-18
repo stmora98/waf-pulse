@@ -7,19 +7,130 @@ import insights
 
 ASSESSMENTS = ("idle", "under", "right", "saturated")
 
-# page kind -> (title, dataset kinds, label of each assessment, columns)
+def _n(value):
+    return f"{value:g}"
+
+
+def _labels(kind, limits):
+    vm, sql, plan = limits["vm"], limits["sql"], limits["plan"]
+    return {
+        "vm": {"idle": f"Idle (under {_n(vm['idle'])}% CPU)", "under": f"Underutilized (under {_n(vm['under'])}%)", "right": "Right-sized",
+               "saturated": f"Saturated ({_n(vm['saturated'])}% or more)"},
+        "sql": {"idle": "Idle", "under": f"Oversized (under {_n(sql['under'])}%)", "right": "Right-sized",
+                "saturated": f"Saturated ({_n(sql['saturated'])}% or more)"},
+        "plan": {"idle": "Idle", "under": f"Underutilized (under {_n(plan['under'])}% CPU)", "right": "Right-sized",
+                 "saturated": f"Saturated ({_n(plan['saturated'])}% CPU or {_n(PLAN_MEMORY_SATURATED)}% memory)"},
+        "storage": {"idle": "No transactions", "under": "Underutilized", "right": "In use", "saturated": "Saturated"},
+    }[kind]
+
+
+def kind_labels(kind, limits=None):
+    """The text of each assessment of a page kind, with the thresholds in force."""
+    return _labels(kind, limits or DEFAULT_THRESHOLDS)
+
+
+# The thresholds the collector uses (percent of average utilization); keep in step with waf_pulse.metrics.
+DEFAULT_THRESHOLDS = {"vm": {"idle": 5, "under": 15, "saturated": 80}, "sql": {"under": 10, "saturated": 80},
+                      "plan": {"under": 20, "saturated": 80}}
+VM_MEMORY_BOUND, VM_MEMORY_SATURATED, PLAN_MEMORY_SATURATED = 70, 90, 85
+THRESHOLD_FIELDS = (("vm", "idle", "Virtual machines: idle below"), ("vm", "under", "underutilized below"), ("vm", "saturated", "saturated from"),
+                    ("sql", "under", "SQL databases: oversized below"), ("sql", "saturated", "saturated from"),
+                    ("plan", "under", "App Service plans: underutilized below"), ("plan", "saturated", "saturated from"))
+
+# page kind -> (title, dataset kinds, label of each assessment)
 KINDS = {
-    "vm": ("Virtual machines", ("vm",),
-           {"idle": "Idle (under 5% CPU)", "under": "Underutilized (under 15%)", "right": "Right-sized",
-            "saturated": "Saturated (80% or more)"}),
-    "sql": ("SQL databases", ("sql_dtu", "sql_vcore"),
-            {"idle": "Idle", "under": "Oversized (under 10%)", "right": "Right-sized", "saturated": "Saturated (80% or more)"}),
-    "plan": ("App Service plans", ("plan",),
-             {"idle": "Idle", "under": "Underutilized (under 20% CPU)", "right": "Right-sized",
-              "saturated": "Saturated (80% CPU or 85% memory)"}),
-    "storage": ("Storage accounts", ("storage",),
-                {"idle": "No transactions", "under": "Underutilized", "right": "In use", "saturated": "Saturated"}),
+    "vm": ("Virtual machines", ("vm",), kind_labels("vm")),
+    "sql": ("SQL databases", ("sql_dtu", "sql_vcore"), kind_labels("sql")),
+    "plan": ("App Service plans", ("plan",), kind_labels("plan")),
+    "storage": ("Storage accounts", ("storage",), kind_labels("storage")),
 }
+
+
+def validate_thresholds(value):
+    """(thresholds, errors) from what the visitor sent: every group complete, numbers above 0 and up to 100, each level
+    above the one before it."""
+    errors, result = [], {}
+    if not isinstance(value, dict):
+        return None, ["Send the thresholds as an object."]
+    for group, defaults in DEFAULT_THRESHOLDS.items():
+        values = value.get(group)
+        if not isinstance(values, dict):
+            errors.append(f"Missing the {group} thresholds.")
+            continue
+        numbers = {}
+        for name in defaults:
+            number = values.get(name)
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or not 0 < number <= 100:
+                errors.append(f"{group} {name} must be a number above 0 and up to 100.")
+            else:
+                numbers[name] = number
+        if len(numbers) == len(defaults):
+            ordered = list(numbers.values())
+            if ordered != sorted(set(ordered)):
+                errors.append(f"The {group} thresholds must go up from the lowest level to the highest.")
+            else:
+                result[group] = numbers
+    return (result, []) if not errors else (None, errors)
+
+
+def resolve_thresholds(saved):
+    """The defaults with the saved values on top (when they are valid as a whole)."""
+    if saved:
+        checked, errors = validate_thresholds(saved)
+        if not errors:
+            return checked
+    return {group: dict(values) for group, values in DEFAULT_THRESHOLDS.items()}
+
+
+def assess(record, limits):
+    """The assessment of a measured record with the thresholds, the same rules as the collector."""
+    kind, average = record.get("kind"), record.get("avg")
+    if kind == "storage" or average is None:
+        return record.get("assessment")
+    if kind == "vm":
+        vm = limits["vm"]
+        memory = record.get("memory")
+        if average >= vm["saturated"] or (memory is not None and memory >= VM_MEMORY_SATURATED):
+            return "saturated"
+        if memory is not None and memory >= VM_MEMORY_BOUND:
+            return "right"
+        return "idle" if average < vm["idle"] else "under" if average < vm["under"] else "right"
+    if kind in ("sql_dtu", "sql_vcore"):
+        sql = limits["sql"]
+        return "under" if average < sql["under"] else "saturated" if average >= sql["saturated"] else "right"
+    if kind == "plan":
+        plan = limits["plan"]
+        if average >= plan["saturated"] or (record.get("memory") is not None and record["memory"] >= PLAN_MEMORY_SATURATED):
+            return "saturated"
+        return "under" if average < plan["under"] else "right"
+    return record.get("assessment")
+
+
+def reassess(metrics, saved):
+    """A copy of the metrics dataset with every resource and the distribution judged by the saved thresholds. The
+    dataset is returned as is when they are the defaults."""
+    limits = resolve_thresholds(saved)
+    if limits == DEFAULT_THRESHOLDS or not metrics:
+        return metrics, limits
+    records = []
+    for item in metrics.get("resources") or []:
+        assessment = assess(item, limits)
+        changed = {**item, "assessment": assessment}
+        if item.get("kind") == "vm":
+            if assessment == "right" and item.get("memory", 0) >= VM_MEMORY_BOUND and item["avg"] < limits["vm"]["under"]:
+                changed["note"] = "memory-bound"
+            else:
+                changed.pop("note", None)
+        records.append(changed)
+    distribution = {}
+    for source, old in (metrics.get("distribution") or {}).items():
+        mine = [r for r in records if r.get("kind") == source]
+        if source == "storage" or len(mine) != sum(old.get(name, 0) for name in ASSESSMENTS):
+            distribution[source] = old
+            continue
+        counted = Counter(r["assessment"] for r in mine)
+        distribution[source] = {**{name: counted.get(name, 0) for name in ASSESSMENTS}, "nodata": old.get("nodata", 0)}
+    return {**metrics, "resources": records, "distribution": distribution}, limits
 HIDDEN_WHEN_EMPTY = {"storage": ("under", "saturated"), "sql": ("idle",), "plan": ("idle",)}
 
 
@@ -59,9 +170,16 @@ KIND_TYPES = {
 FACETS = {"subscription": ("subscriptionId", "Subscription"), "group": ("resourceGroup", "Resource group"),
           "assessment": ("assessment", "Assessment")}
 ADVICE_FILTER = {"with": "With an Advisor recommendation", "without": "Without one"}
-# reference lines of the utilization chart, in percent, by metrics kind (the thresholds of the collector)
-MARKS = {"vm": ((5, "Idle"), (15, "Underutilized"), (80, "Saturated")), "sql_dtu": ((10, "Oversized"), (80, "Saturated")),
-         "sql_vcore": ((10, "Oversized"), (80, "Saturated")), "plan": ((20, "Underutilized"), (80, "Saturated"))}
+def marks(kind, limits=None):
+    """Reference lines of the utilization chart, in percent: the thresholds in force for a metrics kind."""
+    limits = limits or DEFAULT_THRESHOLDS
+    vm, sql, plan = limits["vm"], limits["sql"], limits["plan"]
+    return {"vm": ((vm["idle"], "Idle"), (vm["under"], "Underutilized"), (vm["saturated"], "Saturated")),
+            "sql_dtu": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
+            "sql_vcore": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
+            "plan": ((plan["under"], "Underutilized"), (plan["saturated"], "Saturated"))}.get(kind, ())
+
+
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ASSESSMENT_ORDER = {"idle": 0, "under": 1, "saturated": 2, "right": 3}
 SORTS = {"assessment": "Assessment", "cost": "Cost", "savings": "Savings", "cpu": "Average"}

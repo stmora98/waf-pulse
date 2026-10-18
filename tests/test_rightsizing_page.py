@@ -223,3 +223,69 @@ def test_resource_page_shows_utilization_advice_cost_and_the_curve(client, monke
     html = client.get("/resource?id=" + rid).get_data(as_text=True)
     assert "Utilization and right-sizing" in html and "→ Standard_D4as_v5" in html and ">77<" in html and "60.0%" in html and "4 vCPU" in html
     assert 'class="chart trend"' in html and "curve-cpuMax" in html and "Idle" in html
+
+# ---- adjustable thresholds
+
+def test_collector_and_dashboard_share_the_default_thresholds():
+    from waf_pulse import metrics as collector
+    import rightsizing
+    assert collector.DEFAULT_THRESHOLDS == rightsizing.DEFAULT_THRESHOLDS
+    assert (collector.VM_MEMORY_BOUND, collector.VM_MEMORY_SATURATED, collector.PLAN_SATURATED_MEMORY) == (
+        rightsizing.VM_MEMORY_BOUND, rightsizing.VM_MEMORY_SATURATED, rightsizing.PLAN_MEMORY_SATURATED)
+
+
+def test_collector_classifies_with_the_saved_thresholds_and_ignores_bad_ones():
+    from waf_pulse import metrics as collector
+    cpu = {"Percentage CPU": [{"timeStamp": "2026-10-01T00:00:00Z", "average": 20}]}
+    assert collector.classify("vm", cpu) == (None, 20)
+    assert collector.classify("vm", cpu, {"vm": {"idle": 5, "under": 30, "saturated": 90}})[0] == "MET-VM-002"
+    assert collector.classify("vm", cpu, {"vm": {"idle": 40, "under": 30, "saturated": 90}}) == (None, 20)  # out of order: defaults
+    assert collector.resolve_thresholds({"vm": {"idle": "x", "under": -1}}) == collector.DEFAULT_THRESHOLDS
+    assert collector.resolve_thresholds("junk") == collector.DEFAULT_THRESHOLDS
+
+
+def test_validate_thresholds():
+    import rightsizing
+    ok, errors = rightsizing.validate_thresholds({"vm": {"idle": 10, "under": 25, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}})
+    assert errors == [] and ok["vm"]["under"] == 25
+    for bad in (None, {}, {"vm": {"idle": 10, "under": 5, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
+                {"vm": {"idle": 0, "under": 5, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
+                {"vm": {"idle": 1, "under": 5, "saturated": 101}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
+                {"vm": {"idle": True, "under": 5, "saturated": 9}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}}):
+        value, problems = rightsizing.validate_thresholds(bad)
+        assert value is None and problems
+
+
+def test_reassess_judges_every_resource_and_the_distribution_by_the_saved_thresholds():
+    import rightsizing
+    saved = {"vm": {"idle": 5, "under": 50, "saturated": 80}, "sql": {"under": 10, "saturated": 80}, "plan": {"under": 20, "saturated": 80}}
+    consistent = {**METRICS, "distribution": {**METRICS["distribution"], "vm": {"idle": 1, "under": 1, "right": 1, "saturated": 0, "nodata": 3}}}
+    metrics, limits = rightsizing.reassess(consistent, saved)
+    by_name = {r["name"]: r["assessment"] for r in metrics["resources"]}
+    assert by_name["vm3"] == "under" and by_name["vm2"] == "under" and limits["vm"]["under"] == 50
+    assert metrics["distribution"]["vm"] == {"idle": 1, "under": 2, "right": 0, "saturated": 0, "nodata": 3}
+    assert rightsizing.reassess(METRICS, saved)[0]["distribution"]["vm"] == METRICS["distribution"]["vm"]  # the list is not the whole: keep the counts
+    same, _ = rightsizing.reassess(METRICS, None)
+    assert same is METRICS
+    assert rightsizing.kind_labels("vm", limits)["under"] == "Underutilized (under 50%)"
+
+
+def test_thresholds_apply_to_the_page(client, monkeypatch):
+    serve(monkeypatch, {"runId": "r1", "metrics": METRICS, "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    saved = {"vm": {"idle": 5, "under": 50, "saturated": 80}, "sql": {"under": 10, "saturated": 80}, "plan": {"under": 20, "saturated": 80}}
+    monkeypatch.setattr(data, "get_setting", lambda name: saved)
+    html = page(client, "?kind=vm")
+    assert "Underutilized (under 50%)" in html and "custom" in html and 'id="thresholds-form"' in html and 'name="vm.under" value="50"' in html
+
+
+def test_thresholds_api(client, monkeypatch):
+    stored = {}
+    monkeypatch.setattr(data, "save_setting", lambda name, value: stored.update({name: value}))
+    good = {"vm": {"idle": 5, "under": 25, "saturated": 90}, "sql": {"under": 10, "saturated": 80}, "plan": {"under": 20, "saturated": 80}}
+    assert client.post("/api/rightsizing-thresholds", json={"thresholds": good}).status_code == 403  # needs the header
+    headers = {"X-WAF-Pulse": "1"}
+    assert client.post("/api/rightsizing-thresholds", json={"thresholds": good}, headers=headers).status_code == 200
+    assert stored["rightsizing-thresholds"] == good
+    bad = client.post("/api/rightsizing-thresholds", json={"thresholds": {"vm": {"idle": 50, "under": 10, "saturated": 90}}}, headers=headers)
+    assert bad.status_code == 422 and "error" in bad.get_json()
+    assert client.post("/api/rightsizing-thresholds", json={"reset": True}, headers=headers).status_code == 200 and stored["rightsizing-thresholds"] is None

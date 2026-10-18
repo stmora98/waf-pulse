@@ -112,6 +112,28 @@ VM_IDLE, VM_UNDER, VM_SATURATED = 5, 15, 80
 VM_MEMORY_BOUND, VM_MEMORY_SATURATED = 70, 90  # low CPU with this much memory in use is a memory-bound machine, not an idle one
 PLAN_UNDER, PLAN_SATURATED_CPU, PLAN_SATURATED_MEMORY = 20, 80, 85
 
+# What the visitor can change on the dashboard (percent of average utilization); the memory limits stay fixed.
+DEFAULT_THRESHOLDS = {"vm": {"idle": VM_IDLE, "under": VM_UNDER, "saturated": VM_SATURATED},
+                      "sql": {"under": SQL_OVERSIZED, "saturated": SQL_SATURATED},
+                      "plan": {"under": PLAN_UNDER, "saturated": PLAN_SATURATED_CPU}}
+
+
+def resolve_thresholds(saved):
+    """The defaults with the visitor's saved values on top; anything out of range or out of order falls back."""
+    result = {group: dict(values) for group, values in DEFAULT_THRESHOLDS.items()}
+    for group, values in (saved or {}).items() if isinstance(saved, dict) else []:
+        if group not in result or not isinstance(values, dict):
+            continue
+        merged = dict(result[group])
+        for name in merged:
+            number = values.get(name)
+            if isinstance(number, (int, float)) and not isinstance(number, bool) and 0 < number <= 100:
+                merged[name] = number
+        order = [merged[name] for name in ("idle", "under", "saturated") if name in merged]
+        if order == sorted(set(order)):
+            result[group] = merged
+    return result
+
 _sleep = time.sleep
 
 
@@ -137,40 +159,42 @@ def parse_batch(body):
     return result
 
 
-def classify(kind, metrics):
+def classify(kind, metrics, thresholds=None):
     """Returns (rule id, value) for a measured resource, or (None, value) when it is healthy or has no data."""
+    limits = resolve_thresholds(thresholds)
+    vm_idle, vm_under, vm_saturated = limits["vm"]["idle"], limits["vm"]["under"], limits["vm"]["saturated"]
     if kind == "vm":
         value = summarize(metrics.get("Percentage CPU", []), "average")
         if value is None:
             return None, None
-        if value >= VM_SATURATED:
+        if value >= vm_saturated:
             return "MET-VM-003", value
         memory = summarize(metrics.get("Memory used %", []), "average")
         if memory is not None and memory >= VM_MEMORY_SATURATED:
             return "MET-VM-004", memory
         if memory is not None and memory >= VM_MEMORY_BOUND:
             return None, value
-        if value < VM_IDLE:
+        if value < vm_idle:
             return "MET-VM-001", value
-        return ("MET-VM-002", value) if value < VM_UNDER else (None, value)
+        return ("MET-VM-002", value) if value < vm_under else (None, value)
     if kind in ("sql_dtu", "sql_vcore"):
         name = "dtu_consumption_percent" if kind == "sql_dtu" else "cpu_percent"
         value = summarize(metrics.get(name, []), "average")
         if value is None:
             return None, None
-        if value < SQL_OVERSIZED:
+        if value < limits["sql"]["under"]:
             return "MET-SQL-001", value
-        return ("MET-SQL-002", value) if value >= SQL_SATURATED else (None, value)
+        return ("MET-SQL-002", value) if value >= limits["sql"]["saturated"] else (None, value)
     if kind == "plan":
         cpu = summarize(metrics.get("CpuPercentage", []), "average")
         memory = summarize(metrics.get("MemoryPercentage", []), "average")
         if cpu is None:
             return None, None
-        if cpu >= PLAN_SATURATED_CPU:
+        if cpu >= limits["plan"]["saturated"]:
             return "MET-APP-002", cpu
         if memory is not None and memory >= PLAN_SATURATED_MEMORY:
             return "MET-APP-002", memory
-        return ("MET-APP-001", cpu) if cpu < PLAN_UNDER else (None, cpu)
+        return ("MET-APP-001", cpu) if cpu < limits["plan"]["under"] else (None, cpu)
     if kind == "storage":
         points = metrics.get("Transactions", [])
         if not points:
@@ -259,7 +283,7 @@ def resource_group_of(resource_id):
     lowered = [p.lower() for p in parts]
     return parts[lowered.index("resourcegroups") + 1] if "resourcegroups" in lowered[:-1] else ""
 
-def evaluate(run_id, resources, measurements, sizes=None):
+def evaluate(run_id, resources, measurements, sizes=None, thresholds=None):
     """resources: {kind: [ARG rows]}; measurements: {resourceid (lower): {metric: points}}; sizes: {(subscription, region):
     {size: skus.parse entry}}. Returns (findings, stats, dataset); dataset["series"] has the daily curves."""
     findings, counts, measured_totals = [], {}, {}
@@ -275,7 +299,7 @@ def evaluate(run_id, resources, measurements, sizes=None):
                 size = ((sizes or {}).get((str(row.get("subscriptionId", "")).lower(), str(row.get("location", "")).lower())) or {}).get(
                     str(row.get("detail", "")).lower())
                 metrics = enrich_vm(metrics, size)
-            rule, value = classify(kind, metrics)
+            rule, value = classify(kind, metrics, thresholds)
             if value is None:
                 continue
             sub = str(row.get("subscriptionId", "")).lower()
@@ -301,7 +325,7 @@ def evaluate(run_id, resources, measurements, sizes=None):
                         record[field] = round(number, 1)
                 if size:
                     record["vcpus"], record["memoryGB"] = size.get("vcpus"), size.get("memoryGB")
-                if rule is None and value is not None and value < VM_UNDER and record.get("memory", 0) >= VM_MEMORY_BOUND:
+                if rule is None and value is not None and value < resolve_thresholds(thresholds)["vm"]["under"] and record.get("memory", 0) >= VM_MEMORY_BOUND:
                     record["note"] = "memory-bound"
             curve = series_of(kind, metrics)
             if curve:
@@ -401,7 +425,7 @@ def plan_requests(resources):
     ]
 
 
-def collect(credential, run_id, subscription_ids):
+def collect(credential, run_id, subscription_ids, thresholds=None):
     resources, errors = {}, []
     for kind, target in TARGETS.items():
         rows = []
@@ -431,5 +455,6 @@ def collect(credential, run_id, subscription_ids):
             sizes[(sub_id, region)] = skus.fetch(credential, sub_id, region)
         except Exception as exc:
             errors.append({"ruleId": f"metrics-sizes-{region}", "error": str(exc).splitlines()[0][:200]})
-    findings, stats, dataset = evaluate(run_id, resources, measurements, sizes)
+    findings, stats, dataset = evaluate(run_id, resources, measurements, sizes, thresholds)
+    dataset["thresholds"] = resolve_thresholds(thresholds)
     return findings, stats, dataset, errors

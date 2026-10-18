@@ -25,6 +25,16 @@ def container(name):
     return database().get_container_client(name)
 
 
+def get_setting(name):
+    """A setting the dashboard saved (thresholds, for example), or None."""
+    from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
+    try:
+        return container("summaries").read_item(f"setting-{name}", partition_key="settings").get("value")
+    except CosmosResourceNotFoundError:
+        return None
+
+
 def start_run(run_id, started_utc, trigger):
     container("runs").upsert_item(
         {

@@ -483,3 +483,10 @@ a.azure-link:active { transform: scale(0.97); }
 .curve-mem { stroke: #9b72e0; fill: #9b72e0; background: #9b72e0; }
 .chart .curve-mem.curve { fill: none; }
 
+/* right-sizing thresholds */
+#thresholds-panel > summary { cursor: pointer; font-weight: 600; }
+.thresholds { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 20px; align-items: end; }
+.thresholds label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.thresholds input[type="number"] { width: 5.5em; }
+.thresholds .lz-row { grid-column: 1 / -1; }
+

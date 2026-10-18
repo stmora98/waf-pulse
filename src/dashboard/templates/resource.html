@@ -32,7 +32,11 @@
             <tbody>
               {% if r %}
                 <tr><th>Assessment</th><td><span class="chip as-{{ r.assessment }}">{{ r.assessment | capitalize }}</span>{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td></tr>
-                <tr><th>Average / peak CPU</th><td>{{ r.avg }}%{% if r.max is defined %} / {{ r.max }}%{% endif %}</td></tr>
+                {% if r.kind == 'storage' %}
+                  <tr><th>Transactions</th><td>{{ '{:,.0f}'.format(r.avg) }} <span class="muted">in {{ usage.lookback }} days</span></td></tr>
+                {% else %}
+                  <tr><th>Average / peak {{ 'DTU' if r.kind == 'sql_dtu' else 'CPU' }}</th><td>{{ r.avg }}%{% if r.max is defined %} / {{ r.max }}%{% endif %}</td></tr>
+                {% endif %}
                 {% if r.memory is defined %}<tr><th>Memory in use</th><td>{{ r.memory }}%{% if r.memoryGB %} <span class="muted">of {{ '{:g}'.format(r.memoryGB) }} GiB</span>{% endif %}</td></tr>{% endif %}
                 {% if r.iops is defined %}<tr><th>Disk IOPS</th><td>{{ r.iops }}% of the size limit{% if r.iopsMax is defined %} <span class="muted">· peak {{ r.iopsMax }}%</span>{% endif %}</td></tr>{% endif %}
                 {% if r.net is defined %}<tr><th>Network</th><td>{{ r.net }} Mbps average{% if r.netMax is defined %} <span class="muted">· peak {{ r.netMax }}</span>{% endif %}</td></tr>{% endif %}

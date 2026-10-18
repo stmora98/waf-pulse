@@ -519,3 +519,37 @@ function fitPopover(pop, container, anchor) {
   document.addEventListener("click", close);
   document.addEventListener("keydown", function (event) { if (event.key === "Escape") { close(); } });
 })();
+
+(function () {
+  var form = document.getElementById("thresholds-form");
+  if (!form) { return; }
+  var status = document.getElementById("thresholds-status");
+  var reset = document.getElementById("thresholds-reset");
+
+  function send(body) {
+    status.textContent = "Saving...";
+    return fetch("/api/rightsizing-thresholds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (response.ok) { window.location.reload(); return null; }
+      return response.json().then(function (result) { throw new Error(result.error || "failed"); });
+    }).catch(function (error) {
+      status.textContent = error.message === "failed" ? "The thresholds could not be saved." : error.message;
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var thresholds = {};
+    Array.prototype.forEach.call(form.querySelectorAll("input[name]"), function (input) {
+      var parts = input.name.split(".");
+      thresholds[parts[0]] = thresholds[parts[0]] || {};
+      thresholds[parts[0]][parts[1]] = Number(input.value);
+    });
+    send({ thresholds: thresholds });
+  });
+  reset.addEventListener("click", function () { send({ reset: true }); });
+})();
+

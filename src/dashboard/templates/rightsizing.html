@@ -27,6 +27,23 @@
         {% endif %}
       </section>
 
+      <details class="panel" id="thresholds-panel"{% if custom %} open{% endif %}>
+        <summary>Thresholds{% if custom %} <span class="chip">custom</span>{% endif %}</summary>
+        <p class="muted">The average utilization that makes a resource idle, underutilized or saturated. The dashboard applies them at once; the findings in the action items use them from the next refresh.</p>
+        <form id="thresholds-form" class="thresholds">
+          {% for group, name, label in threshold_fields %}
+            <label>{{ label }}
+              <span><input type="number" min="1" max="100" step="1" name="{{ group }}.{{ name }}" value="{{ '%g' | format(limits[group][name]) }}" required> %</span>
+            </label>
+          {% endfor %}
+          <div class="lz-row">
+            <button type="submit">Apply</button>
+            <button type="button" class="icon-button" id="thresholds-reset"{% if not custom %} disabled{% endif %}>Back to the defaults</button>
+            <span class="muted" id="thresholds-status" role="status"></span>
+          </div>
+        </form>
+      </details>
+
       <section class="insights two">
         {% for card in cards %}
           <div class="panel">

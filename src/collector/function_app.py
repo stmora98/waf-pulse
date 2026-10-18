@@ -217,8 +217,13 @@ def act_governance(payload: dict):
 def act_metrics(payload: dict):
     run_id = payload["runId"]
     try:
+        try:
+            thresholds = store.get_setting("rightsizing-thresholds")
+        except Exception:
+            logging.exception("Could not read the right-sizing thresholds; using the defaults")
+            thresholds = None
         findings, stats, dataset, errors = metrics.collect(
-            credentials.collector_credential(), run_id, payload["subscriptions"]
+            credentials.collector_credential(), run_id, payload["subscriptions"], thresholds
         )
         store.save_findings(findings)
         store.save_stats(run_id, "metrics", {"stats": stats, "errors": errors})
