@@ -1,6 +1,8 @@
 """Chart geometry for the dashboard. Pure functions: the templates draw SVG from these numbers, so no inline style
 or script is needed and the content security policy stays strict."""
 
+from datetime import date, timedelta
+
 SEVERITIES = ("critical", "high", "medium", "low")
 
 
@@ -60,3 +62,50 @@ def sparkline(points, width=360, height=90, pad=8):
         coords.append({"x": round(x, 1), "y": round(y, 1), "label": label, "value": value})
     return {"width": width, "height": height, "dots": coords, "top": top,
             "line": " ".join(f"{c['x']},{c['y']}" for c in coords)}
+
+def trend(series, width=720, height=220, left=36, right=12, top=10, bottom=26, marks=()):
+    """Daily curves on a 0-100 scale. series: {from: 'YYYY-MM-DD', cpu, cpuMax, mem: [value or None, ...]}; marks: [(value,
+    label)] horizontal reference lines. Returns the polylines (broken where a day has no data), grid, ticks and the points
+    to hover, or None without data."""
+    if not series or not any(v is not None for v in series.get("cpu", [])):
+        return None
+    count = len(series["cpu"])
+    try:
+        first = date.fromisoformat(series["from"])
+    except (KeyError, ValueError):
+        first = None
+    inner_w, inner_h = width - left - right, height - top - bottom
+    step = inner_w / max(count - 1, 1)
+
+    def point(index, value):
+        return round(left + step * index, 1), round(top + inner_h * (1 - min(max(value, 0), 100) / 100), 1)
+
+    def lines(values):
+        runs, current = [], []
+        for index, value in enumerate(values):
+            if value is None:
+                if current:
+                    runs.append(current)
+                current = []
+            else:
+                current.append(point(index, value))
+        if current:
+            runs.append(current)
+        return [" ".join(f"{x},{y}" for x, y in run) if len(run) > 1 else f"{run[0][0] - 2},{run[0][1]} {run[0][0] + 2},{run[0][1]}" for run in runs]
+
+    def day(index):
+        return (first + timedelta(days=index)).isoformat() if first else str(index + 1)
+
+    curves = []
+    for key, name in (("cpuMax", "Peak CPU"), ("cpu", "Average CPU"), ("mem", "Memory in use")):
+        values = series.get(key)
+        if values and any(v is not None for v in values):
+            curves.append({"key": key, "name": name, "lines": lines(values),
+                           "dots": [{"x": point(i, v)[0], "y": point(i, v)[1], "tip": f"{day(i)} · {name} {v:g}%"} for i, v in enumerate(values) if v is not None]})
+    ticks = sorted({0, count // 2, count - 1})
+    return {
+        "width": width, "height": height, "left": left, "right": width - right, "curves": curves,
+        "grid": [{"y": point(0, v)[1], "label": f"{v}%"} for v in (0, 25, 50, 75, 100)],
+        "marks": [{"y": point(0, v)[1], "label": label} for v, label in marks],
+        "ticks": [{"x": point(i, 0)[0], "label": day(i)[5:]} for i in ticks], "label_y": height - 6,
+    }

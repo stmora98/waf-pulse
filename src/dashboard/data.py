@@ -207,3 +207,12 @@ def rows_of(run_id, kind):
     for item in items:
         rows.extend(item.get("rows", []))
     return rows
+
+
+def series_of(run_id, resource_id):
+    """The daily utilization curve of one resource in a run, or None."""
+    items = _db().get_container_client("summaries").query_items(
+        "SELECT VALUE r FROM c JOIN r IN c.rows WHERE c.runId = @run AND c.kind = 'series' AND r.id = @id",
+        parameters=[{"name": "@run", "value": run_id}, {"name": "@id", "value": resource_id.lower()}], partition_key=run_id)
+    return next(iter(items), None)
+

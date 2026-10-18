@@ -24,6 +24,49 @@
         </table>
       </section>
 
+      {% if usage %}
+        {% set r = usage.row %}{% set a = usage.advice %}
+        <h3>Utilization and right-sizing</h3>
+        <section class="panel">
+          <table class="narrow">
+            <tbody>
+              {% if r %}
+                <tr><th>Assessment</th><td><span class="chip as-{{ r.assessment }}">{{ r.assessment | capitalize }}</span>{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td></tr>
+                <tr><th>Average / peak CPU</th><td>{{ r.avg }}%{% if r.max is defined %} / {{ r.max }}%{% endif %}</td></tr>
+                {% if r.memory is defined %}<tr><th>Memory in use</th><td>{{ r.memory }}%{% if r.memoryGB %} <span class="muted">of {{ '{:g}'.format(r.memoryGB) }} GiB</span>{% endif %}</td></tr>{% endif %}
+                {% if r.iops is defined %}<tr><th>Disk IOPS</th><td>{{ r.iops }}% of the size limit{% if r.iopsMax is defined %} <span class="muted">· peak {{ r.iopsMax }}%</span>{% endif %}</td></tr>{% endif %}
+                {% if r.net is defined %}<tr><th>Network</th><td>{{ r.net }} Mbps average{% if r.netMax is defined %} <span class="muted">· peak {{ r.netMax }}</span>{% endif %}</td></tr>{% endif %}
+                {% if r.vcpus %}<tr><th>Size</th><td>{{ r.detail }} <span class="muted">· {{ '{:g}'.format(r.vcpus) }} vCPU</span></td></tr>{% endif %}
+              {% endif %}
+              {% if a %}
+                <tr><th>Azure Advisor</th><td><strong>{{ 'Shut down' if a.action | lower == 'shutdown' else '→ ' ~ a.targetSku }}</strong>
+                  {% if a.monthlySavings %}<span class="muted">· saves {{ '{:,.0f}'.format(a.monthlySavings) }} {{ a.currency }} per month</span>{% endif %}</td></tr>
+              {% endif %}
+              {% if usage.cost is not none %}<tr><th>Cost, last 30 days</th><td>{{ '{:,.0f}'.format(usage.cost) }}</td></tr>{% endif %}
+            </tbody>
+          </table>
+          {% if usage.chart %}
+            {% set c = usage.chart %}
+            <svg class="chart trend" viewBox="0 0 {{ c.width }} {{ c.height }}" role="img" aria-label="Daily utilization of the last {{ usage.lookback }} days">
+              {% for g in c.grid %}
+                <line class="grid" x1="{{ c.left }}" x2="{{ c.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+                <text class="axis" x="{{ c.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+              {% endfor %}
+              {% for m in c.marks %}
+                <line class="mark" x1="{{ c.left }}" x2="{{ c.right }}" y1="{{ m.y }}" y2="{{ m.y }}"></line>
+                <text class="axis" x="{{ c.right }}" y="{{ m.y - 3 }}" text-anchor="end">{{ m.label }}</text>
+              {% endfor %}
+              {% for curve in c.curves %}
+                {% for run in curve.lines %}<polyline class="curve curve-{{ curve.key }}" points="{{ run }}"></polyline>{% endfor %}
+                {% for d in curve.dots %}<circle class="curve-dot curve-{{ curve.key }}" cx="{{ d.x }}" cy="{{ d.y }}" r="3"><title>{{ d.tip }}</title></circle>{% endfor %}
+              {% endfor %}
+              {% for t in c.ticks %}<text class="axis" x="{{ t.x }}" y="{{ c.label_y }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+            </svg>
+            <ul class="legend">{% for curve in c.curves %}<li><span class="swatch curve-{{ curve.key }}"></span>{{ curve.name }}</li>{% endfor %}</ul>
+          {% endif %}
+        </section>
+      {% endif %}
+
       <h3>Findings for this resource <span class="muted">· {{ findings | length }}</span></h3>
       {% if findings %}
         <div class="table-wrap">

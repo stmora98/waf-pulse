@@ -72,10 +72,10 @@ def save_resources(run_id, rows, truncated=False):
                            {"rows": rows[index:index + RESOURCE_CHUNK], "truncated": truncated})
 
 
-def save_rows(run_id, kind, rows):
+def save_rows(run_id, kind, rows, chunk=RESOURCE_CHUNK):
     """Rows kept next to a run but apart from its summary (advice per resource, cost per resource), in chunks."""
-    for index in range(0, max(len(rows), 1), RESOURCE_CHUNK):
-        _save_run_document(run_id, kind, f"{kind}:{index // RESOURCE_CHUNK}", {"rows": rows[index:index + RESOURCE_CHUNK]})
+    for index in range(0, max(len(rows), 1), chunk):
+        _save_run_document(run_id, kind, f"{kind}:{index // chunk}", {"rows": rows[index:index + chunk]})
 
 
 def _save_run_document(run_id, kind, key, payload):

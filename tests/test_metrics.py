@@ -4,7 +4,7 @@ import pytest
 
 import app as dashboard_app
 import data
-from waf_pulse import graph, metrics
+from waf_pulse import graph, metrics, skus
 
 SUB = "11111111-1111-1111-1111-111111111111"
 NOW = datetime(2026, 10, 15, tzinfo=timezone.utc)
@@ -217,7 +217,7 @@ def test_fetch_batch_calls_the_regional_endpoint(monkeypatch):
     result = metrics.fetch_batch(Credential(), "vm", SUB, "westus2", ["/x/Y"], now=NOW)
     assert captured["url"] == f"https://westus2.metrics.monitor.azure.com/subscriptions/{SUB}/metrics:getBatch"
     assert captured["params"]["metricnamespace"] == "Microsoft.Compute/virtualMachines"
-    assert captured["params"]["metricnames"] == "Percentage CPU" and captured["params"]["interval"] == "P1D"
+    assert captured["params"]["metricnames"].startswith("Percentage CPU,Available Memory Bytes") and captured["params"]["interval"] == "P1D"
     assert captured["params"]["endtime"] == "2026-10-15T00:00:00Z" and captured["params"]["starttime"] == "2026-09-15T00:00:00Z"
     assert captured["scope"] == metrics.SCOPE and captured["token"] == "secret-token"
     assert result == {"/x/y": {"Percentage CPU": points("average", 3)}}
@@ -238,6 +238,7 @@ def test_collect_reports_failures_without_losing_the_rest(monkeypatch):
 
     monkeypatch.setattr(graph, "query", fake_query)
     monkeypatch.setattr(metrics, "fetch_batch", fake_fetch)
+    monkeypatch.setattr(skus, "fetch", lambda credential, sub, region: {})
     findings, stats, dataset, errors = metrics.collect(None, "r", [SUB])
     assert [f["ruleId"] for f in findings] == ["MET-VM-001"]
     assert errors == [{"ruleId": "metrics-plan", "error": "Forbidden"}]
@@ -251,6 +252,7 @@ def test_a_failing_metrics_request_is_reported(monkeypatch):
         raise RuntimeError("HTTP 400")
 
     monkeypatch.setattr(metrics, "fetch_batch", boom)
+    monkeypatch.setattr(skus, "fetch", lambda credential, sub, region: {})
     findings, stats, dataset, errors = metrics.collect(None, "r", [SUB])
     assert findings == [] and errors[0]["ruleId"] == "metrics-vm-eastus"
 
@@ -283,3 +285,98 @@ def test_pillar_pages_render_the_right_sizing_panel(monkeypatch):
     assert "Right-sizing" in html and "VMs 4" in html and "busy-vm" in html
     assert "<i>idle-vm</i>" not in html and "&lt;i&gt;idle-vm&lt;/i&gt;" in html
     assert "Right-sizing" in client.get("/pillar/cost").get_data(as_text=True)
+
+
+# --- memory, disk and network of virtual machines ------------------------------------------------------------
+
+GIB = 1024 ** 3
+SIZE = {"vcpus": 4, "memoryGB": 16, "iops": 1000, "restricted": False}
+
+
+def test_sizes_are_read_from_the_skus_api():
+    body = {"value": [
+        {"resourceType": "virtualMachines", "name": "Standard_D4as_v5", "capabilities": [
+            {"name": "vCPUs", "value": "4"}, {"name": "MemoryGB", "value": "16"}, {"name": "UncachedDiskIOPS", "value": "6400"}], "restrictions": []},
+        {"resourceType": "virtualMachines", "name": "Standard_X", "capabilities": [], "restrictions": [{"reasonCode": "NotAvailableForSubscription"}]},
+        {"resourceType": "disks", "name": "Premium_LRS", "capabilities": []}]}
+    sizes = skus.parse(body)
+    assert sizes["standard_d4as_v5"] == {"vcpus": 4, "memoryGB": 16, "iops": 6400, "restricted": False}
+    assert sizes["standard_x"]["restricted"] is True and sizes["standard_x"]["vcpus"] is None and "premium_lrs" not in sizes
+    assert skus.parse(None) == {}
+
+
+def test_skus_follow_the_next_link(monkeypatch):
+    pages = [{"value": [{"resourceType": "virtualMachines", "name": "A", "capabilities": []}], "nextLink": "https://next"},
+             {"value": [{"resourceType": "virtualMachines", "name": "B", "capabilities": []}]}]
+    calls = []
+
+    class Response:
+        def __init__(self, body):
+            self.body = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.body
+
+    def fake_get(url, params=None, headers=None, timeout=0):
+        calls.append((url, params))
+        return Response(pages[len(calls) - 1])
+
+    class Credential:
+        def get_token(self, scope):
+            return type("T", (), {"token": "t"})()
+
+    monkeypatch.setattr(skus.requests, "get", fake_get)
+    assert set(skus.fetch(Credential(), SUB, "eastus")) == {"a", "b"}
+    assert calls[0][1]["$filter"] == "location eq 'eastus'" and calls[1] == ("https://next", None)
+
+
+def test_enrich_derives_memory_disk_and_network():
+    raw = {"Available Memory Bytes": points("average", 4 * GIB),
+           "Disk Read Operations/Sec": points("average", 100) , "Disk Write Operations/Sec": points("average", 150),
+           "Network In Total": points("average", 7_500_000), "Network Out Total": points("average", 7_500_000)}
+    raw["Disk Read Operations/Sec"][0]["maximum"] = 300
+    raw["Disk Write Operations/Sec"][0]["maximum"] = 200
+    out = metrics.enrich_vm(raw, SIZE)
+    assert out["Memory used %"][0]["average"] == 75.0
+    assert out["Disk IOPS %"][0]["average"] == 25.0 and out["Disk IOPS %"][0]["maximum"] == 50.0
+    assert out["Network Mbps"][0]["average"] == 2.0
+    assert metrics.enrich_vm(raw, None).keys() >= {"Network Mbps"} and "Memory used %" not in metrics.enrich_vm(raw, None)
+
+
+def test_a_vm_with_low_cpu_but_busy_memory_is_not_idle():
+    cpu = {"Percentage CPU": points("average", 3)}
+    assert metrics.classify("vm", {**cpu, "Memory used %": points("average", 40)})[0] == "MET-VM-001"
+    assert metrics.classify("vm", {**cpu, "Memory used %": points("average", 75)}) == (None, 3)
+    assert metrics.classify("vm", {**cpu, "Memory used %": points("average", 93)}) == ("MET-VM-004", 93)
+    assert metrics.classify("vm", {"Percentage CPU": points("average", 90), "Memory used %": points("average", 95)})[0] == "MET-VM-003"
+
+
+def test_evaluate_adds_vm_details_and_the_daily_series():
+    vm = {**row("Microsoft.Compute/virtualMachines", "big"), "detail": "Standard_D4as_v5"}
+    raw = {"Percentage CPU": points("average", 3, 5), "Available Memory Bytes": points("average", 8 * GIB, 8 * GIB),
+           "Network In Total": points("average", 0, 0), "Network Out Total": points("average", 0, 0)}
+    raw["Percentage CPU"][0]["maximum"] = 40
+    findings, stats, dataset = metrics.evaluate("r", {"vm": [vm]}, {vm["id"].lower(): raw}, {(SUB, "eastus"): {"standard_d4as_v5": SIZE}})
+    record = dataset["resources"][0]
+    assert record["memory"] == 50.0 and record["vcpus"] == 4 and record["memoryGB"] == 16 and record["net"] == 0.0
+    assert "note" not in record and record["assessment"] == "idle"
+    assert dataset["series"] == [{"id": vm["id"].lower(), "from": "2026-10-01", "cpu": [3, 5], "cpuMax": [40, None], "mem": [50.0, 50.0]}]
+    busy = {**raw, "Available Memory Bytes": points("average", 4 * GIB, 4 * GIB)}
+    _, _, dataset = metrics.evaluate("r", {"vm": [vm]}, {vm["id"].lower(): busy}, {(SUB, "eastus"): {"standard_d4as_v5": SIZE}})
+    assert dataset["resources"][0]["note"] == "memory-bound" and dataset["resources"][0]["assessment"] == "right"
+
+
+def test_a_failing_sizes_call_is_reported_and_right_sizing_goes_on(monkeypatch):
+    vm = row("Microsoft.Compute/virtualMachines", "a")
+    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines" in kql else [])
+    monkeypatch.setattr(metrics, "fetch_batch", lambda *a, **k: {vm["id"].lower(): {"Percentage CPU": points("average", 1)}})
+
+    def refuse(credential, sub, region):
+        raise RuntimeError("AuthorizationFailed\nmore")
+
+    monkeypatch.setattr(skus, "fetch", refuse)
+    findings, _, _, errors = metrics.collect(None, "r", [SUB])
+    assert [f["ruleId"] for f in findings] == ["MET-VM-001"] and errors == [{"ruleId": "metrics-sizes-eastus", "error": "AuthorizationFailed"}]

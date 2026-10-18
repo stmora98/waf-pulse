@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import graph
+from . import graph, skus
 from .findings import make_finding
 
 BATCH_SIZE = 50
@@ -25,7 +25,7 @@ WORKERS = 4
 TARGETS = {
     "vm": {
         "namespace": "Microsoft.Compute/virtualMachines",
-        "metrics": "Percentage CPU",
+        "metrics": "Percentage CPU,Available Memory Bytes,Disk Read Operations/Sec,Disk Write Operations/Sec,Network In Total,Network Out Total",
         "aggregation": "Average,Maximum",
         "query": """
 resources
@@ -87,6 +87,8 @@ RULES = {
                    "Resize the virtual machine to a smaller size."),
     "MET-VM-003": ("Performance Efficiency", "high", "Virtual machine is saturated: average CPU {value:.1f}% over {days} days",
                    "Resize to a larger size or scale out the workload."),
+    "MET-VM-004": ("Performance Efficiency", "high", "Virtual machine is short on memory: average memory use {value:.1f}% over {days} days",
+                   "Resize to a size with more memory or find what is holding it."),
     "MET-SQL-001": ("Cost Optimization", "medium", "SQL database is oversized: average utilization {value:.1f}% over {days} days",
                     "Move the database to a smaller service objective."),
     "MET-SQL-002": ("Performance Efficiency", "high", "SQL database is saturated: average utilization {value:.1f}% over {days} days",
@@ -99,7 +101,7 @@ RULES = {
                     "Delete the storage account if it is no longer used."),
 }
 APPLICABLE = {
-    "vm": ["MET-VM-001", "MET-VM-002", "MET-VM-003"],
+    "vm": ["MET-VM-001", "MET-VM-002", "MET-VM-003", "MET-VM-004"],
     "sql_dtu": ["MET-SQL-001", "MET-SQL-002"],
     "sql_vcore": ["MET-SQL-001", "MET-SQL-002"],
     "plan": ["MET-APP-001", "MET-APP-002"],
@@ -107,6 +109,7 @@ APPLICABLE = {
 }
 SQL_OVERSIZED, SQL_SATURATED = 10, 80
 VM_IDLE, VM_UNDER, VM_SATURATED = 5, 15, 80
+VM_MEMORY_BOUND, VM_MEMORY_SATURATED = 70, 90  # low CPU with this much memory in use is a memory-bound machine, not an idle one
 PLAN_UNDER, PLAN_SATURATED_CPU, PLAN_SATURATED_MEMORY = 20, 80, 85
 
 _sleep = time.sleep
@@ -140,11 +143,16 @@ def classify(kind, metrics):
         value = summarize(metrics.get("Percentage CPU", []), "average")
         if value is None:
             return None, None
+        if value >= VM_SATURATED:
+            return "MET-VM-003", value
+        memory = summarize(metrics.get("Memory used %", []), "average")
+        if memory is not None and memory >= VM_MEMORY_SATURATED:
+            return "MET-VM-004", memory
+        if memory is not None and memory >= VM_MEMORY_BOUND:
+            return None, value
         if value < VM_IDLE:
             return "MET-VM-001", value
-        if value < VM_UNDER:
-            return "MET-VM-002", value
-        return ("MET-VM-003", value) if value >= VM_SATURATED else (None, value)
+        return ("MET-VM-002", value) if value < VM_UNDER else (None, value)
     if kind in ("sql_dtu", "sql_vcore"):
         name = "dtu_consumption_percent" if kind == "sql_dtu" else "cpu_percent"
         value = summarize(metrics.get(name, []), "average")
@@ -173,7 +181,7 @@ def classify(kind, metrics):
 
 
 ASSESSMENT = {
-    "MET-VM-001": "idle", "MET-VM-002": "under", "MET-VM-003": "saturated",
+    "MET-VM-001": "idle", "MET-VM-002": "under", "MET-VM-003": "saturated", "MET-VM-004": "saturated",
     "MET-SQL-001": "under", "MET-SQL-002": "saturated",
     "MET-APP-001": "under", "MET-APP-002": "saturated",
     "MET-STG-001": "idle",
@@ -189,22 +197,84 @@ def peak(kind, metrics):
     return summarize(metrics.get(name, []), "maximum") if name else None
 
 
+def _by_day(points):
+    return {p.get("timeStamp"): p for p in points or []}
+
+
+def _pair(first, second, field, scale):
+    values = [v for v in (first.get(field), second.get(field)) if v is not None]
+    return round(sum(values) * scale, 2) if values else None
+
+
+def enrich_vm(metrics, size):
+    """Adds what the size of a virtual machine lets us read from its raw metrics: memory in use (%), disk IOPS (% of what
+    the size allows) and network traffic (Mbps). `size` is the entry of skus.parse; without it only the network is derived."""
+    extra = {}
+    memory_gb = (size or {}).get("memoryGB")
+    if memory_gb and metrics.get("Available Memory Bytes"):
+        total = memory_gb * 1024 ** 3
+        extra["Memory used %"] = [
+            {"timeStamp": p.get("timeStamp"), "average": None if p.get("average") is None else round(min(max(100 - p["average"] / total * 100, 0), 100), 2)}
+            for p in metrics["Available Memory Bytes"]]
+    reads, writes = _by_day(metrics.get("Disk Read Operations/Sec")), _by_day(metrics.get("Disk Write Operations/Sec"))
+    cap = (size or {}).get("iops")
+    if cap and (reads or writes):
+        extra["Disk IOPS %"] = [
+            {"timeStamp": day, "average": _pair(reads.get(day, {}), writes.get(day, {}), "average", 100 / cap),
+             "maximum": _pair(reads.get(day, {}), writes.get(day, {}), "maximum", 100 / cap)}
+            for day in sorted(set(reads) | set(writes))]
+    ins, outs = _by_day(metrics.get("Network In Total")), _by_day(metrics.get("Network Out Total"))
+    if ins or outs:
+        # the daily average of a per-minute total, so bytes per minute -> megabits per second
+        scale = 8 / 60 / 1e6
+        extra["Network Mbps"] = [
+            {"timeStamp": day, "average": _pair(ins.get(day, {}), outs.get(day, {}), "average", scale),
+             "maximum": _pair(ins.get(day, {}), outs.get(day, {}), "maximum", scale)}
+            for day in sorted(set(ins) | set(outs))]
+    return {**metrics, **extra}
+
+
+def series_of(kind, metrics):
+    """The daily curve of a resource for its chart: {from, cpu, cpuMax, mem}, one value per day (None where there is no
+    data), or None when there is nothing to draw."""
+    name = PEAK_METRIC.get(kind)
+    points = metrics.get(name, []) if name else []
+    if not points:
+        return None
+    memory_name = {"vm": "Memory used %", "plan": "MemoryPercentage"}.get(kind)
+    memory = _by_day(metrics.get(memory_name))
+
+    def one(value):
+        return None if value is None else round(value, 1)
+
+    days = [p.get("timeStamp") for p in points]
+    result = {"from": str(days[0])[:10], "cpu": [one(p.get("average")) for p in points], "cpuMax": [one(p.get("maximum")) for p in points]}
+    if memory:
+        result["mem"] = [one(memory.get(day, {}).get("average")) for day in days]
+    return result
+
+
 def resource_group_of(resource_id):
     parts = str(resource_id).split("/")
     lowered = [p.lower() for p in parts]
     return parts[lowered.index("resourcegroups") + 1] if "resourcegroups" in lowered[:-1] else ""
 
-def evaluate(run_id, resources, measurements):
-    """resources: {kind: [ARG rows]}; measurements: {resourceid (lower): {metric: points}}.
-    Returns (findings, stats, dataset)."""
+def evaluate(run_id, resources, measurements, sizes=None):
+    """resources: {kind: [ARG rows]}; measurements: {resourceid (lower): {metric: points}}; sizes: {(subscription, region):
+    {size: skus.parse entry}}. Returns (findings, stats, dataset); dataset["series"] has the daily curves."""
     findings, counts, measured_totals = [], {}, {}
-    inventory, distribution = [], {}
+    inventory, distribution, series = [], {}, []
     top = {"idle": [], "saturated": []}
     for kind, rows in resources.items():
         for row in rows:
             metrics = measurements.get(str(row["id"]).lower())
             if metrics is None:
                 continue
+            size = None
+            if kind == "vm":
+                size = ((sizes or {}).get((str(row.get("subscriptionId", "")).lower(), str(row.get("location", "")).lower())) or {}).get(
+                    str(row.get("detail", "")).lower())
+                metrics = enrich_vm(metrics, size)
             rule, value = classify(kind, metrics)
             if value is None:
                 continue
@@ -222,6 +292,20 @@ def evaluate(run_id, resources, measurements):
                 memory = summarize(metrics.get("MemoryPercentage", []), "average")
                 if memory is not None:
                     record["memory"] = round(memory, 1)
+            if kind == "vm":
+                for field, name, aggregate in (("memory", "Memory used %", "average"), ("iops", "Disk IOPS %", "average"),
+                                               ("iopsMax", "Disk IOPS %", "maximum"), ("net", "Network Mbps", "average"),
+                                               ("netMax", "Network Mbps", "maximum")):
+                    number = summarize(metrics.get(name, []), aggregate)
+                    if number is not None:
+                        record[field] = round(number, 1)
+                if size:
+                    record["vcpus"], record["memoryGB"] = size.get("vcpus"), size.get("memoryGB")
+                if rule is None and value is not None and value < VM_UNDER and record.get("memory", 0) >= VM_MEMORY_BOUND:
+                    record["note"] = "memory-bound"
+            curve = series_of(kind, metrics)
+            if curve:
+                series.append({"id": str(row["id"]).lower(), **curve})
             inventory.append(record)
             if rule is None:
                 continue
@@ -266,6 +350,7 @@ def evaluate(run_id, resources, measurements):
                                 "nodata": max(len(rows) - sum(distribution.get(kind, {}).values()), 0)}
                          for kind, rows in resources.items()},
         "resources": sorted(inventory, key=lambda r: (ASSESSMENT_ORDER[r["assessment"]], r["avg"]))[:MAX_INVENTORY],
+        "series": series[:MAX_INVENTORY],
     }
     return findings, list(merged.values()), dataset
 
@@ -340,5 +425,11 @@ def collect(credential, run_id, subscription_ids):
             measurements.update(result)
             if error:
                 errors.append(error)
-    findings, stats, dataset = evaluate(run_id, resources, measurements)
+    sizes = {}
+    for sub_id, region in sorted({(str(r["subscriptionId"]).lower(), str(r["location"]).lower()) for r in resources.get("vm", [])}):
+        try:
+            sizes[(sub_id, region)] = skus.fetch(credential, sub_id, region)
+        except Exception as exc:
+            errors.append({"ruleId": f"metrics-sizes-{region}", "error": str(exc).splitlines()[0][:200]})
+    findings, stats, dataset = evaluate(run_id, resources, measurements, sizes)
     return findings, stats, dataset, errors

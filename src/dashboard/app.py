@@ -427,13 +427,37 @@ def resource_page():
                "resourceGroup": "", "location": "", "detail": "", "tags": None}
     names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
     ordered = sorted(findings, key=lambda f: (insights.RANK.get(f.get("severity"), 9), f.get("title", "")))
+    usage = _usage(summary, resource_id)
     return render_template(
-        "resource.html", error=None, summary=summary, resource=row, findings=ordered, source_labels=data.SOURCE_LABELS,
+        "resource.html", error=None, summary=summary, resource=row, findings=ordered, source_labels=data.SOURCE_LABELS, usage=usage,
         subscription_name=names.get(row["subscriptionId"], row["subscriptionId"]) if row else "",
         friendly=insights.friendly_type(row["type"]) if row else "",
     )
 
 
+
+
+def _usage(summary, resource_id):
+    """What the right-sizing data knows about one resource: its row (utilization, Advisor advice, cost) and its daily curve.
+    None when the resource was not measured or Advisor has nothing on it."""
+    if not summary:
+        return None
+    try:
+        metrics = summary.get("metrics") or {}
+        key = resource_id.lower()
+        measured = next((r for r in metrics.get("resources") or [] if str(r["id"]).lower() == key), None)
+        advice = next((a for a in data.rows_of(summary["runId"], "advice") if str(a["id"]).lower() == key), None)
+        cost = next((c["cost"] for c in data.rows_of(summary["runId"], "costs") if str(c["id"]).lower() == key), None)
+        curve = data.series_of(summary["runId"], resource_id) if measured else None
+    except Exception:
+        logging.exception("Could not load the utilization of a resource")
+        return None
+    if not (measured or advice):
+        return None
+    kind = (measured or {}).get("kind", "vm")
+    marks = rightsizing.MARKS.get(kind, ())
+    return {"row": measured, "advice": advice, "cost": cost, "chart": charts.trend(curve, marks=marks) if curve else None,
+            "lookback": metrics.get("lookbackDays", 30)}
 
 
 def _csv(filename, header, rows):
@@ -523,11 +547,11 @@ def rightsizing_csv():
         return jsonify(error="No utilization data yet."), 404
     names, labels = ctx["names"], ctx["labels"]
     header = ["Name", "Type", "Subscription", "Resource group", "Size", "Avg %", "Max %", "Assessment", "Cost last 30 days",
-              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Resource ID"]
+              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Resource ID"]
     rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r["resourceGroup"], r["detail"], r["avg"], r["max"],
              labels.get(r["assessment"], r["assessment"]), r["cost"], (r["advice"] or {}).get("action"), "" if str((r["advice"] or {}).get("action")).lower() == "shutdown" else (r["advice"] or {}).get("targetSku"),
              (r["advice"] or {}).get("monthlySavings"), (r["advice"] or {}).get("currency"), (r["advice"] or {}).get("cpuP95"),
-             (r["advice"] or {}).get("memoryP95"), r["id"]] for r in ctx["rows"]]
+             (r["advice"] or {}).get("memoryP95"), r.get("memory"), r.get("iops"), r.get("net"), r["id"]] for r in ctx["rows"]]
     return _csv(f"right-sizing-{ctx['kind']}.csv", header, rows)
 
 

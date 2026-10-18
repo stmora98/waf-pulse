@@ -186,3 +186,40 @@ def test_resources_csv(client, monkeypatch):
     response = client.get("/resources.csv?location=eastus")
     text = response.get_data(as_text=True)
     assert response.mimetype == "text/csv" and "'+evil" in text and "Prod" in text
+
+# ---- memory, disk, network and the utilization curve
+
+def test_trend_geometry_breaks_lines_where_a_day_has_no_data():
+    import charts
+    chart = charts.trend({"from": "2026-10-01", "cpu": [10, None, 30, 40], "cpuMax": [20, None, 50, 90], "mem": [50, 50, 50, 50]}, marks=[(80, "Saturated")])
+    cpu = next(c for c in chart["curves"] if c["key"] == "cpu")
+    assert len(cpu["lines"]) == 2 and len(cpu["dots"]) == 3 and cpu["dots"][0]["tip"] == "2026-10-01 · Average CPU 10%"
+    assert [c["key"] for c in chart["curves"]] == ["cpuMax", "cpu", "mem"]
+    assert chart["marks"][0]["label"] == "Saturated" and chart["ticks"][0]["label"] == "10-01"
+    assert charts.trend(None) is None and charts.trend({"from": "2026-10-01", "cpu": [None, None]}) is None
+    assert len(charts.trend({"from": "bad", "cpu": [5]})["curves"][0]["lines"]) == 1
+
+
+def test_vm_table_shows_memory_disk_and_network_and_the_memory_bound_note(client, monkeypatch):
+    vm = {**METRICS["resources"][1], "memory": 74.5, "iops": 12.3, "iopsMax": 40.1, "net": 3.2, "netMax": 9.9, "note": "memory-bound", "assessment": "right"}
+    metrics = {**METRICS, "resources": [vm]}
+    serve(monkeypatch, {"runId": "r1", "metrics": metrics, "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    html = page(client, "?kind=vm")
+    assert "Memory %" in html and "Disk IOPS %" in html and "Network Mbps" in html
+    assert "74.5" in html and "12.3" in html and "peak 40.1" in html and "3.2" in html and "low CPU but memory in use" in html
+
+
+def test_resource_page_shows_utilization_advice_cost_and_the_curve(client, monkeypatch):
+    rid = "/subscriptions/" + SUB + "/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
+    vm = {**METRICS["resources"][0], "id": rid, "name": "vm1", "memory": 60.0, "vcpus": 4, "memoryGB": 16}
+    summary = {"runId": "r1", "metrics": {**METRICS, "resources": [vm]}, "subscriptions": [{"id": SUB, "name": "Prod"}]}
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
+    monkeypatch.setattr(data, "summary", lambda run_id: summary)
+    monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
+    monkeypatch.setattr(data, "resources", lambda run_id: ([{"id": rid, "name": "vm1", "type": "microsoft.compute/virtualmachines", "subscriptionId": SUB,
+                                                              "resourceGroup": "rg1", "location": "eastus", "detail": "x", "tags": 0}], False))
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: {"advice": [{**ADVICE[0], "id": rid}], "costs": [{"id": rid.lower(), "cost": 77.0}]}[kind])
+    monkeypatch.setattr(data, "series_of", lambda run_id, resource_id: {"id": rid.lower(), "from": "2026-10-01", "cpu": [4, 5, 6], "cpuMax": [30, 40, 50], "mem": [60, 61, 62]})
+    html = client.get("/resource?id=" + rid).get_data(as_text=True)
+    assert "Utilization and right-sizing" in html and "→ Standard_D4as_v5" in html and ">77<" in html and "60.0%" in html and "4 vCPU" in html
+    assert 'class="chart trend"' in html and "curve-cpuMax" in html and "Idle" in html

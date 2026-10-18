@@ -470,3 +470,16 @@ a.azure-link:active { transform: scale(0.97); }
 .fpop .fopts { flex: 1 1 auto; min-height: 72px; max-height: none; overflow-y: auto; }
 .fpop .lz-row { position: sticky; bottom: -14px; background: var(--panel); padding: 10px 0 2px; margin-top: 0; }
 .lz-pop { width: min(320px, calc(100vw - 32px)); }
+
+/* utilization curves */
+.chart.trend { max-width: 760px; margin-top: 12px; }
+.chart .mark { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6; }
+.chart .curve { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .curve-dot { stroke: none; }
+.curve-cpu { stroke: var(--accent); fill: var(--accent); background: var(--accent); }
+.chart .curve-cpu.curve { fill: none; }
+.curve-cpuMax { stroke: #d99a2b; fill: #d99a2b; background: #d99a2b; }
+.chart .curve-cpuMax.curve { fill: none; stroke-dasharray: 5 4; stroke-width: 1.5; }
+.curve-mem { stroke: #9b72e0; fill: #9b72e0; background: #9b72e0; }
+.chart .curve-mem.curve { fill: none; }
+

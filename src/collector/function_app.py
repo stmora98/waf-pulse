@@ -222,6 +222,7 @@ def act_metrics(payload: dict):
         )
         store.save_findings(findings)
         store.save_stats(run_id, "metrics", {"stats": stats, "errors": errors})
+        store.save_rows(run_id, "series", dataset.pop("series", []), chunk=150)
         store.save_dataset(run_id, "metrics", dataset)
         return {"key": "metrics", "findings": len(findings)}
     except Exception as exc:

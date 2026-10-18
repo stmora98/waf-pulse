@@ -82,6 +82,7 @@
                   <th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
                   {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ 'DTU' if kind == 'sql' else 'CPU' }} %</th><th>Max %</th>{% endif %}
                   {% if kind == 'plan' %}<th>Avg memory %</th>{% endif %}
+                  {% if kind == 'vm' %}<th>Memory %</th><th>Disk IOPS %</th><th>Network Mbps</th>{% endif %}
                   <th>Assessment</th><th>Cost (30 d)</th><th>Advisor</th><th>Azure</th>
                 </tr>
               </thead>
@@ -98,7 +99,12 @@
                       <td>{{ r.avg if r.avg is not none else '–' }}</td><td>{{ r.max if r.max is defined and r.max is not none else '–' }}</td>
                     {% endif %}
                     {% if kind == 'plan' %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
-                    <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span>{% if r.source == 'advisor' %}<br><span class="muted">from Advisor, no metrics</span>{% endif %}</td>
+                    {% if kind == 'vm' %}
+                      <td>{{ r.memory if r.memory is defined else '–' }}</td>
+                      <td>{{ r.iops if r.iops is defined else '–' }}{% if r.iopsMax is defined %}<br><span class="muted">peak {{ r.iopsMax }}</span>{% endif %}</td>
+                      <td>{{ r.net if r.net is defined else '–' }}{% if r.netMax is defined %}<br><span class="muted">peak {{ r.netMax }}</span>{% endif %}</td>
+                    {% endif %}
+                    <td><span class="chip as-{{ r.assessment }}">{{ labels[r.assessment] }}</span>{% if r.note == 'memory-bound' %}<br><span class="muted">low CPU but memory in use</span>{% endif %}{% if r.source == 'advisor' %}<br><span class="muted">from Advisor, no metrics</span>{% endif %}</td>
                     <td>{% if r.cost is not none %}{{ '{:,.0f}'.format(r.cost) }}{% else %}<span class="muted">–</span>{% endif %}</td>
                     <td>
                       {% if r.advice %}

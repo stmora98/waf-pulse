@@ -59,6 +59,9 @@ KIND_TYPES = {
 FACETS = {"subscription": ("subscriptionId", "Subscription"), "group": ("resourceGroup", "Resource group"),
           "assessment": ("assessment", "Assessment")}
 ADVICE_FILTER = {"with": "With an Advisor recommendation", "without": "Without one"}
+# reference lines of the utilization chart, in percent, by metrics kind (the thresholds of the collector)
+MARKS = {"vm": ((5, "Idle"), (15, "Underutilized"), (80, "Saturated")), "sql_dtu": ((10, "Oversized"), (80, "Saturated")),
+         "sql_vcore": ((10, "Oversized"), (80, "Saturated")), "plan": ((20, "Underutilized"), (80, "Saturated"))}
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ASSESSMENT_ORDER = {"idle": 0, "under": 1, "saturated": 2, "right": 3}
 SORTS = {"assessment": "Assessment", "cost": "Cost", "savings": "Savings", "cpu": "Average"}
