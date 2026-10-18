@@ -490,3 +490,14 @@ a.azure-link:active { transform: scale(0.97); }
 .thresholds input[type="number"] { width: 5.5em; }
 .thresholds .lz-row { grid-column: 1 / -1; }
 
+/* selection, risk and tracking */
+.pick { width: 28px; text-align: center; }
+.selection { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 14px; margin-top: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.risk { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; border: 1px solid var(--line); }
+.risk-high { color: #e4584a; border-color: #e4584a; }
+.risk-normal { color: var(--muted); }
+.two-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+ul.plain { list-style: none; padding: 0; margin: 4px 0; }
+ul.plain li { padding: 3px 0; }
+

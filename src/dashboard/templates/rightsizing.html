@@ -19,6 +19,12 @@
           <span class="card-title">Advisor savings</span><span class="card-score">{{ '{:,.0f}'.format(totals.monthlySavings) }}</span>
           <span class="muted">{{ totals.currency }} per month · {{ totals.advised }} recommendation(s)</span>
         </div>
+        {% if totals.scheduleMachines %}
+          <a class="card good" href="{{ url_for('rightsizing_page', kind='vm', schedule='with') }}#resources">
+            <span class="card-title">Auto-shutdown</span><span class="card-score">{{ totals.scheduleMachines }}</span>
+            <span class="muted">machine(s) used in office hours{% if totals.scheduleSavings %} · up to {{ '{:,.0f}'.format(totals.scheduleSavings) }} {{ totals.currency }} in 30 days{% endif %}</span>
+          </a>
+        {% endif %}
         {% if has_costs %}
           <div class="card na">
             <span class="card-title">Spent on them</span><span class="card-score">{{ '{:,.0f}'.format(totals.spentOnThem) }}</span>
@@ -26,6 +32,35 @@
           </div>
         {% endif %}
       </section>
+
+      {% if tracking %}
+        <section class="panel" id="tracking">
+          <h3>Advisor savings over time</h3>
+          <p class="muted">Monthly savings Advisor sees in each run ({{ tracking.currency }}). Since the previous run
+            <strong>{{ '{:,.0f}'.format(tracking.saved) }}</strong> per month was resolved ({{ tracking.resolved | length }} recommendation(s) gone)
+            and <strong>{{ '{:,.0f}'.format(tracking.added) }}</strong> per month appeared ({{ tracking.new | length }} new).</p>
+          {% if tracking_chart and tracking_chart.dots | length > 1 %}
+            <svg class="chart" viewBox="0 0 {{ tracking_chart.width }} {{ tracking_chart.height }}" role="img" aria-label="Advisor monthly savings per run">
+              <polyline class="line line-cost-optimization" points="{{ tracking_chart.line }}"></polyline>
+              {% for dot in tracking_chart.dots %}<circle class="dot" cx="{{ dot.x }}" cy="{{ dot.y }}" r="3.5"><title>{{ dot.label }}: {{ '{:,.0f}'.format(dot.value) }}</title></circle>{% endfor %}
+            </svg>
+          {% endif %}
+          {% if tracking.resolved or tracking.new %}
+            <div class="two-cols">
+              {% for title, items in (('Resolved', tracking.resolved), ('New', tracking.new)) %}
+                {% if items %}
+                  <div>
+                    <h4>{{ title }}</h4>
+                    <ul class="plain">
+                      {% for a in items %}<li><a href="{{ url_for('resource_page', id=a.id) }}">{{ a.name }}</a> <span class="muted">· {{ 'Shut down' if a.action | lower == 'shutdown' else '→ ' ~ a.targetSku }}{% if a.monthlySavings %} · {{ '{:,.0f}'.format(a.monthlySavings) }}/mo{% endif %}</span></li>{% endfor %}
+                    </ul>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </section>
+      {% endif %}
 
       <details class="panel" id="thresholds-panel"{% if custom %} open{% endif %}>
         <summary>Thresholds{% if custom %} <span class="chip">custom</span>{% endif %}</summary>
@@ -96,17 +131,22 @@
             <table id="rs">
               <thead>
                 <tr>
-                  <th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
-                  {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ 'DTU' if kind == 'sql' else 'CPU' }} %</th><th>Max %</th>{% endif %}
-                  {% if kind == 'plan' %}<th>Avg memory %</th>{% endif %}
+                  <th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all shown"></th><th>Resource</th><th>Subscription</th><th>Resource group</th><th>{{ 'SKU' if kind in ('storage', 'sql') else 'Size' }}</th>
+                  {% if kind == 'storage' %}<th>Transactions</th>{% else %}<th>Avg {{ avg_label }} %</th><th>Max %</th>{% endif %}
+                  {% if with_memory %}<th>Avg memory %</th>{% endif %}
                   {% if kind == 'vm' %}<th>Memory %</th><th>Disk IOPS %</th><th>Network Mbps</th>{% endif %}
                   <th>Assessment</th><th>Cost (30 d)</th><th>Advisor</th><th>Azure</th>
                 </tr>
               </thead>
               <tbody>
                 {% for r in rows %}
-                  <tr>
-                    <td><a href="{{ url_for('resource_page', id=r.id) }}" title="{{ r.id }}">{{ r.name }}</a></td>
+                  <tr data-id="{{ r.id }}" data-name="{{ r.name }}" data-size="{{ r.detail }}" data-advice="{{ (r.advice.targetSku or r.advice.action) if r.advice else '' }}"
+                      data-saving="{{ r.advice.monthlySavings if r.advice and r.advice.monthlySavings else 0 }}" data-cost="{{ r.cost if r.cost is not none else 0 }}">
+                    <td class="pick"><input type="checkbox" class="pick-row" aria-label="Select {{ r.name }}"></td>
+                    <td><a href="{{ url_for('resource_page', id=r.id) }}" title="{{ r.id }}">{{ r.name }}</a>
+                      {% if r.risk and r.risk.reasons %}<br><span class="risk risk-{{ r.risk.level }}" title="{{ r.risk.reasons | join('; ') }}">{{ 'Production' if r.risk.level == 'high' else 'Check first' }}</span>
+                        <span class="muted">{{ r.risk.reasons[0] }}</span>{% endif %}
+                      {% if r.env %}<br><span class="muted">environment: {{ r.env }}</span>{% endif %}</td>
                     <td>{{ names.get(r.subscriptionId, r.subscriptionId) }}</td>
                     <td>{{ r.resourceGroup }}</td>
                     <td>{{ r.detail }}</td>
@@ -115,7 +155,7 @@
                     {% else %}
                       <td>{{ r.avg if r.avg is not none else '–' }}</td><td>{{ r.max if r.max is defined and r.max is not none else '–' }}</td>
                     {% endif %}
-                    {% if kind == 'plan' %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
+                    {% if with_memory %}<td>{{ r.memory if r.memory is defined else '–' }}</td>{% endif %}
                     {% if kind == 'vm' %}
                       <td>{{ r.memory if r.memory is defined else '–' }}</td>
                       <td>{{ r.iops if r.iops is defined else '–' }}{% if r.iopsMax is defined %}<br><span class="muted">peak {{ r.iopsMax }}</span>{% endif %}</td>
@@ -129,12 +169,18 @@
                         {% if r.advice.monthlySavings %}<br><span class="muted">saves {{ '{:,.0f}'.format(r.advice.monthlySavings) }} {{ r.advice.currency }}/mo</span>{% endif %}
                         {% if r.advice.cpuP95 is not none or r.advice.memoryP95 is not none %}<br><span class="muted">P95 CPU {{ r.advice.cpuP95 if r.advice.cpuP95 is not none else '–' }}% · memory {{ r.advice.memoryP95 if r.advice.memoryP95 is not none else '–' }}%</span>{% endif %}
                       {% else %}<span class="muted">–</span>{% endif %}
+                      {% if r.scheduleCandidate %}<br><span class="chip">Schedule</span> <span class="muted">{{ schedule_text(r.schedule) }}{% if r.scheduleSaving %} · could save about {{ '{:,.0f}'.format(r.scheduleSaving) }}/mo{% endif %}</span>{% endif %}
                     </td>
                     <td>{{ azure_link(r.id) }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
+          </div>
+          <div class="selection" id="selection" hidden role="status">
+            <strong id="sel-count">0</strong> selected · saves <strong id="sel-saving">0</strong> {{ totals.currency }}/mo · cost <strong id="sel-cost">0</strong> in 30 days
+            <button type="button" id="sel-csv">Download selection</button>
+            <button type="button" class="icon-button" id="sel-clear">Clear</button>
           </div>
           {% if total_rows > rows | length %}<p class="muted">Showing {{ rows | length }} of {{ total_rows }}. Download the CSV for the whole list.</p>{% endif %}
         {% else %}

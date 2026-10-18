@@ -223,6 +223,14 @@ def test_fetch_batch_calls_the_regional_endpoint(monkeypatch):
     assert result == {"/x/y": {"Percentage CPU": points("average", 3)}}
 
 
+REAL_FETCH_HOURLY = metrics.fetch_hourly
+
+
+@pytest.fixture(autouse=True)
+def no_hourly_calls(monkeypatch):
+    monkeypatch.setattr(metrics, "fetch_hourly", lambda *a, **k: {})
+
+
 def test_collect_reports_failures_without_losing_the_rest(monkeypatch):
     vm = row("Microsoft.Compute/virtualMachines", "idle")
 
@@ -380,3 +388,120 @@ def test_a_failing_sizes_call_is_reported_and_right_sizing_goes_on(monkeypatch):
     monkeypatch.setattr(skus, "fetch", refuse)
     findings, _, _, errors = metrics.collect(None, "r", [SUB])
     assert [f["ruleId"] for f in findings] == ["MET-VM-001"] and errors == [{"ruleId": "metrics-sizes-eastus", "error": "AuthorizationFailed"}]
+
+# ---- more resource kinds
+
+def test_new_kinds_have_queries_rules_and_thresholds():
+    for kind in ("sql_mi", "aks", "cosmos", "redis"):
+        assert kind in metrics.TARGETS and all(rule in metrics.RULES for rule in metrics.APPLICABLE[kind])
+    assert "provisioned" in metrics.TARGETS["cosmos"]["query"] and "EnableServerless" in metrics.TARGETS["cosmos"]["query"]
+
+
+def test_aks_is_underutilized_only_when_memory_is_low_too():
+    low = {"node_cpu_usage_percentage": points("average", 8)}
+    assert metrics.classify("aks", {**low, "node_memory_working_set_percentage": points("average", 30)}) == ("MET-AKS-001", 8)
+    assert metrics.classify("aks", {**low, "node_memory_working_set_percentage": points("average", 65)}) == (None, 8)
+    assert metrics.classify("aks", {**low, "node_memory_working_set_percentage": points("average", 90)}) == ("MET-AKS-002", 90)
+    assert metrics.classify("aks", {"node_cpu_usage_percentage": points("average", 85)})[0] == "MET-AKS-002"
+
+
+def test_cosmos_redis_and_managed_instance_classification():
+    assert metrics.classify("cosmos", {"NormalizedRUConsumption": points("average", 4)}) == ("MET-COS-001", 4)
+    assert metrics.classify("cosmos", {"NormalizedRUConsumption": points("average", 95)})[0] == "MET-COS-002"
+    assert metrics.classify("cosmos", {"NormalizedRUConsumption": points("average", 40)}) == (None, 40)
+    assert metrics.classify("redis", {"percentProcessorTime": points("average", 3), "usedmemorypercentage": points("average", 20)})[0] == "MET-RED-001"
+    assert metrics.classify("redis", {"percentProcessorTime": points("average", 3), "usedmemorypercentage": points("average", 95)})[0] == "MET-RED-002"
+    assert metrics.classify("sql_mi", {"avg_cpu_percent": points("average", 2)})[0] == "MET-MI-001"
+    assert metrics.classify("sql_mi", {"avg_cpu_percent": points("average", 90)})[0] == "MET-MI-002"
+    assert metrics.classify("aks", {}) == (None, None)
+
+
+def test_vm_records_carry_environment_and_availability():
+    vm = {**row("Microsoft.Compute/virtualMachines", "p"), "environment": "Production", "availability": "none"}
+    _, _, dataset = metrics.evaluate("r", {"vm": [vm]}, {vm["id"].lower(): {"Percentage CPU": points("average", 30)}})
+    assert dataset["resources"][0]["env"] == "Production" and dataset["resources"][0]["ha"] == "none"
+
+
+def test_aks_records_keep_their_memory_and_the_dashboard_agrees_with_the_collector():
+    import rightsizing
+    cluster = row("Microsoft.ContainerService/managedClusters", "k")
+    raw = {"node_cpu_usage_percentage": points("average", 8), "node_memory_working_set_percentage": points("average", 30)}
+    _, _, dataset = metrics.evaluate("r", {"aks": [cluster]}, {cluster["id"].lower(): raw})
+    record = dataset["resources"][0]
+    assert record["memory"] == 30 and record["assessment"] == "under"
+    assert rightsizing.assess(record, rightsizing.DEFAULT_THRESHOLDS) == "under"
+    assert rightsizing.assess({**record, "memory": 90}, rightsizing.DEFAULT_THRESHOLDS) == "saturated"
+    assert rightsizing.assess({**record, "memory": 65}, rightsizing.DEFAULT_THRESHOLDS) == "right"
+    assert "aks" in rightsizing.KINDS and rightsizing.kind_labels("cosmos")["under"].startswith("Mostly unused")
+
+# ---- office-hours virtual machines
+
+def hourly_points(busy_hours, level=40, base=2, days=7, start="2026-10-05"):
+    """168 hourly points: `level` percent in the given UTC hours Monday to Friday, `base` otherwise."""
+    from datetime import datetime, timedelta
+    first = datetime.fromisoformat(start)
+    out = []
+    for i in range(24 * days):
+        moment = first + timedelta(hours=i)
+        busy = moment.weekday() < 5 and moment.hour in busy_hours
+        out.append({"timeStamp": moment.strftime("%Y-%m-%dT%H:00:00Z"), "average": level if busy else base})
+    return out
+
+
+def test_schedule_finds_the_office_hours_window_and_the_quiet_weekend():
+    schedule = metrics.schedule_of(hourly_points(range(8, 18)))
+    assert schedule["window"] == 10 and schedule["start"] == 8 and schedule["weekend"] is True and schedule["hours"] == 50
+    assert schedule["saving"] == round(1 - 50 / 168, 2)
+
+
+def test_schedule_of_a_machine_that_is_always_busy_or_idle():
+    assert metrics.schedule_of(hourly_points(range(24)))["window"] > metrics.SCHEDULE_MAX_WINDOW
+    assert metrics.schedule_of(hourly_points(range(8, 18), level=3, base=1)) is None  # never above the minimum peak
+    assert metrics.schedule_of(hourly_points(range(8, 18))[:20]) is None  # too little data
+    assert metrics.schedule_of(None) is None
+
+
+def test_schedule_window_can_wrap_midnight():
+    schedule = metrics.schedule_of(hourly_points([22, 23, 0, 1, 2, 3]))
+    assert schedule["window"] == 6 and schedule["start"] == 22
+
+
+def test_a_vm_used_in_office_hours_gets_a_finding_and_a_schedule():
+    vm = row("Microsoft.Compute/virtualMachines", "office")
+    daily = {"Percentage CPU": points("average", 20, 20)}
+    hourly = {vm["id"].lower(): {"Percentage CPU": hourly_points(range(8, 18))}}
+    findings, stats, dataset = metrics.evaluate("r", {"vm": [vm]}, {vm["id"].lower(): daily}, hourly=hourly)
+    assert [f["ruleId"] for f in findings] == ["MET-VM-005"] and "10 hours a day" in findings[0]["title"]
+    assert dataset["resources"][0]["scheduleCandidate"] is True and dataset["resources"][0]["schedule"]["window"] == 10
+    always = {vm["id"].lower(): {"Percentage CPU": hourly_points(range(24))}}
+    findings, _, dataset = metrics.evaluate("r", {"vm": [vm]}, {vm["id"].lower(): daily}, hourly=always)
+    assert findings == [] and "scheduleCandidate" not in dataset["resources"][0]
+
+
+def test_hourly_cpu_is_requested_for_the_measured_vms_and_failures_are_reported(monkeypatch):
+    vm = row("Microsoft.Compute/virtualMachines", "a")
+    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines" in kql else [])
+    monkeypatch.setattr(metrics, "fetch_batch", lambda *a, **k: {vm["id"].lower(): {"Percentage CPU": points("average", 20)}})
+    monkeypatch.setattr(skus, "fetch", lambda credential, sub, region: {})
+    seen = []
+
+    def hourly(credential, sub, region, ids, now=None):
+        seen.append((sub, region, ids))
+        raise RuntimeError("HTTP 429\nmore")
+
+    monkeypatch.setattr(metrics, "fetch_hourly", hourly)
+    _, _, _, errors = metrics.collect(None, "r", [SUB])
+    assert seen == [(SUB, "eastus", [vm["id"]])] and errors == [{"ruleId": "metrics-schedule-eastus", "error": "HTTP 429"}]
+
+
+def test_fetch_hourly_asks_for_seven_days_of_hourly_cpu(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(metrics, "_post", lambda url, params, token, ids: captured.update(params=params) or {"values": []})
+
+    class Credential:
+        def get_token(self, scope):
+            return type("T", (), {"token": "t"})()
+
+    REAL_FETCH_HOURLY(Credential(), SUB, "eastus", ["/x"], now=NOW)
+    assert captured["params"]["interval"] == "PT1H" and captured["params"]["metricnames"] == "Percentage CPU"
+    assert captured["params"]["starttime"] == "2026-10-08T00:00:00Z"

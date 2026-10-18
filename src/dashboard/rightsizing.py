@@ -13,7 +13,14 @@ def _n(value):
 
 def _labels(kind, limits):
     vm, sql, plan = limits["vm"], limits["sql"], limits["plan"]
+    aks, cosmos, redis = limits["aks"], limits["cosmos"], limits["redis"]
     return {
+        "aks": {"idle": "Idle", "under": f"Underutilized (under {_n(aks['under'])}% node CPU)", "right": "Right-sized",
+                "saturated": f"Saturated ({_n(aks['saturated'])}% CPU or 85% memory)"},
+        "cosmos": {"idle": "Idle", "under": f"Mostly unused (under {_n(cosmos['under'])}% of the RU/s)", "right": "Right-sized",
+                   "saturated": f"Close to the limit ({_n(cosmos['saturated'])}% or more)"},
+        "redis": {"idle": "Idle", "under": f"Underutilized (under {_n(redis['under'])}% CPU)", "right": "Right-sized",
+                  "saturated": f"Saturated ({_n(redis['saturated'])}% CPU or 90% memory)"},
         "vm": {"idle": f"Idle (under {_n(vm['idle'])}% CPU)", "under": f"Underutilized (under {_n(vm['under'])}%)", "right": "Right-sized",
                "saturated": f"Saturated ({_n(vm['saturated'])}% or more)"},
         "sql": {"idle": "Idle", "under": f"Oversized (under {_n(sql['under'])}%)", "right": "Right-sized",
@@ -31,17 +38,26 @@ def kind_labels(kind, limits=None):
 
 # The thresholds the collector uses (percent of average utilization); keep in step with waf_pulse.metrics.
 DEFAULT_THRESHOLDS = {"vm": {"idle": 5, "under": 15, "saturated": 80}, "sql": {"under": 10, "saturated": 80},
-                      "plan": {"under": 20, "saturated": 80}}
+                      "plan": {"under": 20, "saturated": 80}, "aks": {"under": 20, "saturated": 80},
+                      "cosmos": {"under": 10, "saturated": 80}, "redis": {"under": 10, "saturated": 80}}
+# kind -> (threshold group, second metric saturates from, second metric blocks "under" from), as in waf_pulse.metrics.GENERIC
+GENERIC = {"sql_mi": ("sql", None, None), "aks": ("aks", 85, 60), "cosmos": ("cosmos", None, None), "redis": ("redis", 90, 50)}
 VM_MEMORY_BOUND, VM_MEMORY_SATURATED, PLAN_MEMORY_SATURATED = 70, 90, 85
 THRESHOLD_FIELDS = (("vm", "idle", "Virtual machines: idle below"), ("vm", "under", "underutilized below"), ("vm", "saturated", "saturated from"),
                     ("sql", "under", "SQL databases: oversized below"), ("sql", "saturated", "saturated from"),
-                    ("plan", "under", "App Service plans: underutilized below"), ("plan", "saturated", "saturated from"))
+                    ("plan", "under", "App Service plans: underutilized below"), ("plan", "saturated", "saturated from"),
+                    ("aks", "under", "AKS clusters: underutilized below"), ("aks", "saturated", "saturated from"),
+                    ("cosmos", "under", "Cosmos DB: mostly unused below"), ("cosmos", "saturated", "close to the limit from"),
+                    ("redis", "under", "Redis caches: underutilized below"), ("redis", "saturated", "saturated from"))
 
 # page kind -> (title, dataset kinds, label of each assessment)
 KINDS = {
     "vm": ("Virtual machines", ("vm",), kind_labels("vm")),
-    "sql": ("SQL databases", ("sql_dtu", "sql_vcore"), kind_labels("sql")),
+    "sql": ("SQL databases", ("sql_dtu", "sql_vcore", "sql_mi"), kind_labels("sql")),
     "plan": ("App Service plans", ("plan",), kind_labels("plan")),
+    "aks": ("AKS clusters", ("aks",), kind_labels("aks")),
+    "cosmos": ("Cosmos DB accounts", ("cosmos",), kind_labels("cosmos")),
+    "redis": ("Redis caches", ("redis",), kind_labels("redis")),
     "storage": ("Storage accounts", ("storage",), kind_labels("storage")),
 }
 
@@ -54,8 +70,11 @@ def validate_thresholds(value):
         return None, ["Send the thresholds as an object."]
     for group, defaults in DEFAULT_THRESHOLDS.items():
         values = value.get(group)
+        if values is None:
+            result[group] = dict(defaults)  # saved before this group existed
+            continue
         if not isinstance(values, dict):
-            errors.append(f"Missing the {group} thresholds.")
+            errors.append(f"The {group} thresholds must be an object.")
             continue
         numbers = {}
         for name in defaults:
@@ -95,6 +114,14 @@ def assess(record, limits):
         if memory is not None and memory >= VM_MEMORY_BOUND:
             return "right"
         return "idle" if average < vm["idle"] else "under" if average < vm["under"] else "right"
+    if kind in GENERIC:
+        group, saturates, blocks = GENERIC[kind]
+        other = record.get("memory")
+        if average >= limits[group]["saturated"] or (other is not None and saturates is not None and other >= saturates):
+            return "saturated"
+        if other is not None and blocks is not None and other >= blocks:
+            return "right"
+        return "under" if average < limits[group]["under"] else "right"
     if kind in ("sql_dtu", "sql_vcore"):
         sql = limits["sql"]
         return "under" if average < sql["under"] else "saturated" if average >= sql["saturated"] else "right"
@@ -131,7 +158,7 @@ def reassess(metrics, saved):
         counted = Counter(r["assessment"] for r in mine)
         distribution[source] = {**{name: counted.get(name, 0) for name in ASSESSMENTS}, "nodata": old.get("nodata", 0)}
     return {**metrics, "resources": records, "distribution": distribution}, limits
-HIDDEN_WHEN_EMPTY = {"storage": ("under", "saturated"), "sql": ("idle",), "plan": ("idle",)}
+HIDDEN_WHEN_EMPTY = {"storage": ("under", "saturated"), "sql": ("idle",), "plan": ("idle",), "aks": ("idle",), "cosmos": ("idle",), "redis": ("idle",)}
 
 
 def counts(metrics, kind):
@@ -166,10 +193,18 @@ KIND_TYPES = {
     "sql": ("microsoft.sql/servers/databases", "microsoft.sql/managedinstances"),
     "plan": ("microsoft.web/serverfarms",),
     "storage": ("microsoft.storage/storageaccounts",),
+    "aks": ("microsoft.containerservice/managedclusters",),
+    "cosmos": ("microsoft.documentdb/databaseaccounts",),
+    "redis": ("microsoft.cache/redis",),
 }
+AVG_LABEL = {"vm": "CPU", "sql": "DTU", "plan": "CPU", "aks": "node CPU", "cosmos": "RU", "redis": "CPU"}
+WITH_MEMORY = ("plan", "aks", "redis")
 FACETS = {"subscription": ("subscriptionId", "Subscription"), "group": ("resourceGroup", "Resource group"),
           "assessment": ("assessment", "Assessment")}
 ADVICE_FILTER = {"with": "With an Advisor recommendation", "without": "Without one"}
+SCHEDULE_FILTER = {"with": "Used in office hours only", "without": "Not a candidate"}
+RADIOS = {"advice": ADVICE_FILTER, "schedule": SCHEDULE_FILTER}
+RADIO_LABELS = {"advice": "Advisor", "schedule": "Auto-shutdown"}
 def marks(kind, limits=None):
     """Reference lines of the utilization chart, in percent: the thresholds in force for a metrics kind."""
     limits = limits or DEFAULT_THRESHOLDS
@@ -177,18 +212,22 @@ def marks(kind, limits=None):
     return {"vm": ((vm["idle"], "Idle"), (vm["under"], "Underutilized"), (vm["saturated"], "Saturated")),
             "sql_dtu": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
             "sql_vcore": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
-            "plan": ((plan["under"], "Underutilized"), (plan["saturated"], "Saturated"))}.get(kind, ())
+            "plan": ((plan["under"], "Underutilized"), (plan["saturated"], "Saturated")),
+            "sql_mi": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
+            "aks": ((limits["aks"]["under"], "Underutilized"), (limits["aks"]["saturated"], "Saturated")),
+            "cosmos": ((limits["cosmos"]["under"], "Mostly unused"), (limits["cosmos"]["saturated"], "Close to the limit")),
+            "redis": ((limits["redis"]["under"], "Underutilized"), (limits["redis"]["saturated"], "Saturated"))}.get(kind, ())
 
 
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ASSESSMENT_ORDER = {"idle": 0, "under": 1, "saturated": 2, "right": 3}
 SORTS = {"assessment": "Assessment", "cost": "Cost", "savings": "Savings", "cpu": "Average"}
 MENU = (("subscription", "Subscription", "facet"), ("group", "Resource group", "facet"), ("assessment", "Assessment", "facet"),
-        ("advice", "Advisor recommendation", "radio"), ("name", "Name", "text"))
+        ("advice", "Advisor recommendation", "radio"), ("schedule", "Auto-shutdown candidate", "radio"), ("name", "Name", "text"))
 
 
 def parse_filters(args):
-    filters = insights.parse_filters(args, FACETS, ("subscription", "assessment"), {"advice": ADVICE_FILTER})
+    filters = insights.parse_filters(args, FACETS, ("subscription", "assessment"), RADIOS)
     for field, valid in (("assessment", lambda v: v in ASSESSMENTS), ("subscription", lambda v: bool(GUID.fullmatch(v)))):
         if field in filters:
             filters[field]["values"] = [v for v in filters[field]["values"] if valid(v)]
@@ -209,7 +248,11 @@ def build_rows(metrics, kind, advice, costs):
             continue
         key = str(item["id"]).lower()
         seen.add(key)
-        rows.append({**item, "cost": cost_by_id.get(key), "advice": advice_by_id.get(key), "source": "metrics"})
+        cost = cost_by_id.get(key)
+        row = {**item, "cost": cost, "advice": advice_by_id.get(key), "source": "metrics"}
+        if item.get("scheduleCandidate") and cost is not None:
+            row["scheduleSaving"] = round(cost * item["schedule"]["saving"], 2)
+        rows.append(row)
     for key, item in advice_by_id.items():
         if key in seen or item.get("type", "").lower() not in KIND_TYPES[kind]:
             continue
@@ -233,6 +276,8 @@ def apply_filters(rows, filters, skip=None):
                 keep = hit if spec["op"] == "eq" else not hit
             elif field == "advice":
                 keep = bool(row.get("advice")) == (spec["values"][0] == "with")
+            elif field == "schedule":
+                keep = bool(row.get("scheduleCandidate")) == (spec["values"][0] == "with")
             elif field == "name":
                 keep = spec["values"][0].lower() in str(row.get("name", "")).lower()
             if not keep:
@@ -277,4 +322,52 @@ def totals(metrics, advice, costs):
         "toAct": len(acting) + sum(1 for a in advice or [] if str(a["id"]).lower() not in {str(r["id"]).lower() for r in metrics.get("resources") or []}),
         "monthlySavings": round(saving, 2), "currency": currencies[0] if currencies else "USD", "advised": len(advice or []),
         "spentOnThem": round(sum(cost_by_id.get(str(r["id"]).lower(), 0) for r in acting), 2),
+        "scheduleSavings": round(sum(cost_by_id.get(str(r["id"]).lower(), 0) * r["schedule"]["saving"]
+                                     for r in metrics.get("resources") or [] if r.get("scheduleCandidate")), 2),
+        "scheduleMachines": sum(1 for r in metrics.get("resources") or [] if r.get("scheduleCandidate")),
     }
+
+
+def schedule_text(schedule):
+    """One line about when a machine is used, from the collector's {hours, window, start, weekend, saving}."""
+    end = (schedule["start"] + schedule["window"]) % 24
+    return (f"busy about {schedule['window']} h a day ({schedule['start']:02d}:00-{end:02d}:00 UTC), "
+            f"{'weekdays only' if schedule['weekend'] else 'every day'}")
+
+
+PRODUCTION = re.compile(r"^(prod|production|prd|live)", re.I)
+
+
+def risk(row):
+    """What to weigh before changing a machine: {level, reasons}. Only virtual machines carry the context."""
+    reasons = []
+    env = str(row.get("env") or "")
+    if env and PRODUCTION.match(env):
+        reasons.append("tagged as production")
+    if row.get("ha") == "none":
+        reasons.append("single instance: resizing restarts it and the service is down meanwhile")
+    elif row.get("ha") in ("set", "zone"):
+        reasons.append("in an availability " + ("set" if row["ha"] == "set" else "zone") + ": resize one machine at a time")
+    if row.get("note") == "memory-bound":
+        reasons.append("memory is busy: pick a size with the same memory")
+    level = "high" if env and PRODUCTION.match(env) else "normal"
+    return {"level": level, "reasons": reasons}
+
+
+def track(history):
+    """What changed in Advisor's right-sizing savings. history: [(label, advice rows)] oldest first, only runs that have
+    advice. Returns None with fewer than two runs, else {points, saved, resolved, new, currency}: `resolved` are the
+    resources that had a recommendation in the previous run and no longer do, with what they were worth per month."""
+    history = [(label, rows) for label, rows in history if rows is not None]
+    if len(history) < 2:
+        return None
+    points = [(label, round(sum(a.get("monthlySavings") or 0 for a in rows), 2)) for label, rows in history]
+    before = {str(a["id"]).lower(): a for a in history[-2][1]}
+    now = {str(a["id"]).lower(): a for a in history[-1][1]}
+    resolved = sorted((a for key, a in before.items() if key not in now), key=lambda a: -(a.get("monthlySavings") or 0))
+    new = sorted((a for key, a in now.items() if key not in before), key=lambda a: -(a.get("monthlySavings") or 0))
+    currencies = [a.get("currency") for _, rows in history for a in rows if a.get("currency")]
+    return {"points": points, "resolved": resolved[:15], "new": new[:15], "currency": currencies[0] if currencies else "USD",
+            "saved": round(sum(a.get("monthlySavings") or 0 for a in resolved), 2),
+            "added": round(sum(a.get("monthlySavings") or 0 for a in new), 2), "runs": len(history)}
+

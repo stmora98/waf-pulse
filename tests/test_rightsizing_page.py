@@ -248,12 +248,14 @@ def test_validate_thresholds():
     import rightsizing
     ok, errors = rightsizing.validate_thresholds({"vm": {"idle": 10, "under": 25, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}})
     assert errors == [] and ok["vm"]["under"] == 25
-    for bad in (None, {}, {"vm": {"idle": 10, "under": 5, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
+    for bad in (None, {"vm": {"idle": 10, "under": 5, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
                 {"vm": {"idle": 0, "under": 5, "saturated": 90}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
                 {"vm": {"idle": 1, "under": 5, "saturated": 101}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}},
                 {"vm": {"idle": True, "under": 5, "saturated": 9}, "sql": {"under": 5, "saturated": 70}, "plan": {"under": 20, "saturated": 80}}):
         value, problems = rightsizing.validate_thresholds(bad)
         assert value is None and problems
+    legacy, errors = rightsizing.validate_thresholds({})  # saved before groups were added: the missing ones use the defaults
+    assert errors == [] and legacy == rightsizing.DEFAULT_THRESHOLDS
 
 
 def test_reassess_judges_every_resource_and_the_distribution_by_the_saved_thresholds():
@@ -285,7 +287,63 @@ def test_thresholds_api(client, monkeypatch):
     assert client.post("/api/rightsizing-thresholds", json={"thresholds": good}).status_code == 403  # needs the header
     headers = {"X-WAF-Pulse": "1"}
     assert client.post("/api/rightsizing-thresholds", json={"thresholds": good}, headers=headers).status_code == 200
-    assert stored["rightsizing-thresholds"] == good
+    assert stored["rightsizing-thresholds"]["vm"] == good["vm"] and stored["rightsizing-thresholds"]["aks"] == {"under": 20, "saturated": 80}
     bad = client.post("/api/rightsizing-thresholds", json={"thresholds": {"vm": {"idle": 50, "under": 10, "saturated": 90}}}, headers=headers)
     assert bad.status_code == 422 and "error" in bad.get_json()
     assert client.post("/api/rightsizing-thresholds", json={"reset": True}, headers=headers).status_code == 200 and stored["rightsizing-thresholds"] is None
+
+# ---- tracking, risk and selection
+
+def test_track_reports_what_was_resolved_and_what_is_new():
+    import rightsizing
+    a = {"id": "/s/a", "name": "a", "monthlySavings": 100, "currency": "USD"}
+    b = {"id": "/s/b", "name": "b", "monthlySavings": 30, "currency": "USD"}
+    c = {"id": "/S/C", "name": "c", "monthlySavings": 10, "currency": "USD"}
+    tracked = rightsizing.track([("1", [a, b]), ("2", [{**b, "id": "/S/B"}, c])])
+    assert tracked["points"] == [("1", 130), ("2", 40)]
+    assert [x["name"] for x in tracked["resolved"]] == ["a"] and [x["name"] for x in tracked["new"]] == ["c"]
+    assert tracked["saved"] == 100 and tracked["added"] == 10 and tracked["runs"] == 2
+    assert rightsizing.track([("1", [a])]) is None and rightsizing.track([("1", None), ("2", [a])]) is None
+
+
+def test_risk_context_of_a_virtual_machine():
+    import rightsizing
+    assert rightsizing.risk({"env": "Production", "ha": "none"})["level"] == "high"
+    assert "single instance" in " ".join(rightsizing.risk({"ha": "none"})["reasons"])
+    zone = rightsizing.risk({"ha": "zone", "env": "dev"})
+    assert zone["level"] == "normal" and "availability zone" in zone["reasons"][0]
+    assert rightsizing.risk({"note": "memory-bound"})["reasons"] == ["memory is busy: pick a size with the same memory"]
+    assert rightsizing.risk({}) == {"level": "normal", "reasons": []}
+
+
+def test_page_shows_risk_selection_and_tracking(client, monkeypatch):
+    vm = {**METRICS["resources"][1], "env": "prod", "ha": "none"}
+    serve(monkeypatch, {"runId": "r1", "metrics": {**METRICS, "resources": [vm]}, "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    runs = [{"id": "r1", "status": "completed", "startedUtc": "2026-10-17T10:00:00+00:00"}, {"id": "r0", "status": "completed", "startedUtc": "2026-10-10T10:00:00+00:00"}]
+    monkeypatch.setattr(data, "history", lambda limit=30: runs)
+    earlier = {"r1": [ADVICE[1]], "r0": [ADVICE[0], ADVICE[1]]}
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: earlier[run_id] if kind == "advice" else [])
+    html = page(client, "?kind=vm")
+    assert 'id="tracking"' in html and "Advisor savings over time" in html and "1 recommendation(s) gone" in html
+    assert "Production" in html and "single instance" in html and 'id="selection"' in html and 'class="pick-row"' in html and 'data-saving="0"' in html
+
+# ---- schedule, new kinds and the type chips
+
+def test_schedule_candidates_show_up_with_their_estimated_saving(client, monkeypatch):
+    schedule = {"hours": 50, "window": 10, "start": 8, "weekend": True, "saving": 0.7}
+    vm = {**METRICS["resources"][1], "scheduleCandidate": True, "schedule": schedule}
+    other = {**METRICS["resources"][2]}
+    serve(monkeypatch, {"runId": "r1", "metrics": {**METRICS, "resources": [vm, other]}, "subscriptions": [{"id": SUB, "name": "Prod"}]},
+          {"costs": [{"id": vm["id"].lower(), "cost": 200.0}]})
+    html = page(client, "?kind=vm")
+    assert "busy about 10 h a day (08:00-18:00 UTC), weekdays only" in html and "could save about 140/mo" in html and "Auto-shutdown" in html
+    only = page(client, "?kind=vm&schedule=with")
+    assert "vm2" in only and "vm3" not in only
+    csv = client.get("/rightsizing.csv?kind=vm").get_data(as_text=True)
+    assert "busy about 10 h a day" in csv
+
+
+def test_type_chips_only_list_kinds_with_data(client, monkeypatch):
+    serve(monkeypatch, {"runId": "r1", "metrics": METRICS, "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    html = page(client, "?kind=vm")
+    assert ">Virtual machines<" in html and ">App Service plans<" in html and ">AKS clusters<" not in html and ">Redis caches<" not in html

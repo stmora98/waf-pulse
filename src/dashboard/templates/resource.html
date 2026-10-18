@@ -46,6 +46,7 @@
                 <tr><th>Azure Advisor</th><td><strong>{{ 'Shut down' if a.action | lower == 'shutdown' else '→ ' ~ a.targetSku }}</strong>
                   {% if a.monthlySavings %}<span class="muted">· saves {{ '{:,.0f}'.format(a.monthlySavings) }} {{ a.currency }} per month</span>{% endif %}</td></tr>
               {% endif %}
+              {% if r and r.schedule %}<tr><th>Usage pattern</th><td>{{ usage.schedule_text }}{% if r.scheduleCandidate %} <span class="muted">· an automatic shutdown could switch off about {{ (r.schedule.saving * 100) | round | int }}% of its hours</span>{% endif %}</td></tr>{% endif %}
               {% if usage.cost is not none %}<tr><th>Cost, last 30 days</th><td>{{ '{:,.0f}'.format(usage.cost) }}</td></tr>{% endif %}
             </tbody>
           </table>

@@ -490,7 +490,8 @@ def _usage(summary, resource_id):
         return None
     kind = (measured or {}).get("kind", "vm")
     marks = rightsizing.marks(kind, limits)
-    return {"row": measured, "advice": advice, "cost": cost, "chart": charts.trend(curve, marks=marks) if curve else None,
+    return {"schedule_text": rightsizing.schedule_text(measured["schedule"]) if measured and measured.get("schedule") else "",
+            "row": measured, "advice": advice, "cost": cost, "chart": charts.trend(curve, marks=marks) if curve else None,
             "lookback": metrics.get("lookbackDays", 30)}
 
 
@@ -504,6 +505,28 @@ def _csv(filename, header, rows):
     response = Response("\ufeff" + buffer.getvalue(), mimetype="text/csv")
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+TRACKED_RUNS = 8
+
+
+def _tracking():
+    """The Advisor savings of the last runs, or None when there are not two runs with advice or the store fails."""
+    try:
+        runs = [r for r in data.history(TRACKED_RUNS + 4) if r.get("status") == "completed"][:TRACKED_RUNS]
+        entries = []
+        for run in reversed(runs):
+            rows = data.rows_of(run["id"], "advice")
+            if rows:
+                entries.append((_short_time(run), rows))
+        return rightsizing.track(entries)
+    except Exception:
+        logging.exception("Could not read the earlier runs")
+        return None
+
+
+def _short_time(run):
+    return history.short_time(run.get("startedUtc"))
 
 
 def _rightsizing_context(include_all=False):
@@ -548,9 +571,9 @@ def rightsizing_page():
                       "measured": sum(totals[n] for n in rightsizing.ASSESSMENTS), "nodata": totals["nodata"]})
     active = []
     for field, spec in filters.items():
-        label = (rightsizing.FACETS[field][1] if field in rightsizing.FACETS else "Advisor" if field == "advice" else "Name")
+        label = (rightsizing.FACETS[field][1] if field in rightsizing.FACETS else rightsizing.RADIO_LABELS.get(field, "Name"))
         shown = [names.get(v.lower(), v) if field == "subscription" else labels.get(v, v) if field == "assessment"
-                 else rightsizing.ADVICE_FILTER.get(v, v) for v in spec["values"]]
+                 else rightsizing.RADIOS.get(field, {}).get(v, v) for v in spec["values"]]
         rest = {k: s for k, s in filters.items() if k != field}
         active.append({"field": field, "label": label, "op": spec["op"], "values": shown,
                        "remove": url_for("rightsizing_page", kind=kind, **_filter_args(rest))})
@@ -558,17 +581,22 @@ def rightsizing_page():
         "fields": {f: {"label": rightsizing.FACETS[f][1], "options": o} for f, o in
                    rightsizing.filter_choices(ctx["base"], filters, labels, names).items()},
         "active": {f: {"op": s["op"], "values": s["values"]} for f, s in filters.items()},
-        "menu": [{"field": f, "label": l, "kind": k, **({"choices": [[c, t] for c, t in rightsizing.ADVICE_FILTER.items()]} if k == "radio" else {})}
+        "menu": [{"field": f, "label": l, "kind": k, **({"choices": [[c, t] for c, t in rightsizing.RADIOS[f].items()]} if k == "radio" else {})}
                  for f, l, k in rightsizing.MENU],
     }
-    rows = ctx["rows"]
+    rows = [{**r, "risk": rightsizing.risk(r)} if kind == "vm" else r for r in ctx["rows"]]
     page_args = {"kind": kind, **_filter_args(filters)}
+    tracking = _tracking()
+    tracking_chart = charts.sparkline(tracking["points"]) if tracking else None
     return render_template(
         "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, title=rightsizing.KINDS[kind][0], labels=labels,
-        rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), everything=len(ctx["base"]), names=names, kinds=rightsizing.KINDS,
+        rows=rows[:MAX_TABLE_ROWS], total_rows=len(rows), everything=len(ctx["base"]), names=names,
+        kinds={key: value for key, value in rightsizing.KINDS.items() if key == kind or any(rightsizing.counts(metrics, key).values())},
         limits=ctx["limits"], threshold_fields=rightsizing.THRESHOLD_FIELDS, custom=ctx["limits"] != rightsizing.DEFAULT_THRESHOLDS,
+        avg_label=rightsizing.AVG_LABEL.get(kind, "CPU"), with_memory=kind in rightsizing.WITH_MEMORY,
         lookback=metrics.get("lookbackDays", 30), totals=rightsizing.totals(metrics, ctx["advice"], ctx["costs"]), active=active,
         facets=facets, page_args=page_args, order=ctx["order"], sorts=rightsizing.SORTS, has_costs=bool(ctx["costs"]),
+        tracking=tracking, tracking_chart=tracking_chart, schedule_text=rightsizing.schedule_text,
     )
 
 
@@ -583,11 +611,12 @@ def rightsizing_csv():
         return jsonify(error="No utilization data yet."), 404
     names, labels = ctx["names"], ctx["labels"]
     header = ["Name", "Type", "Subscription", "Resource group", "Size", "Avg %", "Max %", "Assessment", "Cost last 30 days",
-              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Resource ID"]
+              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Schedule", "Resource ID"]
     rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r["resourceGroup"], r["detail"], r["avg"], r["max"],
              labels.get(r["assessment"], r["assessment"]), r["cost"], (r["advice"] or {}).get("action"), "" if str((r["advice"] or {}).get("action")).lower() == "shutdown" else (r["advice"] or {}).get("targetSku"),
              (r["advice"] or {}).get("monthlySavings"), (r["advice"] or {}).get("currency"), (r["advice"] or {}).get("cpuP95"),
-             (r["advice"] or {}).get("memoryP95"), r.get("memory"), r.get("iops"), r.get("net"), r["id"]] for r in ctx["rows"]]
+             (r["advice"] or {}).get("memoryP95"), r.get("memory"), r.get("iops"), r.get("net"),
+             rightsizing.schedule_text(r["schedule"]) if r.get("scheduleCandidate") else "", r["id"]] for r in ctx["rows"]]
     return _csv(f"right-sizing-{ctx['kind']}.csv", header, rows)
 
 

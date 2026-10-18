@@ -553,3 +553,53 @@ function fitPopover(pop, container, anchor) {
   reset.addEventListener("click", function () { send({ reset: true }); });
 })();
 
+(function () {
+  var table = document.getElementById("rs");
+  var panel = document.getElementById("selection");
+  if (!table || !panel) { return; }
+  var all = document.getElementById("pick-all");
+  var boxes = Array.prototype.slice.call(table.querySelectorAll(".pick-row"));
+
+  function number(value) { var n = parseFloat(value); return isFinite(n) ? n : 0; }
+
+  function chosen() {
+    return boxes.filter(function (box) { return box.checked; }).map(function (box) { return box.closest("tr"); });
+  }
+
+  function refresh() {
+    var rows = chosen();
+    var saving = 0, cost = 0;
+    rows.forEach(function (row) { saving += number(row.getAttribute("data-saving")); cost += number(row.getAttribute("data-cost")); });
+    panel.hidden = rows.length === 0;
+    document.getElementById("sel-count").textContent = String(rows.length);
+    document.getElementById("sel-saving").textContent = Math.round(saving).toLocaleString();
+    document.getElementById("sel-cost").textContent = Math.round(cost).toLocaleString();
+    all.checked = rows.length > 0 && rows.length === boxes.length;
+    all.indeterminate = rows.length > 0 && rows.length < boxes.length;
+  }
+
+  function cell(value) {
+    var text = String(value);
+    if (/^[=+\-@\t\r]/.test(text)) { text = "'" + text; }
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+
+  boxes.forEach(function (box) { box.addEventListener("change", refresh); });
+  all.addEventListener("change", function () { boxes.forEach(function (box) { box.checked = all.checked; }); refresh(); });
+  document.getElementById("sel-clear").addEventListener("click", function () { boxes.forEach(function (box) { box.checked = false; }); refresh(); });
+  document.getElementById("sel-csv").addEventListener("click", function () {
+    var lines = [["Name", "Size", "Advisor", "Monthly savings", "Cost 30 days", "Resource ID"].map(cell).join(",")];
+    chosen().forEach(function (row) {
+      lines.push([row.getAttribute("data-name"), row.getAttribute("data-size"), row.getAttribute("data-advice"), row.getAttribute("data-saving"),
+                  row.getAttribute("data-cost"), row.getAttribute("data-id")].map(cell).join(","));
+    });
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv" }));
+    link.download = "right-sizing-selection.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  });
+})();
+
