@@ -27,6 +27,10 @@
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
 
       {% if slug == 'cost' %}
+        {% if scoped_spend %}
+          {% include "_finops_scoped.html" %}
+          <p class="muted">Below: the monthly trends, anomalies, rate options and budgets, which are always for the whole tenant.</p>
+        {% endif %}
         {% include "_finops.html" %}
       {% endif %}
 

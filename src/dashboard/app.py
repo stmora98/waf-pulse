@@ -304,6 +304,11 @@ def pillar_page(slug):
     spend = _spend_context(summary, rules) if slug == "cost" else {}
     if slug == "security":
         spend = _security_context(summary)
+    if slug == "cost" and summary and scope.is_active(_scope()):
+        try:
+            spend = {**spend, "scoped_spend": _scoped_spend(summary)}
+        except Exception:
+            logging.exception("Could not read the spend of the filtered resources")
     return render_template(
         "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
@@ -316,6 +321,42 @@ def pillar_page(slug):
 
 BREAKDOWN_PANELS = (("byService", "Service"), ("byResourceGroup", "Resource group"), ("byLocation", "Region"),
                     ("byResourceType", "Resource type"))
+
+
+SCOPED_SPEND_ROWS = 15
+
+
+def _scoped_spend(summary):
+    """The spend of the resources the filters leave: their cost of the last 30 days (amortized), from the per-resource costs the
+    collector keeps for the most expensive resources, broken down with what the inventory knows about each resource."""
+    chosen = _resolved(summary)
+    costs = data.rows_of(summary["runId"], "costs")
+    inventory = {str(r["id"]).lower(): r for r in _inventory_all(summary)[0]}
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    kept, unplaced = [], 0.0
+    for item in costs:
+        row = inventory.get(str(item["id"]).lower())
+        if row is None:
+            unplaced += item["cost"]
+        elif chosen.row_ok(row):
+            kept.append({**row, "cost": item["cost"]})
+    listed = sum(c["cost"] for c in costs)
+    total = sum(r["cost"] for r in kept)
+
+    def bars(field, label, link, limit=8, shown=lambda v: v):
+        sums = Counter()
+        for row in kept:
+            sums[row.get(field) or "–"] += row["cost"]
+        return {"title": label, "chart": charts.hbars([(shown(name), round(cost), link(name)) for name, cost in sums.most_common(limit)], width=440, label_width=210, label_limit=34)} if sums else None
+
+    panels = [p for p in (
+        bars("type", "By resource type", lambda v: url_for("resources_page", type=v), shown=insights.friendly_type),
+        bars("resourceGroup", "By resource group", lambda v: url_for("resources_page", group=v)),
+        bars("location", "By region", lambda v: url_for("resources_page", location=v)),
+        bars("subscriptionId", "By subscription", lambda v: url_for("resources_page", subscription=v), shown=lambda v: names.get(str(v).lower(), v))) if p]
+    return {"currency": ((summary or {}).get("finops") or {}).get("currency", ""), "total": total, "resources": len(kept), "listed": len(costs),
+            "share": round(100 * total / listed, 1) if listed else None, "unplaced": unplaced, "panels": panels, "have_costs": bool(costs),
+            "top": sorted(kept, key=lambda r: -r["cost"])[:SCOPED_SPEND_ROWS], "names": names}
 
 
 def _security_context(summary):
@@ -837,7 +878,7 @@ UNSCOPED_PAGES = ("governance_page", "history_page", "compare_page", "suppressio
 @app.context_processor
 def inject_user():
     chosen = _scope()
-    unscoped = request.endpoint in UNSCOPED_PAGES or (request.endpoint == "pillar_page" and (request.view_args or {}).get("slug") == "cost")
+    unscoped = request.endpoint in UNSCOPED_PAGES
     return {"user": request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""), "nav_pillars": list(insights.PILLAR_PAGES.items()),
             "scope_active": scope.is_active(chosen), "scope_label": scope.label(chosen), "scope_unfiltered": unscoped and scope.is_active(chosen),
             "scope_filters": [{"index": i, "text": scope.describe(f)} for i, f in enumerate(chosen)]}

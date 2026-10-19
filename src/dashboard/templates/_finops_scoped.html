@@ -1,0 +1,43 @@
+{% from "_macros.html" import hbar_chart, azure_link %}
+<h3 class="spend" id="filtered-spend">Spend of the filtered resources</h3>
+{% if not scoped_spend.have_costs %}
+  <section class="notice">No per-resource costs yet. They come from Cost Management (Cost Management Reader role) after a refresh.</section>
+{% else %}
+  <p class="muted">The cost of the last 30 days (amortized) of the filtered resources, from the {{ scoped_spend.listed }} most expensive resources of the tenant.
+    {% if scoped_spend.unplaced %}{{ '{:,.0f}'.format(scoped_spend.unplaced) }} {{ scoped_spend.currency }} of that belongs to resources the inventory does not list (deleted or not inventoried), so no filter includes it.{% endif %}</p>
+  <section class="cards compact">
+    <div class="card na">
+      <span class="card-title">Last 30 days</span>
+      <span class="card-score">{{ '{:,.0f}'.format(scoped_spend.total) }}</span>
+      <span class="muted">{{ scoped_spend.currency }} · {{ scoped_spend.resources }} resource(s){% if scoped_spend.share is not none %} · {{ scoped_spend.share }}% of the listed spend{% endif %}</span>
+    </div>
+  </section>
+  {% if scoped_spend.panels %}
+    <section class="insights two">
+      {% for panel in scoped_spend.panels %}
+        <div class="panel"><h3>{{ panel.title }}</h3>{{ hbar_chart(panel.chart, panel.title) }}</div>
+      {% endfor %}
+    </section>
+    <section class="panel">
+      <h3>Most expensive resources</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Resource</th><th>Subscription</th><th>Resource group</th><th>30 days ({{ scoped_spend.currency }})</th><th>Azure</th></tr></thead>
+          <tbody>
+            {% for r in scoped_spend.top %}
+              <tr>
+                <td><a href="{{ url_for('resource_page', id=r.id) }}">{{ r.name }}</a></td>
+                <td>{{ scoped_spend.names.get(r.subscriptionId, r.subscriptionId) }}</td>
+                <td>{{ r.resourceGroup }}</td>
+                <td>{{ '{:,.0f}'.format(r.cost) }}</td>
+                <td>{{ azure_link(r.id) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <p class="muted">No resource with cost matches the filters.</p>
+  {% endif %}
+{% endif %}

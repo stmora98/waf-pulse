@@ -324,3 +324,19 @@ def test_without_rule_statistics_the_page_still_renders(client, monkeypatch):
     monkeypatch.setattr(data, "rows_of", lambda run_id, kind: (_ for _ in ()).throw(RuntimeError("down")) if kind == "rulestats" else [])
     with_filters(client, {"f": "sub", "v": [S1]})
     assert "refresh to see scores" in client.get("/").get_data(as_text=True)
+
+def test_the_cost_page_adds_the_spend_of_the_filtered_resources(client, monkeypatch):
+    serve(monkeypatch)
+    summary = {**json.loads(json.dumps(SUMMARY)), "finops": {"currency": "USD", "months": [], "coverage": {}}}
+    monkeypatch.setattr(data, "summary", lambda run_id: json.loads(json.dumps(summary)))
+    costs = [{"id": rid(S1, "a").lower(), "cost": 300.0}, {"id": rid(S3, "c").lower(), "cost": 100.0}, {"id": "/subscriptions/x/gone", "cost": 50.0}]
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: list(RULESTATS) if kind == "rulestats" else (costs if kind == "costs" else []))
+    plain = client.get("/pillar/cost").get_data(as_text=True)
+    assert "Spend of the filtered resources" not in plain
+    with_filters(client, {"f": "tag", "k": "env", "v": ["prod"]})
+    html = client.get("/pillar/cost").get_data(as_text=True)
+    assert "Spend of the filtered resources" in html and ">300<" in html and "1 resource(s)" in html and "66.7% of the listed spend" in html
+    assert "50 USD of that belongs to resources the inventory does not list" in html and "always for the whole tenant" in html
+    assert "always shows the whole tenant" not in html and "By resource group" in html and ">100<" not in html
+    with_filters(client, {"f": "loc", "v": ["nowhere"]})
+    assert "No resource with cost matches" in client.get("/pillar/cost").get_data(as_text=True)
