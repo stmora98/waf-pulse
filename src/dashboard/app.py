@@ -960,6 +960,23 @@ def suppressions_page():
     return render_template("suppressions.html", error=None, entries=rows, summary=summary, durations=suppress.DURATIONS)
 
 
+STALE_RUN_MINUTES = 20
+
+
+def _is_running(run, now=None):
+    """A run is running while it says so and has not been going for longer than a run ever takes: one that died with its
+    host stays "running" in the store, and must not block the next refresh."""
+    if run.get("status") != "running":
+        return False
+    try:
+        started = datetime.fromisoformat(str(run.get("startedUtc")))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return (now or datetime.now(timezone.utc)) - started < timedelta(minutes=STALE_RUN_MINUTES)
+
+
 @app.post("/api/refresh")
 def api_refresh():
     # A custom header cannot be sent cross-site without a CORS preflight, which blocks CSRF.
@@ -967,7 +984,7 @@ def api_refresh():
         return jsonify(error="Forbidden"), 403
     try:
         latest = data.latest_run()
-        if latest and latest.get("status") == "running":
+        if latest and _is_running(latest):
             return jsonify(message="A refresh is already running."), 409
         data.request_refresh()
     except Exception:

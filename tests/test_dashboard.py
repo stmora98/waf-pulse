@@ -205,3 +205,16 @@ def test_left_menu_lists_every_page_marks_the_current_one_and_can_be_hidden(clie
     assert 'id="sidebar"' in html and "<script>" not in html and "style=" not in html
     assert "wafpulse-nav" in client.get("/static/theme.js").get_data(as_text=True)
     assert 'class="side-link active" href="/actions"' in client.get("/rule/R-1").get_data(as_text=True)
+
+def test_a_run_that_never_finished_does_not_block_the_next_refresh(client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    fresh = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=dashboard_app.STALE_RUN_MINUTES + 5)).isoformat()
+    queued = []
+    monkeypatch.setattr(data, "request_refresh", lambda: queued.append(True))
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"status": "running", "startedUtc": fresh})
+    assert client.post("/api/refresh", headers={"X-WAF-Pulse": "1"}).status_code == 409 and queued == []
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"status": "running", "startedUtc": stale})
+    assert client.post("/api/refresh", headers={"X-WAF-Pulse": "1"}).status_code == 202 and queued == [True]
+    assert dashboard_app._is_running({"status": "running", "startedUtc": "not a date"}) is True
+    assert dashboard_app._is_running({"status": "completed", "startedUtc": fresh}) is False

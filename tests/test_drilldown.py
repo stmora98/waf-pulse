@@ -380,3 +380,34 @@ def test_popovers_fit_the_window_and_keep_their_buttons_in_view():
         assert needle in script, needle
     for needle in ("calc(100vw - 32px)", "overflow-y: auto", "position: sticky"):
         assert needle in css, needle
+
+def test_start_run_closes_the_runs_that_were_interrupted(monkeypatch):
+    saved = []
+
+    class Runs:
+        def query_items(self, query, parameters=None, partition_key=None):
+            assert "status = 'running'" in query and parameters[0]["value"] == "new"
+            return [{"id": "old", "status": "running", "subscriptionId": "tenant", "startedUtc": "x", "_rid": "r", "_etag": "e"}]
+
+        def upsert_item(self, doc):
+            saved.append(doc)
+
+    monkeypatch.setattr(store, "container", lambda name: Runs())
+    store.start_run("new", "2026-10-19T00:00:00+00:00", "manual")
+    assert saved[0]["id"] == "old" and saved[0]["status"] == "failed" and "interrupted" in saved[0]["error"] and "_rid" not in saved[0]
+    assert saved[1]["id"] == "new" and saved[1]["status"] == "running"
+
+
+def test_start_run_still_starts_when_cleaning_up_fails(monkeypatch):
+    saved = []
+
+    class Runs:
+        def query_items(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+        def upsert_item(self, doc):
+            saved.append(doc)
+
+    monkeypatch.setattr(store, "container", lambda name: Runs())
+    store.start_run("new", "t", "manual")
+    assert [d["id"] for d in saved] == ["new"]

@@ -1,5 +1,6 @@
 """Persistence: Cosmos DB for documents, Blob Storage for raw snapshots. Both use the managed identity."""
 import json
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -35,7 +36,24 @@ def get_setting(name):
         return None
 
 
+def close_interrupted_runs(current_run_id):
+    """Marks as failed the runs still "running" from before this one: an orchestration that died (a host restart in the
+    middle of a deployment, for example) never writes its end, and would show as running forever."""
+    runs = container("runs")
+    stale = list(runs.query_items(
+        "SELECT * FROM c WHERE c.status = 'running' AND c.id != @id",
+        parameters=[{"name": "@id", "value": current_run_id}], partition_key=TENANT_PARTITION))
+    for run in stale:
+        runs.upsert_item({**{k: v for k, v in run.items() if not k.startswith("_")}, "status": "failed",
+                          "error": "The run was interrupted before it finished."})
+    return len(stale)
+
+
 def start_run(run_id, started_utc, trigger):
+    try:
+        close_interrupted_runs(run_id)
+    except Exception:
+        logging.exception("Could not close the interrupted runs")
     container("runs").upsert_item(
         {
             "id": run_id,
