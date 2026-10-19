@@ -680,7 +680,7 @@ def rightsizing_csv():
     names, labels = ctx["names"], ctx["labels"]
     header = ["Name", "Type", "Subscription", "Resource group", "Size", "Avg %", "Max %", "Assessment", "Cost last 30 days",
               "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Schedule", "Resource ID"]
-    rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r["resourceGroup"], r["detail"], r["avg"], r["max"],
+    rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r.get("resourceGroup", ""), r.get("detail", ""), r.get("avg"), r.get("max"),
              labels.get(r["assessment"], r["assessment"]), r["cost"], (r["advice"] or {}).get("action"), "" if str((r["advice"] or {}).get("action")).lower() == "shutdown" else (r["advice"] or {}).get("targetSku"),
              (r["advice"] or {}).get("monthlySavings"), (r["advice"] or {}).get("currency"), (r["advice"] or {}).get("cpuP95"),
              (r["advice"] or {}).get("memoryP95"), r.get("memory"), r.get("iops"), r.get("net"),

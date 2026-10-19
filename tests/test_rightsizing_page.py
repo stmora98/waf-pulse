@@ -347,3 +347,11 @@ def test_type_chips_only_list_kinds_with_data(client, monkeypatch):
     serve(monkeypatch, {"runId": "r1", "metrics": METRICS, "subscriptions": [{"id": SUB, "name": "Prod"}]})
     html = page(client, "?kind=vm")
     assert ">Virtual machines<" in html and ">App Service plans<" in html and ">AKS clusters<" not in html and ">Redis caches<" not in html
+
+
+def test_csv_of_storage_accounts_has_no_peak_and_still_downloads(client, monkeypatch):
+    account = {"kind": "storage", "id": "/s/acct", "name": "acct", "subscriptionId": SUB, "resourceGroup": "rg", "detail": "Standard_LRS", "avg": 120.0, "assessment": "right"}
+    metrics = {**METRICS, "distribution": {**METRICS["distribution"], "storage": {"idle": 0, "under": 0, "right": 1, "saturated": 0, "nodata": 0}}, "resources": [account]}
+    serve(monkeypatch, {"runId": "r1", "metrics": metrics, "subscriptions": [{"id": SUB, "name": "Prod"}]})
+    response = client.get("/rightsizing.csv?kind=storage")
+    assert response.status_code == 200 and "acct,storage,Prod,rg,Standard_LRS,120.0" in response.get_data(as_text=True)
