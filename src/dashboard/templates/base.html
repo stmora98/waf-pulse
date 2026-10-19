@@ -62,14 +62,21 @@
         </div>
         <div class="actions">
           {% if user %}<span class="muted">{{ user }}</span>{% endif %}
-          <button id="scope-btn" class="icon-button{% if scope_active %} scoped{% endif %}" type="button" aria-haspopup="dialog" aria-expanded="false"
-                  title="Choose the subscriptions, management groups and tags to look at">Scope: {{ scope_label }}</button>
           <button id="theme-toggle" class="icon-button" type="button" aria-label="Change the color theme" title="Color theme: automatic, light or dark">Theme</button>
           <button id="refresh" type="button">Refresh now</button>
         </div>
       </header>
       <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
 
+      <div class="filterbar scopebar" id="scope-bar" role="group" aria-label="Filters for the whole dashboard">
+        <span class="muted">Filters</span>
+        {% for f in scope_filters %}
+          <span class="fpill"><button type="button" data-scope-edit="{{ f.index }}" title="Change this filter">{{ f.text }}</button><button type="button" class="fremove" data-scope-remove="{{ f.index }}" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>
+        {% endfor %}
+        <button type="button" class="fadd" id="scope-add" aria-haspopup="true">+ Add filter</button>
+        {% if scope_active %}<button type="button" class="chip clear" id="scope-clear">Clear all</button>{% endif %}
+        <div class="lz-pop fpop" id="scope-pop" hidden role="dialog" aria-label="Filter"></div>
+      </div>
       {% if scope_unfiltered %}<p class="notice scope-note">This page always shows the whole tenant: the scope ({{ scope_label }}) does not apply to it.</p>{% endif %}
       <main>
         {% block content %}{% endblock %}

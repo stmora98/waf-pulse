@@ -1,6 +1,6 @@
 {% if summary and summary.secureScore and summary.secureScore.topControls %}
   <section class="panel" id="controls">
-    <h3>Secure Score controls</h3>
+    <h3>Secure Score controls{% if summary.secureScore.controlsTenantWide %} <span class="muted">(whole tenant)</span>{% endif %}</h3>
     <p class="muted">Share of resources that pass each control. The controls with the most unhealthy resources come first.</p>
     <div class="table-wrap">
       <table class="narrow">

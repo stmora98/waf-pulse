@@ -705,15 +705,11 @@ function fitPopover(pop, container, anchor) {
 })();
 
 (function () {
-  var button = document.getElementById("scope-btn");
-  if (!button) { return; }
-  var pop = document.createElement("div");
-  pop.className = "sup-pop scope-pop";
-  pop.hidden = true;
-  pop.setAttribute("role", "dialog");
-  pop.setAttribute("aria-label", "Scope");
-  document.body.appendChild(pop);
-  var loaded = null;
+  var bar = document.getElementById("scope-bar");
+  if (!bar) { return; }
+  var pop = document.getElementById("scope-pop");
+  var addButton = document.getElementById("scope-add");
+  var state = null; // { options, filters }
 
   function element(tag, text, className) {
     var node = document.createElement(tag);
@@ -722,167 +718,187 @@ function fitPopover(pop, container, anchor) {
     return node;
   }
 
-  function place() {
-    pop.hidden = false;
-    var rect = button.getBoundingClientRect();
-    pop.style.maxHeight = Math.max(window.innerHeight - 24, 200) + "px";
-    pop.style.left = Math.max(8, Math.min(rect.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8)) + "px";
-    pop.style.top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - pop.offsetHeight - 8)) + "px";
-  }
+  function close() { pop.hidden = true; }
+  function place(anchor) { fitPopover(pop, bar, anchor); }
 
-  function save(body, error) {
+  function save(filters, error) {
     return fetch("/api/scope", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(filters.length ? { filters: filters } : { clear: true })
     }).then(function (response) {
       if (response.ok) { window.location.reload(); return null; }
       return response.json().then(function (result) { throw new Error(result.error || "failed"); });
-    }).catch(function (problem) { error.textContent = problem.message === "failed" ? "The scope could not be saved." : problem.message; });
-  }
-
-  function section(title) {
-    var box = element("div", "", "scope-section");
-    box.appendChild(element("h4", title));
-    return box;
-  }
-
-  function checks(items, chosen, search) {
-    var list = element("div", "", "fopts");
-    var rows = [];
-    items.forEach(function (item) {
-      var label = element("label");
-      var check = element("input");
-      check.type = "checkbox";
-      check.value = item.value;
-      check.checked = chosen.indexOf(item.value.toLowerCase()) !== -1;
-      label.appendChild(check);
-      label.appendChild(element("span", item.text));
-      if (item.count !== undefined) { label.appendChild(element("span", String(item.count), "count")); }
-      list.appendChild(label);
-      rows.push({ label: label, text: item.text.toLowerCase(), check: check });
+    }).catch(function (problem) {
+      var text = problem.message === "failed" ? "The filters could not be saved." : problem.message;
+      if (error) { error.textContent = text; }
     });
-    if (!items.length) { list.appendChild(element("p", "Nothing to choose from.", "muted")); }
-    search.addEventListener("input", function () {
-      var needle = search.value.trim().toLowerCase();
-      rows.forEach(function (row) { row.label.hidden = needle !== "" && row.text.indexOf(needle) === -1; });
-    });
-    return { node: list, values: function () { return rows.filter(function (r) { return r.check.checked; }).map(function (r) { return r.check.value; }); } };
   }
 
-  function render(options, current) {
-    pop.textContent = "";
-    pop.appendChild(element("h4", "Scope"));
-    pop.appendChild(element("p", "Everything on the dashboard, except cost, governance and history, shows only what is in the scope.", "muted"));
-
-    var subs = section("Subscriptions");
-    var subSearch = element("input", "", "lz-input");
-    subSearch.type = "search";
-    subSearch.placeholder = "Search subscriptions";
-    subs.appendChild(subSearch);
-    var subChecks = checks(options.subscriptions.map(function (s) { return { value: s.id, text: s.name, count: s.resources }; }), current.subs || [], subSearch);
-    subs.appendChild(subChecks.node);
-    pop.appendChild(subs);
-
-    var groups = section("Management groups");
-    var groupSearch = element("input", "", "lz-input");
-    groupSearch.type = "search";
-    groupSearch.placeholder = "Search management groups";
-    groups.appendChild(groupSearch);
-    var chosenGroups = (current.mgs || []).map(function (g) { return g.toLowerCase(); });
-    var groupChecks = checks(options.managementGroups.map(function (g) { return { value: g.name, text: g.displayName, count: g.subscriptions }; }), chosenGroups, groupSearch);
-    groups.appendChild(groupChecks.node);
-    groups.appendChild(element("p", "A management group includes the subscriptions of every group below it.", "muted"));
-    pop.appendChild(groups);
-
-    var tags = section("Tags");
-    var tagState = (current.tags || []).slice();
-    var tagList = element("div", "", "scope-tags");
-    var keySelect = element("select");
-    keySelect.setAttribute("aria-label", "Tag key");
-    var valueSelect = element("select");
-    valueSelect.setAttribute("aria-label", "Tag value");
-    var addTag = element("button", "Add tag", "icon-button");
-    addTag.type = "button";
-    function drawTags() {
-      tagList.textContent = "";
-      tagState.forEach(function (item) {
-        var chip = element("span", item, "chip");
-        var remove = element("button", "\u00d7", "chip-remove");
-        remove.type = "button";
-        remove.setAttribute("aria-label", "Remove " + item);
-        remove.addEventListener("click", function () { tagState = tagState.filter(function (x) { return x !== item; }); drawTags(); });
-        chip.appendChild(remove);
-        tagList.appendChild(chip);
-      });
-    }
-    function drawValues() {
-      valueSelect.textContent = "";
-      var key = options.tags.filter(function (t) { return t.key === keySelect.value; })[0];
-      (key ? key.values : []).forEach(function (v) {
-        var option = element("option", v.value + " (" + v.count + ")");
-        option.value = v.value;
-        valueSelect.appendChild(option);
-      });
-    }
-    if (options.tagsAvailable && options.tags.length) {
-      options.tags.forEach(function (t) {
-        var option = element("option", t.key + " (" + t.total + ")");
-        option.value = t.key;
-        keySelect.appendChild(option);
-      });
-      keySelect.addEventListener("change", drawValues);
-      addTag.addEventListener("click", function () {
-        var item = keySelect.value + "=" + valueSelect.value;
-        if (keySelect.value && tagState.indexOf(item) === -1) { tagState.push(item); drawTags(); }
-      });
-      var row = element("div", "", "lz-row");
-      row.appendChild(keySelect);
-      row.appendChild(valueSelect);
-      row.appendChild(addTag);
-      tags.appendChild(row);
-      drawValues();
-    } else {
-      tags.appendChild(element("p", options.tagsAvailable ? "No tags found." : "Tags appear after the next refresh.", "muted"));
-    }
-    tags.appendChild(tagList);
-    tags.appendChild(element("p", "Resources must carry every key (with any of its chosen values).", "muted"));
-    drawTags();
-    pop.appendChild(tags);
-
-    var error = element("p", "", "lz-error");
-    pop.appendChild(error);
-    var actions = element("div", "", "lz-row");
-    var apply = element("button", "Apply");
-    apply.type = "button";
-    apply.addEventListener("click", function () {
-      apply.disabled = true;
-      save({ subs: subChecks.values(), mgs: groupChecks.values(), tags: tagState }, error).then(function () { apply.disabled = false; });
-    });
-    var clear = element("button", "Show everything", "icon-button");
-    clear.type = "button";
-    clear.addEventListener("click", function () { save({ clear: true }, error); });
-    actions.appendChild(apply);
-    actions.appendChild(clear);
-    pop.appendChild(actions);
-    place();
-  }
-
-  button.addEventListener("click", function (event) {
-    event.stopPropagation();
-    if (!pop.hidden) { pop.hidden = true; button.setAttribute("aria-expanded", "false"); return; }
-    button.setAttribute("aria-expanded", "true");
-    if (loaded) { render(loaded.options, loaded.current); return; }
-    pop.textContent = "Loading...";
-    place();
-    fetch("/api/scope-options").then(function (response) {
+  function load() {
+    if (state) { return Promise.resolve(state); }
+    return fetch("/api/scope-options").then(function (response) {
       if (!response.ok) { throw new Error("failed"); }
       return response.json();
-    }).then(function (result) { loaded = result; render(result.options, result.current); })
-      .catch(function () { pop.textContent = "The scope options could not be loaded."; });
-  });
-  pop.addEventListener("click", function (event) { event.stopPropagation(); });
-  document.addEventListener("click", function () { pop.hidden = true; button.setAttribute("aria-expanded", "false"); });
-  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { pop.hidden = true; } });
-})();
+    }).then(function (result) { state = { options: result.options, filters: result.current || [] }; return state; });
+  }
 
+  var FIELD_ORDER = ["sub", "mg", "rg", "type", "loc", "tag"];
+
+  function menu() {
+    load().then(function (current) {
+      pop.textContent = "";
+      pop.appendChild(element("h4", "Add filter"));
+      FIELD_ORDER.forEach(function (field) {
+        var spec = current.options.fields[field];
+        var item = element("button", spec.label, "fmenu-item");
+        item.type = "button";
+        item.addEventListener("click", function (event) { event.stopPropagation(); edit({ f: field, op: "eq", v: [] }, -1, addButton); });
+        pop.appendChild(item);
+      });
+      place(addButton);
+    }).catch(function () { pop.textContent = "The filter options could not be loaded."; place(addButton); });
+  }
+
+  function operator(entry) {
+    var op = element("select");
+    [["eq", "equals"], ["ne", "does not equal"]].forEach(function (pair) {
+      var option = element("option", pair[1]);
+      option.value = pair[0];
+      op.appendChild(option);
+    });
+    op.value = entry.op === "ne" ? "ne" : "eq";
+    op.setAttribute("aria-label", "Operator");
+    return op;
+  }
+
+  function actions(onApply, error) {
+    var row = element("div", "", "lz-row");
+    var apply = element("button", "Apply");
+    apply.type = "button";
+    apply.addEventListener("click", function () { apply.disabled = true; onApply().then(function () { apply.disabled = false; }); });
+    var cancel = element("button", "Cancel", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    row.appendChild(apply);
+    row.appendChild(cancel);
+    return row;
+  }
+
+  function submit(entry, index, error) {
+    var filters = state.filters.slice();
+    if (index >= 0) { filters[index] = entry; } else { filters.push(entry); }
+    return save(filters, error);
+  }
+
+  function edit(entry, index, anchor) {
+    load().then(function () {
+      var spec = state.options.fields[entry.f];
+      pop.textContent = "";
+      var title = entry.f === "tag" ? "Tag" : spec.label;
+      pop.appendChild(element("h4", title));
+      var op = operator(entry);
+      pop.appendChild(op);
+      var error = element("p", "", "lz-error");
+      var names = {};
+      var collect;
+
+      function facetList(container, options, chosen) {
+        var search = element("input", "", "lz-input");
+        search.type = "search";
+        search.placeholder = "Search";
+        container.appendChild(search);
+        var box = element("div", "", "fopts");
+        var rows = [];
+        var picked = {};
+        chosen.forEach(function (value) { picked[String(value).toLowerCase()] = true; });
+        options.forEach(function (option) {
+          var label = element("label");
+          var check = element("input");
+          check.type = "checkbox";
+          check.value = option.value;
+          check.checked = !!picked[String(option.value).toLowerCase()];
+          label.appendChild(check);
+          label.appendChild(element("span", option.text || option.value));
+          if (option.count !== undefined) { label.appendChild(element("span", String(option.count), "count")); }
+          box.appendChild(label);
+          rows.push({ label: label, text: String(option.text || option.value).toLowerCase(), check: check, option: option });
+        });
+        if (!rows.length) { box.appendChild(element("p", "Nothing to choose from.", "muted")); }
+        search.addEventListener("input", function () {
+          var needle = search.value.trim().toLowerCase();
+          rows.forEach(function (row) { row.label.hidden = needle !== "" && row.text.indexOf(needle) === -1; });
+        });
+        container.appendChild(box);
+        return function () {
+          var values = [], text = {};
+          rows.forEach(function (row) {
+            if (row.check.checked) { values.push(row.check.value); if (row.option.text && row.option.text !== row.option.value) { text[row.option.value.toLowerCase()] = row.option.text; } }
+          });
+          return { values: values, names: text };
+        };
+      }
+
+      if (entry.f === "tag") {
+        var keySelect = element("select");
+        keySelect.setAttribute("aria-label", "Tag name");
+        var keys = (spec.keys || []);
+        if (!state.options.tagsAvailable || !keys.length) {
+          pop.appendChild(element("p", state.options.tagsAvailable ? "No tags found." : "Tags appear after the next refresh.", "muted"));
+          pop.appendChild(actions(function () { close(); return Promise.resolve(); }, error));
+          place(anchor);
+          return;
+        }
+        keys.forEach(function (key) {
+          var option = element("option", key.key + " (" + key.count + ")");
+          option.value = key.key;
+          keySelect.appendChild(option);
+        });
+        if (entry.k) { keySelect.value = entry.k; }
+        pop.insertBefore(keySelect, op);
+        var holder = element("div");
+        pop.appendChild(holder);
+        var render = function () {
+          holder.textContent = "";
+          var key = keys.filter(function (k) { return k.key === keySelect.value; })[0];
+          var saved = (entry.k === keySelect.value) ? entry.v : [];
+          collect = facetList(holder, (key ? key.values : []).map(function (v) { return { value: v.value, text: v.value, count: v.count }; }), saved);
+        };
+        keySelect.addEventListener("change", render);
+        render();
+      } else {
+        collect = facetList(pop, spec.options, entry.v);
+      }
+      pop.appendChild(error);
+      pop.appendChild(actions(function () {
+        var picked = collect();
+        if (entry.f !== "tag" && !picked.values.length) { error.textContent = "Choose at least one value."; return Promise.resolve(); }
+        var next = { f: entry.f, op: op.value, v: picked.values };
+        if (entry.f === "tag") { next.k = keySelect.value; }
+        if (Object.keys(picked.names).length) { next.n = picked.names; }
+        return submit(next, index, error);
+      }, error));
+      place(anchor);
+    }).catch(function () { pop.textContent = "The filter options could not be loaded."; place(anchor); });
+  }
+
+  addButton.addEventListener("click", function (event) { event.stopPropagation(); if (!pop.hidden) { close(); } else { menu(); } });
+  Array.prototype.forEach.call(bar.querySelectorAll("[data-scope-edit]"), function (button) {
+    button.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var index = Number(button.getAttribute("data-scope-edit"));
+      load().then(function () { edit(state.filters[index], index, button); });
+    });
+  });
+  Array.prototype.forEach.call(bar.querySelectorAll("[data-scope-remove]"), function (button) {
+    button.addEventListener("click", function () {
+      var index = Number(button.getAttribute("data-scope-remove"));
+      load().then(function () { var filters = state.filters.slice(); filters.splice(index, 1); return save(filters); });
+    });
+  });
+  var clear = document.getElementById("scope-clear");
+  if (clear) { clear.addEventListener("click", function () { save([]); }); }
+  pop.addEventListener("click", function (event) { event.stopPropagation(); });
+  document.addEventListener("click", close);
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { close(); } });
+})();

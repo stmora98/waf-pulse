@@ -1,0 +1,42 @@
+"""Pillar scoring on the dashboard: the same formula as the collector (waf_pulse.scoring), so a part of the tenant (a filter)
+is scored exactly like the whole of it. Keep both in step: a test compares them."""
+PILLARS = ("Reliability", "Security", "Cost Optimization", "Operational Excellence", "Performance Efficiency")
+SEVERITIES = ("critical", "high", "medium", "low")
+WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1}
+SEVERITY_CAPS = {"critical": 49, "high": 79, "medium": 89}
+
+
+def pillar_score(rule_stats):
+    """rule_stats: [{severity, affected, applicable}] of one pillar. None when nothing applies."""
+    applicable_rules = [r for r in rule_stats if int(r["applicable"]) > 0]
+    if not applicable_rules:
+        return None
+    total_weight = sum(WEIGHTS[r["severity"]] for r in applicable_rules)
+    penalty = sum(WEIGHTS[r["severity"]] * min(1.0, int(r["affected"]) / int(r["applicable"])) for r in applicable_rules)
+    score = 100 - penalty / total_weight * 100
+    for severity in SEVERITIES:
+        cap = SEVERITY_CAPS.get(severity)
+        if cap is not None and any(r["severity"] == severity and int(r["affected"]) > 0 for r in applicable_rules):
+            score = min(score, cap)
+            break
+    return max(0, round(score))
+
+
+def score_pillars(rule_stats):
+    """rule_stats: [{pillar, severity, affected, applicable}]. Returns {pillar: score or None}."""
+    by_pillar = {pillar: [] for pillar in PILLARS}
+    for stat in rule_stats:
+        if stat["pillar"] in by_pillar:
+            by_pillar[stat["pillar"]].append(stat)
+    return {pillar: pillar_score(stats) for pillar, stats in by_pillar.items()}
+
+
+def merge_rule_stats(rows):
+    """Adds affected and applicable of the same rule across subscriptions: rows are {ruleId, pillar, severity, affected, applicable}."""
+    merged = {}
+    for stat in rows:
+        current = merged.setdefault(stat["ruleId"], {"ruleId": stat["ruleId"], "pillar": stat["pillar"], "severity": stat["severity"],
+                                                    "affected": 0, "applicable": 0})
+        current["affected"] += int(stat["affected"])
+        current["applicable"] += int(stat["applicable"])
+    return list(merged.values())

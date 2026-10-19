@@ -330,6 +330,10 @@ def act_finalize(payload: dict):
         store.load_run_documents(run_id, "dataset"),
     )
     summary["suppressed"] = hidden
+    try:
+        store.save_rows(run_id, "rulestats", collect.rule_stats_rows(stats_documents), chunk=1500)
+    except Exception:
+        logging.exception("Could not save the rule statistics; scoped scores fall back to the tenant ones")
     store.save_summary(summary)
     store.save_scores(score_docs)
     store.save_run(

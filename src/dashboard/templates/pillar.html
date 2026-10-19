@@ -23,6 +23,7 @@
           </a>
         {% endfor %}
       </section>
+      {% for note in summary.scopeNotes or [] %}<p class="muted">{{ note }}</p>{% endfor %}
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
 
       {% if slug == 'cost' %}

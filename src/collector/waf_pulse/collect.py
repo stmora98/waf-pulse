@@ -172,6 +172,24 @@ def _complete_statistics(documents, inventory):
     return stats
 
 
+def rule_stats_rows(stats_documents):
+    """The statistics of every rule in every subscription, kept apart from the summary so the dashboard can score any
+    part of the tenant (a filter on tags, resource groups, regions...) the same way the collector scores the whole:
+    [{r: rule, p: pillar, v: severity, s: source, u: subscription, a: affected, n: applicable, t: resource types it
+    evaluates ("*" for all of them) or None}]."""
+    inventory = _merge_inventory(stats_documents)
+    rows = []
+    for stat in _complete_statistics(stats_documents, inventory):
+        rule = _RULES_BY_ID.get(stat["ruleId"])
+        types = stat.get("applicableTypes") or ([stat["applicableType"]] if stat.get("applicableType") else None)
+        if not types and rule is not None:
+            types = list(rule.applies_to)
+        rows.append({"r": stat["ruleId"], "p": stat["pillar"], "v": stat["severity"], "s": stat.get("source", ""),
+                     "u": stat["subscriptionId"], "a": int(stat["affected"]), "n": int(stat["applicable"]),
+                     "t": [str(t).lower() for t in types] if types else None})
+    return rows
+
+
 def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, stats_documents, datasets=()):
     """Aggregates every statistics document into the tenant summary and per subscription score documents."""
     names = {sub["id"].lower(): sub["name"] for sub in subscriptions}
@@ -260,6 +278,7 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
     savings = _advisor_savings(datasets)
     if savings:
         summary["advisorSavings"] = savings
+        summary["advisorSavingsBySubscription"] = _advisor_savings_by_subscription(datasets)
     commitments = _commitments(datasets, names)
     if commitments:
         summary["commitments"] = commitments
@@ -295,6 +314,16 @@ def _advisor_savings(datasets):
         for currency, value in (data.get("savings") or {}).items():
             totals[currency] += value.get("annual", 0)
     return {currency: round(amount, 2) for currency, amount in totals.items()}
+
+def _advisor_savings_by_subscription(datasets):
+    """{subscription: {currency: annual amount}} of the usage savings, so a part of the tenant can show its own."""
+    result = defaultdict(lambda: defaultdict(float))
+    for data in _dataset(datasets, "advisor"):
+        for currency, value in (data.get("savings") or {}).items():
+            for sub, amount in (value.get("bySubscription") or {}).items():
+                result[str(sub).lower()][currency] += amount
+    return {sub: {currency: round(amount, 2) for currency, amount in values.items()} for sub, values in result.items()}
+
 
 def _commitments(datasets, names):
     """Reservation and savings plan options. Terms are alternatives, so they are totalled per term, never together."""

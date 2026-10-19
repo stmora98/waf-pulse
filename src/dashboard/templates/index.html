@@ -20,7 +20,7 @@
         <a href="{{ url_for('compare_page') }}">What changed since the previous run?</a>
       </section>
 
-      {% if summary.scopeNote %}<p class="muted">{{ summary.scopeNote }}</p>{% endif %}
+      {% for note in summary.scopeNotes or [] %}<p class="muted">{{ note }}</p>{% endfor %}
       <section class="cards">
         {% for pillar in pillars %}
           {% set score = (summary.scores or {}).get(pillar) %}

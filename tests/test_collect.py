@@ -219,3 +219,26 @@ def test_subscription_filter_parsing():
 def test_subscription_chunks():
     assert graph.chunks([], 3) == [[]]
     assert graph.chunks(list("abcdefg"), 3) == [["a", "b", "c"], ["d", "e", "f"], ["g"]]
+
+def test_rule_statistics_rows_carry_what_the_dashboard_needs_to_score_any_part_of_the_tenant():
+    documents = [
+        {"stats": [stat("SEC-SQL-001", "Security", "high", 2, 2, "S1", applicableTypes=["Microsoft.Sql/Servers"]),
+                   stat("DIAG-1", "Operational Excellence", "medium", 1, 5, "s2", source="diagnostics")], "errors": [],
+         "inventory": {"s1": {"microsoft.sql/servers": 2}, "s2": {}}},
+        {"stats": [stat("ADV-1", "Reliability", "high", 1, None, "s1", source="advisor", applicableTypes=["microsoft.compute/virtualmachines"])],
+         "inventory": {"s1": {"microsoft.compute/virtualmachines": 4}}},
+    ]
+    rows = {(r["r"], r["u"]): r for r in collect.rule_stats_rows(documents)}
+    assert rows[("SEC-SQL-001", "s1")] == {"r": "SEC-SQL-001", "p": "Security", "v": "high", "s": "builtin", "u": "s1", "a": 2, "n": 2, "t": ["microsoft.sql/servers"]}
+    assert rows[("DIAG-1", "s2")]["a"] == 1 and rows[("DIAG-1", "s2")]["n"] == 5 and rows[("DIAG-1", "s2")]["t"] is None
+    assert rows[("ADV-1", "s1")]["n"] == 4 and rows[("ADV-1", "s1")]["t"] == ["microsoft.compute/virtualmachines"]
+    from waf_pulse import scoring
+    total = collect.build_summary("r", "t0", "t1", "x", [{"id": "s1", "name": "One"}, {"id": "s2", "name": "Two"}], documents)[0]["scores"]
+    merged = scoring.score_pillars(scoring.merge_rule_stats([list(map(lambda r: {"ruleId": r["r"], "pillar": r["p"], "severity": r["v"], "affected": r["a"], "applicable": r["n"]}, rows.values()))]))
+    assert merged == total  # scoring the rows gives the tenant scores the collector wrote
+
+
+def test_advisor_savings_are_kept_per_subscription_too():
+    datasets = [{"name": "advisor", "data": {"savings": {"USD": {"annual": 300.0, "bySubscription": {"S1": 100.0, "s2": 200.0}}}}},
+                {"name": "advisor", "data": {"savings": {"USD": {"annual": 50.0, "bySubscription": {"s1": 50.0}}}}}]
+    assert collect._advisor_savings_by_subscription(datasets) == {"s1": {"USD": 150.0}, "s2": {"USD": 200.0}}

@@ -91,14 +91,41 @@ def _scope():
     return cached
 
 
+def _inventory_all(summary):
+    """(rows, truncated) of the whole inventory, read once per request."""
+    cached = getattr(request, "_inventory", None)
+    if cached is None:
+        cached = request._inventory = data.resources(summary["runId"]) if summary else ([], False)
+    return cached
+
+
 def _resolved(summary):
-    """The scope ready to filter with. Tags need the inventory, which is read only when a tag is in the scope."""
+    """The filters ready to use. The inventory is read only when a filter asks about a resource (group, type, location, tag)."""
     cached = getattr(request, "_resolved", None)
     if cached is None:
         chosen = _scope()
-        rows = data.resources(summary["runId"])[0] if summary and chosen["tags"] else None
+        rows, truncated = _inventory_all(summary) if summary and any(f["f"] in scope.RESOURCE_FIELDS for f in chosen) else ([], False)
         groups = ((summary or {}).get("governance") or {}).get("managementGroups")
-        cached = request._resolved = scope.resolve(chosen, groups, rows)
+        cached = request._resolved = scope.resolve(chosen, groups, rows, truncated)
+    return cached
+
+
+def _scoped_summary(raw):
+    """The summary of the part of the tenant the filters leave, with its scores calculated again."""
+    cached = getattr(request, "_scoped", None)
+    if cached is None:
+        chosen = _resolved(raw)
+        try:
+            rulestats = data.rows_of(raw["runId"], "rulestats")
+        except Exception:
+            logging.exception("Could not read the rule statistics")
+            rulestats = []
+        findings = _all_findings(raw) if chosen.resource_level else None
+        cached = request._scoped = scope.apply_summary(raw, chosen, rulestats, findings)
+        if cached and cached.get("metrics"):
+            cached["metrics"] = rightsizing.scope_metrics(cached["metrics"], chosen.row_ok)
+        if findings is not None and len(findings) >= data.MAX_FINDINGS:
+            cached["scopeNotes"] = [*cached.get("scopeNotes", []), f"Scores use the first {data.MAX_FINDINGS} findings of the run."]
     return cached
 
 
@@ -108,7 +135,7 @@ def _latest():
     completed = latest if latest and latest.get("status") == "completed" else data.latest_run(True)
     summary = data.summary(completed["id"]) if completed else None
     if summary and scope.is_active(_scope()):
-        summary = scope.apply_summary(summary, _resolved(summary))
+        summary = _scoped_summary(summary)
     return latest, summary
 
 
@@ -405,7 +432,7 @@ def _inventory(summary, scoped=True):
     there is no run."""
     if not summary:
         return [], False
-    rows, truncated = data.resources(summary["runId"])
+    rows, truncated = _inventory_all(summary)
     chosen = _resolved(summary) if scoped else None
     return ([r for r in rows if chosen.row_ok(r)] if chosen and chosen.active else rows), truncated
 
@@ -812,7 +839,8 @@ def inject_user():
     chosen = _scope()
     unscoped = request.endpoint in UNSCOPED_PAGES or (request.endpoint == "pillar_page" and (request.view_args or {}).get("slug") == "cost")
     return {"user": request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""), "nav_pillars": list(insights.PILLAR_PAGES.items()),
-            "scope_active": scope.is_active(chosen), "scope_label": scope.label(chosen), "scope_unfiltered": unscoped and scope.is_active(chosen)}
+            "scope_active": scope.is_active(chosen), "scope_label": scope.label(chosen), "scope_unfiltered": unscoped and scope.is_active(chosen),
+            "scope_filters": [{"index": i, "text": scope.describe(f)} for i, f in enumerate(chosen)]}
 
 
 @app.get("/api/scope-options")
@@ -821,25 +849,28 @@ def api_scope_options():
         raw = data.latest_run()
         completed = raw if raw and raw.get("status") == "completed" else data.latest_run(True)
         summary = data.summary(completed["id"]) if completed else None
-        rows = data.resources(summary["runId"])[0] if summary else []
+        rows = _inventory_all(summary)[0] if summary else []
     except Exception:
-        logging.exception("Could not load the scope options")
+        logging.exception("Could not load the filter options")
         return jsonify(error="The data store is not reachable right now."), 503
     return jsonify(options=scope.options(summary, rows), current=_scope())
 
 
 @app.post("/api/scope")
 def api_scope():
-    """Saves the scope the visitor picked in a cookie ({"clear": true} goes back to everything)."""
+    """Saves the filters the visitor built in a cookie ({"clear": true} removes them)."""
     if _cross_site():
         return jsonify(error="Forbidden"), 403
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
-    chosen = scope.sanitize(None if body.get("clear") else body)
-    response = jsonify(scope=chosen, label=scope.label(chosen))
-    if scope.is_active(chosen):
+    chosen = [] if body.get("clear") else scope.sanitize(body)
+    encoded = scope.encode(chosen)
+    if len(encoded) > scope.MAX_COOKIE:
+        return jsonify(error="Too many values in the filters: remove some."), 422
+    response = jsonify(filters=chosen, label=scope.label(chosen))
+    if chosen:
         secure = request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
-        response.set_cookie(scope.COOKIE, scope.encode(chosen), max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax", secure=secure)
+        response.set_cookie(scope.COOKIE, encoded, max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax", secure=secure)
     else:
         response.delete_cookie(scope.COOKIE)
     return response

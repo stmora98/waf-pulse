@@ -362,7 +362,13 @@ def scope_metrics(metrics, keep):
     for source, old in (metrics.get("distribution") or {}).items():
         counted = Counter(r["assessment"] for r in records if r.get("kind") == source)
         distribution[source] = {**{name: counted.get(name, 0) for name in ASSESSMENTS}, "nodata": 0}
-    return {**metrics, "resources": records, "distribution": distribution}
+    def entry(record):
+        return {"name": record.get("name", ""), "detail": record.get("detail", ""), "value": record.get("avg")}
+
+    under = sorted((r for r in records if r.get("assessment") in ("idle", "under") and r.get("avg") is not None), key=lambda r: r["avg"])
+    saturated = sorted((r for r in records if r.get("assessment") == "saturated" and r.get("avg") is not None), key=lambda r: -r["avg"])
+    return {**metrics, "resources": records, "distribution": distribution, "measured": dict(Counter(r.get("kind") for r in records)),
+            "topUnderutilized": [entry(r) for r in under[:10]], "topSaturated": [entry(r) for r in saturated[:10]]}
 
 
 def risk(row):

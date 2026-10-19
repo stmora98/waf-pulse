@@ -2,7 +2,7 @@
   <div class="panel">
     <h3>Right-sizing · last {{ summary.metrics.lookbackDays }} days</h3>
     <p class="muted">Resources measured with Azure Monitor:
-      {% for kind, label in [('vm', 'VMs'), ('sql_dtu', 'SQL DTU'), ('sql_vcore', 'SQL vCore'), ('plan', 'App Service plans'), ('storage', 'Storage')] %}
+      {% for kind, label in [('vm', 'VMs'), ('vmss', 'Scale sets'), ('disk', 'Premium disks'), ('sql_dtu', 'SQL DTU'), ('sql_vcore', 'SQL vCore'), ('sql_mi', 'SQL MI'), ('plan', 'App Service plans'), ('aks', 'AKS'), ('cosmos', 'Cosmos DB'), ('redis', 'Redis'), ('storage', 'Storage')] %}
         {% if summary.metrics.measured.get(kind) %}{{ label }} {{ summary.metrics.measured[kind] }} · {% endif %}
       {% endfor %}
     </p>
