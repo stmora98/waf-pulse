@@ -603,3 +603,104 @@ function fitPopover(pop, container, anchor) {
   });
 })();
 
+(function () {
+  var buttons = document.querySelectorAll(".suppress-btn");
+  var restore = document.querySelectorAll("[data-restore]");
+  if (!buttons.length && !restore.length) { return; }
+  var DURATIONS = [[0, "Forever"], [30, "30 days"], [90, "90 days"], [180, "180 days"], [365, "1 year"]];
+  var pop = document.createElement("div");
+  pop.className = "sup-pop";
+  pop.hidden = true;
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Suppress");
+  document.body.appendChild(pop);
+
+  function element(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text) { node.textContent = text; }
+    if (className) { node.className = className; }
+    return node;
+  }
+
+  function send(body, onError) {
+    return fetch("/api/suppressions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (response.ok) { window.location.reload(); return null; }
+      return response.json().then(function (result) { throw new Error(result.error || "failed"); });
+    }).catch(function (error) {
+      onError(error.message === "failed" ? "It could not be saved." : error.message);
+    });
+  }
+
+  function place(anchor) {
+    pop.hidden = false;
+    var rect = anchor.getBoundingClientRect();
+    var left = Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8));
+    var top = rect.bottom + 6;
+    if (top + pop.offsetHeight > window.innerHeight - 8) { top = Math.max(8, rect.top - pop.offsetHeight - 6); }
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+  }
+
+  function open(button) {
+    var resource = button.getAttribute("data-resource");
+    pop.textContent = "";
+    pop.appendChild(element("h4", resource ? "Suppress for this resource" : "Suppress for every resource"));
+    pop.appendChild(element("p", button.getAttribute("data-title") || "", "muted"));
+    var reason = element("input", "", "lz-input");
+    reason.type = "text";
+    reason.maxLength = 200;
+    reason.placeholder = "Why (optional)";
+    reason.setAttribute("aria-label", "Reason");
+    pop.appendChild(reason);
+    var days = element("select");
+    days.setAttribute("aria-label", "For how long");
+    DURATIONS.forEach(function (pair) {
+      var option = element("option", pair[1]);
+      option.value = String(pair[0]);
+      days.appendChild(option);
+    });
+    pop.appendChild(days);
+    var error = element("p", "", "lz-error");
+    var actions = element("div", "", "lz-row");
+    var apply = element("button", "Suppress");
+    apply.type = "button";
+    apply.addEventListener("click", function () {
+      apply.disabled = true;
+      send({ add: { ruleId: button.getAttribute("data-rule"), resourceId: resource || "", days: Number(days.value),
+                    reason: reason.value.trim(), ruleTitle: button.getAttribute("data-title") || "",
+                    resourceName: button.getAttribute("data-name") || "" } },
+           function (text) { error.textContent = text; apply.disabled = false; });
+    });
+    var cancel = element("button", "Cancel", "icon-button");
+    cancel.type = "button";
+    cancel.addEventListener("click", function () { pop.hidden = true; });
+    actions.appendChild(apply);
+    actions.appendChild(cancel);
+    pop.appendChild(error);
+    pop.appendChild(actions);
+    place(button);
+    reason.focus();
+  }
+
+  Array.prototype.forEach.call(buttons, function (button) {
+    button.addEventListener("click", function (event) { event.stopPropagation(); open(button); });
+  });
+  Array.prototype.forEach.call(restore, function (button) {
+    button.addEventListener("click", function () {
+      button.disabled = true;
+      send({ remove: button.getAttribute("data-restore") }, function (text) {
+        var status = document.getElementById("suppress-status");
+        if (status) { status.textContent = text; }
+        button.disabled = false;
+      });
+    });
+  });
+  pop.addEventListener("click", function (event) { event.stopPropagation(); });
+  document.addEventListener("click", function () { pop.hidden = true; });
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { pop.hidden = true; } });
+})();
+

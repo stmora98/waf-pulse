@@ -235,7 +235,7 @@ def test_collect_reports_failures_without_losing_the_rest(monkeypatch):
     vm = row("Microsoft.Compute/virtualMachines", "idle")
 
     def fake_query(credential, subscriptions, kql, max_rows=0):
-        if "virtualmachines" in kql:
+        if "virtualmachines'" in kql:
             return [vm]
         if "serverfarms" in kql:
             raise RuntimeError("Forbidden\nsecond line")
@@ -254,7 +254,7 @@ def test_collect_reports_failures_without_losing_the_rest(monkeypatch):
 
 def test_a_failing_metrics_request_is_reported(monkeypatch):
     vm = row("Microsoft.Compute/virtualMachines", "a")
-    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines" in kql else [])
+    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines'" in kql else [])
 
     def boom(*args, **kwargs):
         raise RuntimeError("HTTP 400")
@@ -379,7 +379,7 @@ def test_evaluate_adds_vm_details_and_the_daily_series():
 
 def test_a_failing_sizes_call_is_reported_and_right_sizing_goes_on(monkeypatch):
     vm = row("Microsoft.Compute/virtualMachines", "a")
-    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines" in kql else [])
+    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines'" in kql else [])
     monkeypatch.setattr(metrics, "fetch_batch", lambda *a, **k: {vm["id"].lower(): {"Percentage CPU": points("average", 1)}})
 
     def refuse(credential, sub, region):
@@ -480,7 +480,7 @@ def test_a_vm_used_in_office_hours_gets_a_finding_and_a_schedule():
 
 def test_hourly_cpu_is_requested_for_the_measured_vms_and_failures_are_reported(monkeypatch):
     vm = row("Microsoft.Compute/virtualMachines", "a")
-    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines" in kql else [])
+    monkeypatch.setattr(graph, "query", lambda c, s, kql, max_rows=0: [vm] if "virtualmachines'" in kql else [])
     monkeypatch.setattr(metrics, "fetch_batch", lambda *a, **k: {vm["id"].lower(): {"Percentage CPU": points("average", 20)}})
     monkeypatch.setattr(skus, "fetch", lambda credential, sub, region: {})
     seen = []

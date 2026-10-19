@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Suppressions · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Suppressions</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% else %}
+      <p class="muted">Recommendations you accepted or postponed. The dashboard hides them at once; the scores take them out at the next refresh.
+        {% if summary and summary.suppressed %}The last run left out <strong>{{ summary.suppressed }}</strong> finding(s).{% endif %}</p>
+      {% if entries %}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Recommendation</th><th>Applies to</th><th>Until</th><th>Why</th><th></th></tr></thead>
+            <tbody>
+              {% for e in entries %}
+                <tr{% if e.expired %} class="muted"{% endif %}>
+                  <td><a href="{{ url_for('rule_page', rule_id=e.ruleId) }}">{{ e.ruleTitle or e.ruleId }}</a><br><span class="muted"><code>{{ e.ruleId }}</code></span></td>
+                  <td>{% if e.resourceId %}<a href="{{ url_for('resource_page', id=e.resourceId) }}">{{ e.resourceName or e.resourceId }}</a>{% else %}All resources{% endif %}</td>
+                  <td>{% if e.until %}{{ e.until }}{% if e.expired %} <span class="chip">expired</span>{% endif %}{% else %}Forever{% endif %}</td>
+                  <td>{{ e.reason or '–' }}</td>
+                  <td><button type="button" class="icon-button" data-restore="{{ e.id }}">Restore</button></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" id="suppress-status" role="status"></p>
+      {% else %}
+        <section class="notice">Nothing is suppressed. Use <strong>Suppress</strong> on a recommendation or on one of its resources to accept a risk or to postpone it.</section>
+      {% endif %}
+    {% endif %}
+{% endblock %}

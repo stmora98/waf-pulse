@@ -19,6 +19,7 @@
       <section class="panel">
         <h3>What to do</h3>
         <p>{{ rule.recommendation }}</p>
+        <p><button type="button" class="suppress-btn" data-rule="{{ rule.ruleId }}" data-title="{{ rule.title }}">Suppress this recommendation</button></p>
         {% if rule.link and rule.link.startswith('https://') %}<p><a href="{{ rule.link }}" rel="noopener noreferrer" target="_blank">Documentation</a></p>{% endif %}
       </section>
       {% if spark and spark.dots | length > 1 %}
@@ -35,7 +36,7 @@
         <h3>Affected resources</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Resource</th><th>Type</th><th>Subscription</th><th>Azure</th></tr></thead>
+            <thead><tr><th>Resource</th><th>Type</th><th>Subscription</th><th>Azure</th><th></th></tr></thead>
             <tbody>
               {% for f in resources %}
                 <tr>
@@ -43,6 +44,7 @@
                   <td>{{ f.resourceType }}</td>
                   <td><span class="muted">{{ f.subscriptionId }}</span></td>
                   <td>{{ azure_link(f.resourceId) }}</td>
+                  <td><button type="button" class="suppress-btn" data-rule="{{ rule.ruleId }}" data-title="{{ rule.title }}" data-resource="{{ f.resourceId }}" data-name="{{ f.resourceName }}">Suppress</button></td>
                 </tr>
               {% endfor %}
             </tbody>

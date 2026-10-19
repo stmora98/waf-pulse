@@ -5,7 +5,8 @@ Every query must return the columns: id, name, type, subscriptionId.
 could have violated the rule, so one finding in a large tenant is not diluted by unrelated resources.
 New rules (for example the Azure review checklists) are added to RULES and need no other change.
 """
-from dataclasses import dataclass
+from .aoe_rules import RULES_EXTRA
+from .rule_model import Rule
 
 PILLARS = (
     "Reliability",
@@ -17,18 +18,6 @@ PILLARS = (
 SEVERITIES = ("critical", "high", "medium", "low")
 
 RESOURCE_GROUP_TYPE = "microsoft.resources/subscriptions/resourcegroups"
-
-
-@dataclass(frozen=True)
-class Rule:
-    id: str
-    pillar: str
-    severity: str
-    title: str
-    recommendation: str
-    applies_to: tuple
-    query: str
-    source: str = "builtin"
 
 
 # "*" in applies_to means every resource in the subscription.
@@ -512,3 +501,5 @@ resources
 """,
     ),
 )
+
+RULES = RULES + RULES_EXTRA

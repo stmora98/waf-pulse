@@ -105,6 +105,15 @@ def load_run_documents(run_id, kind):
     return list(items)
 
 
+def load_findings_index(run_id):
+    """Rule, resource and subscription of every finding of a run, enough to match them against the suppressions."""
+    items = container("findings").query_items(
+        "SELECT c.ruleId, c.resourceId, c.subscriptionId FROM c WHERE c.runId = @run",
+        parameters=[{"name": "@run", "value": run_id}], partition_key=run_id,
+    )
+    return list(items)
+
+
 def save_scores(score_docs):
     target = container("scores")
     for doc in score_docs:

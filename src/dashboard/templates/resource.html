@@ -76,7 +76,7 @@
       {% if findings %}
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Severity</th><th>Action</th><th>Pillar</th><th>Source</th></tr></thead>
+            <thead><tr><th>Severity</th><th>Action</th><th>Pillar</th><th>Source</th><th></th></tr></thead>
             <tbody>
               {% for f in findings %}
                 <tr>
@@ -84,6 +84,7 @@
                   <td><a href="{{ url_for('rule_page', rule_id=f.ruleId) }}">{{ f.title }}</a><br><span class="muted">{{ f.recommendation }}</span></td>
                   <td>{{ f.pillar }}</td>
                   <td>{{ source_labels.get(f.source, f.source) }}</td>
+                  <td><button type="button" class="suppress-btn" data-rule="{{ f.ruleId }}" data-title="{{ f.title }}" data-resource="{{ resource.id }}" data-name="{{ resource.name }}">Suppress</button></td>
                 </tr>
               {% endfor %}
             </tbody>

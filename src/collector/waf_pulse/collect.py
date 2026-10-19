@@ -243,7 +243,7 @@ def build_summary(run_id, started_utc, completed_utc, trigger, subscriptions, st
     finance = _dataset(datasets, "finops")
     if finance:
         summary["finops"] = finance[0]
-    for key in ("diagnostics", "keyvault", "entra"):
+    for key in ("diagnostics", "keyvault", "entra", "lifecycle"):
         found = _dataset(datasets, key)
         if found:
             summary[key] = found[0]

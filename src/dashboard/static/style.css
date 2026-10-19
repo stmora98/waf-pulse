@@ -501,3 +501,11 @@ a.azure-link:active { transform: scale(0.97); }
 ul.plain { list-style: none; padding: 0; margin: 4px 0; }
 ul.plain li { padding: 3px 0; }
 
+/* suppress popover and buttons */
+.sup-pop { position: fixed; z-index: 30; width: 280px; max-width: calc(100vw - 16px); padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); }
+.sup-pop[hidden] { display: none; }
+.sup-pop h4 { margin: 0; }
+.sup-pop p { margin: 0; font-size: 0.85rem; }
+.suppress-btn { font-size: 0.8rem; padding: 3px 10px; }
+

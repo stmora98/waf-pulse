@@ -14,7 +14,7 @@ PILLARS = (
     "Performance Efficiency",
 )
 SEVERITIES = ("critical", "high", "medium", "low")
-SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops", "diagnostics", "keyvault", "entra")
+SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops", "diagnostics", "keyvault", "entra", "lifecycle")
 SOURCE_LABELS = {
     "builtin": "Built-in rules",
     "checklist": "Review checklists",
@@ -26,6 +26,7 @@ SOURCE_LABELS = {
     "diagnostics": "Diagnostic settings",
     "keyvault": "Key Vault expirations",
     "entra": "Microsoft Entra",
+    "lifecycle": "Storage lifecycle",
 }
 TENANT_PARTITION = "tenant"
 QUEUE_NAME = "refresh-requests"

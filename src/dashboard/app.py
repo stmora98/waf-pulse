@@ -18,6 +18,7 @@ import governance_view
 import history
 import insights
 import landing_zone
+import suppress
 import rightsizing
 
 app = Flask(__name__)
@@ -88,11 +89,30 @@ def _latest():
     return latest, (data.summary(completed["id"]) if completed else None)
 
 
-def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS, resource_id=None):
+SUPPRESSIONS_SETTING = "suppressions"
+
+
+def _suppressions():
+    """The suppressions the visitor saved (clean list); empty when none or the store fails."""
+    cached = getattr(request, "_suppressions", None)
+    if cached is None:
+        try:
+            cached = suppress.clean(data.get_setting(SUPPRESSIONS_SETTING))
+        except Exception:
+            logging.exception("Could not read the suppressions")
+            cached = []
+        request._suppressions = cached
+    return cached
+
+
+def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS, resource_id=None, hidden=False):
+    """The findings of the latest run without the suppressed ones (`hidden=True` returns only those)."""
     if not summary:
         return []
     extra = {"resource_id": resource_id} if resource_id else {}
-    return data.all_findings(summary["runId"], pillar, rule_id, limit, **extra)
+    found = data.all_findings(summary["runId"], pillar, rule_id, limit, **extra)
+    visible, suppressed = suppress.split(found, _suppressions())
+    return suppressed if hidden else visible
 
 
 def _data_sources(summary):
@@ -130,6 +150,9 @@ def _data_sources(summary):
     diagnostics = summary.get("diagnostics")
     add("Diagnostic settings", "available" if diagnostics and diagnostics.get("checked") else "empty",
         (diagnostics or {}).get("checked"), "Resources of the supported types.")
+    lifecycle = summary.get("lifecycle")
+    add("Storage lifecycle", "available" if lifecycle and lifecycle.get("checked") else "empty",
+        (lifecycle or {}).get("checked"), "Storage accounts that can hold blobs.")
     keyvault = summary.get("keyvault")
     if keyvault:
         denied = keyvault.get("denied", 0)
@@ -430,6 +453,7 @@ def resource_page():
     usage = _usage(summary, resource_id)
     return render_template(
         "resource.html", error=None, summary=summary, resource=row, findings=ordered, source_labels=data.SOURCE_LABELS, usage=usage,
+        durations=suppress.DURATIONS,
         subscription_name=names.get(row["subscriptionId"], row["subscriptionId"]) if row else "",
         friendly=insights.friendly_type(row["type"]) if row else "",
     )
@@ -669,7 +693,7 @@ def rule_page(rule_id):
     return render_template(
         "rule.html", rule=rule, error=None, spark=spark, back=back, source_labels=data.SOURCE_LABELS,
         resources=sorted(findings[:MAX_RULE_RESOURCES], key=lambda f: str(f.get("resourceName", "")).lower()),
-        truncated=len(findings) > MAX_RULE_RESOURCES,
+        truncated=len(findings) > MAX_RULE_RESOURCES, durations=suppress.DURATIONS,
     )
 
 @app.get("/governance")
@@ -894,6 +918,46 @@ def api_landing_zone_design():
         logging.exception("Could not save the landing zone design")
         return jsonify(error="The diagram could not be saved right now."), 503
     return jsonify(design=design)
+
+
+@app.post("/api/suppressions")
+def api_suppressions():
+    """Suppresses a recommendation (for one resource or for all of them) for a while or for good, or restores one
+    ({"remove": id}). The dashboard hides them at once; the scores follow at the next refresh."""
+    if _cross_site():
+        return jsonify(error="Forbidden"), 403
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    try:
+        entries = suppress.clean(data.get_setting(SUPPRESSIONS_SETTING))
+    except Exception:
+        logging.exception("Could not read the suppressions")
+        return jsonify(error="The suppressions could not be read right now."), 503
+    if "remove" in body:
+        entries = suppress.remove(entries, body["remove"])
+    else:
+        entries, error = suppress.add(entries, body.get("add"))
+        if entries is None:
+            return jsonify(error=error), 422
+    try:
+        data.save_setting(SUPPRESSIONS_SETTING, entries)
+    except Exception:
+        logging.exception("Could not save the suppressions")
+        return jsonify(error="The suppression could not be saved right now."), 503
+    return jsonify(count=len(entries))
+
+
+@app.get("/suppressions")
+def suppressions_page():
+    try:
+        _, summary = _latest()
+    except Exception:
+        logging.exception("Could not load the suppressions")
+        return render_template("suppressions.html", error="The data store is not reachable right now.", entries=[], summary=None), 503
+    today = datetime.now(timezone.utc).date().isoformat()
+    entries = sorted(_suppressions(), key=lambda e: (bool(e["until"]) and e["until"] < today, e["ruleId"], e["resourceName"]))
+    rows = [{**e, "expired": bool(e["until"]) and e["until"] < today} for e in entries]
+    return render_template("suppressions.html", error=None, entries=rows, summary=summary, durations=suppress.DURATIONS)
 
 
 @app.post("/api/refresh")

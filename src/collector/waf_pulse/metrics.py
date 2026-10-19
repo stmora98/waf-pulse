@@ -79,6 +79,30 @@ resources
 | project id, name, subscriptionId, location, detail = strcat(tostring(sku.name), ' ', tostring(properties.vCores), ' vCores')
 """,
     },
+    "vmss": {
+        "namespace": "Microsoft.Compute/virtualMachineScaleSets",
+        "metrics": "Percentage CPU",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.compute/virtualmachinescalesets'
+| where toint(sku.capacity) > 0
+| project id, name, subscriptionId, location, detail = strcat(tostring(sku.name), ' x', tostring(sku.capacity))
+""",
+    },
+    "disk": {
+        "namespace": "Microsoft.Compute/disks",
+        "metrics": "Composite Disk Read Operations/sec,Composite Disk Write Operations/sec",
+        "aggregation": "Average,Maximum",
+        "query": """
+resources
+| where type =~ 'microsoft.compute/disks'
+| where tostring(sku.name) startswith 'Premium' and tostring(properties.diskState) !~ 'Unattached'
+| where toint(properties.diskIOPSReadWrite) > 0
+| project id, name, subscriptionId, location, detail = strcat(tostring(sku.name), ' ', tostring(properties.diskSizeGB), ' GB'),
+    iops = toint(properties.diskIOPSReadWrite)
+""",
+    },
     "aks": {
         "namespace": "Microsoft.ContainerService/managedClusters",
         "metrics": "node_cpu_usage_percentage,node_memory_working_set_percentage",
@@ -143,6 +167,14 @@ RULES = {
                    "Move the instance to fewer vCores."),
     "MET-MI-002": ("Performance Efficiency", "high", "SQL managed instance is saturated: average CPU {value:.1f}% over {days} days",
                    "Move the instance to more vCores."),
+    "MET-VMSS-001": ("Cost Optimization", "medium", "Virtual machine scale set is underutilized: average CPU {value:.1f}% over {days} days",
+                     "Lower the minimum instance count or move to a smaller size, and let autoscale add instances when needed."),
+    "MET-VMSS-002": ("Performance Efficiency", "high", "Virtual machine scale set is saturated: average CPU {value:.1f}% over {days} days",
+                     "Raise the maximum instance count, tune the autoscale rules or move to a larger size."),
+    "MET-DSK-001": ("Cost Optimization", "low", "Premium SSD disk is barely used: average {value:.1f}% of its IOPS over {days} days",
+                    "Move the disk to Standard SSD, or to a smaller Premium size, if the latency allows it."),
+    "MET-DSK-002": ("Performance Efficiency", "high", "Disk is close to its IOPS limit: {value:.1f}% over {days} days",
+                    "Move to a larger disk size or a higher tier before requests are throttled."),
     "MET-AKS-001": ("Cost Optimization", "medium", "AKS cluster is underutilized: average node CPU {value:.1f}% over {days} days",
                     "Use fewer or smaller nodes and turn on the cluster autoscaler."),
     "MET-AKS-002": ("Performance Efficiency", "high", "AKS cluster is saturated: node CPU or memory at {value:.1f}% over {days} days",
@@ -169,6 +201,8 @@ APPLICABLE = {
     "plan": ["MET-APP-001", "MET-APP-002"],
     "sql_mi": ["MET-MI-001", "MET-MI-002"],
     "aks": ["MET-AKS-001", "MET-AKS-002"],
+    "vmss": ["MET-VMSS-001", "MET-VMSS-002"],
+    "disk": ["MET-DSK-001", "MET-DSK-002"],
     "cosmos": ["MET-COS-001", "MET-COS-002"],
     "redis": ["MET-RED-001", "MET-RED-002"],
     "storage": ["MET-STG-001"],
@@ -189,7 +223,8 @@ DEFAULT_THRESHOLDS = {"vm": {"idle": VM_IDLE, "under": VM_UNDER, "saturated": VM
                       "sql": {"under": SQL_OVERSIZED, "saturated": SQL_SATURATED},
                       "plan": {"under": PLAN_UNDER, "saturated": PLAN_SATURATED_CPU},
                       "aks": {"under": 20, "saturated": 80}, "cosmos": {"under": 10, "saturated": 80},
-                      "redis": {"under": 10, "saturated": 80}}
+                      "redis": {"under": 10, "saturated": 80}, "vmss": {"under": 15, "saturated": 80},
+                      "disk": {"under": 5, "saturated": 90}}
 
 # kinds judged by one main metric and, for some, a second one that holds back "underutilized" and flags "saturated"
 # kind -> (threshold group, main metric, second metric, second metric saturates from, second metric blocks "under" from, rules)
@@ -198,6 +233,8 @@ GENERIC = {
     "aks": ("aks", "node_cpu_usage_percentage", "node_memory_working_set_percentage", 85, 60, ("MET-AKS-001", "MET-AKS-002")),
     "cosmos": ("cosmos", "NormalizedRUConsumption", None, None, None, ("MET-COS-001", "MET-COS-002")),
     "redis": ("redis", "percentProcessorTime", "usedmemorypercentage", 90, 50, ("MET-RED-001", "MET-RED-002")),
+    "vmss": ("vmss", "Percentage CPU", None, None, None, ("MET-VMSS-001", "MET-VMSS-002")),
+    "disk": ("disk", "Disk IOPS %", None, None, None, ("MET-DSK-001", "MET-DSK-002")),
 }
 SECOND_METRIC = {"plan": "MemoryPercentage", "aks": "node_memory_working_set_percentage", "redis": "usedmemorypercentage"}
 
@@ -307,12 +344,14 @@ ASSESSMENT = {
     "MET-APP-001": "under", "MET-APP-002": "saturated",
     "MET-MI-001": "under", "MET-MI-002": "saturated", "MET-AKS-001": "under", "MET-AKS-002": "saturated",
     "MET-COS-001": "under", "MET-COS-002": "saturated", "MET-RED-001": "under", "MET-RED-002": "saturated",
+    "MET-VMSS-001": "under", "MET-VMSS-002": "saturated", "MET-DSK-001": "under", "MET-DSK-002": "saturated",
     "MET-STG-001": "idle",
 }
 ASSESSMENT_ORDER = {"idle": 0, "under": 1, "saturated": 2, "right": 3}
 MAX_INVENTORY = 1500
 PEAK_METRIC = {"vm": "Percentage CPU", "sql_dtu": "dtu_consumption_percent", "sql_vcore": "cpu_percent", "plan": "CpuPercentage",
-               "sql_mi": "avg_cpu_percent", "aks": "node_cpu_usage_percentage", "cosmos": "NormalizedRUConsumption", "redis": "percentProcessorTime"}
+               "sql_mi": "avg_cpu_percent", "aks": "node_cpu_usage_percentage", "cosmos": "NormalizedRUConsumption", "redis": "percentProcessorTime",
+               "vmss": "Percentage CPU", "disk": "Disk IOPS %"}
 
 
 def peak(kind, metrics):
@@ -398,6 +437,16 @@ def schedule_of(points):
     return {"hours": len(busy), "window": length, "start": start, "weekend": weekend, "saving": round(max(1 - on / 168, 0), 2)}
 
 
+def enrich_disk(metrics, iops):
+    """The share of the IOPS a disk's size allows that it really uses, from its read and write operations per second."""
+    reads, writes = _by_day(metrics.get("Composite Disk Read Operations/sec")), _by_day(metrics.get("Composite Disk Write Operations/sec"))
+    if not iops or not (reads or writes):
+        return metrics
+    return {**metrics, "Disk IOPS %": [
+        {"timeStamp": day, "average": _pair(reads.get(day, {}), writes.get(day, {}), "average", 100 / iops),
+         "maximum": _pair(reads.get(day, {}), writes.get(day, {}), "maximum", 100 / iops)} for day in sorted(set(reads) | set(writes))]}
+
+
 def series_of(kind, metrics):
     """The daily curve of a resource for its chart: {from, cpu, cpuMax, mem}, one value per day (None where there is no
     data), or None when there is nothing to draw."""
@@ -439,6 +488,8 @@ def evaluate(run_id, resources, measurements, sizes=None, thresholds=None, hourl
                 size = ((sizes or {}).get((str(row.get("subscriptionId", "")).lower(), str(row.get("location", "")).lower())) or {}).get(
                     str(row.get("detail", "")).lower())
                 metrics = enrich_vm(metrics, size)
+            if kind == "disk":
+                metrics = enrich_disk(metrics, row.get("iops"))
             rule, value = classify(kind, metrics, thresholds)
             if value is None:
                 continue

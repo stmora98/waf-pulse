@@ -16,8 +16,8 @@ import azure.durable_functions as df
 import azure.functions as func
 
 from waf_pulse import (
-    advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, metrics,
-    store,
+    advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, lifecycle, metrics,
+    store, suppress,
 )
 
 app = df.DFApp()
@@ -82,6 +82,7 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_finops", scope))
             tasks.append(context.call_activity("act_diagnostics", scope))
             tasks.append(context.call_activity("act_keyvault", scope))
+            tasks.append(context.call_activity("act_lifecycle", scope))
             tasks.append(context.call_activity("act_entra", scope))
         yield context.task_all(tasks)
 
@@ -266,6 +267,21 @@ def act_diagnostics(payload: dict):
 
 
 @app.activity_trigger(input_name="payload")
+def act_lifecycle(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = lifecycle.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"]
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "lifecycle", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "lifecycle", dataset)
+        return {"key": "lifecycle", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "lifecycle", exc)
+
+
+@app.activity_trigger(input_name="payload")
 def act_keyvault(payload: dict):
     run_id = payload["runId"]
     try:
@@ -297,15 +313,23 @@ def act_entra(payload: dict):
 def act_finalize(payload: dict):
     run_id = payload["runId"]
     completed = datetime.now(timezone.utc).isoformat()
+    stats_documents, hidden = store.load_run_documents(run_id, "stats"), 0
+    try:
+        entries = store.get_setting("suppressions")
+        if entries:
+            stats_documents, hidden = suppress.apply(stats_documents, store.load_findings_index(run_id), entries)
+    except Exception:
+        logging.exception("Could not apply the suppressions; the counts include everything")
     summary, score_docs = collect.build_summary(
         run_id,
         payload["startedUtc"],
         completed,
         payload["trigger"],
         payload["subscriptions"],
-        store.load_run_documents(run_id, "stats"),
+        stats_documents,
         store.load_run_documents(run_id, "dataset"),
     )
+    summary["suppressed"] = hidden
     store.save_summary(summary)
     store.save_scores(score_docs)
     store.save_run(

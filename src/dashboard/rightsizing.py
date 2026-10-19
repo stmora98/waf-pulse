@@ -14,7 +14,12 @@ def _n(value):
 def _labels(kind, limits):
     vm, sql, plan = limits["vm"], limits["sql"], limits["plan"]
     aks, cosmos, redis = limits["aks"], limits["cosmos"], limits["redis"]
+    vmss, disk = limits["vmss"], limits["disk"]
     return {
+        "vmss": {"idle": "Idle", "under": f"Underutilized (under {_n(vmss['under'])}% CPU)", "right": "Right-sized",
+                 "saturated": f"Saturated ({_n(vmss['saturated'])}% or more)"},
+        "disk": {"idle": "Idle", "under": f"Barely used (under {_n(disk['under'])}% of the IOPS)", "right": "In use",
+                 "saturated": f"Close to the limit ({_n(disk['saturated'])}% or more)"},
         "aks": {"idle": "Idle", "under": f"Underutilized (under {_n(aks['under'])}% node CPU)", "right": "Right-sized",
                 "saturated": f"Saturated ({_n(aks['saturated'])}% CPU or 85% memory)"},
         "cosmos": {"idle": "Idle", "under": f"Mostly unused (under {_n(cosmos['under'])}% of the RU/s)", "right": "Right-sized",
@@ -39,16 +44,20 @@ def kind_labels(kind, limits=None):
 # The thresholds the collector uses (percent of average utilization); keep in step with waf_pulse.metrics.
 DEFAULT_THRESHOLDS = {"vm": {"idle": 5, "under": 15, "saturated": 80}, "sql": {"under": 10, "saturated": 80},
                       "plan": {"under": 20, "saturated": 80}, "aks": {"under": 20, "saturated": 80},
-                      "cosmos": {"under": 10, "saturated": 80}, "redis": {"under": 10, "saturated": 80}}
+                      "cosmos": {"under": 10, "saturated": 80}, "redis": {"under": 10, "saturated": 80},
+                      "vmss": {"under": 15, "saturated": 80}, "disk": {"under": 5, "saturated": 90}}
 # kind -> (threshold group, second metric saturates from, second metric blocks "under" from), as in waf_pulse.metrics.GENERIC
-GENERIC = {"sql_mi": ("sql", None, None), "aks": ("aks", 85, 60), "cosmos": ("cosmos", None, None), "redis": ("redis", 90, 50)}
+GENERIC = {"sql_mi": ("sql", None, None), "aks": ("aks", 85, 60), "cosmos": ("cosmos", None, None), "redis": ("redis", 90, 50),
+           "vmss": ("vmss", None, None), "disk": ("disk", None, None)}
 VM_MEMORY_BOUND, VM_MEMORY_SATURATED, PLAN_MEMORY_SATURATED = 70, 90, 85
 THRESHOLD_FIELDS = (("vm", "idle", "Virtual machines: idle below"), ("vm", "under", "underutilized below"), ("vm", "saturated", "saturated from"),
                     ("sql", "under", "SQL databases: oversized below"), ("sql", "saturated", "saturated from"),
                     ("plan", "under", "App Service plans: underutilized below"), ("plan", "saturated", "saturated from"),
                     ("aks", "under", "AKS clusters: underutilized below"), ("aks", "saturated", "saturated from"),
                     ("cosmos", "under", "Cosmos DB: mostly unused below"), ("cosmos", "saturated", "close to the limit from"),
-                    ("redis", "under", "Redis caches: underutilized below"), ("redis", "saturated", "saturated from"))
+                    ("redis", "under", "Redis caches: underutilized below"), ("redis", "saturated", "saturated from"),
+                    ("vmss", "under", "Scale sets: underutilized below"), ("vmss", "saturated", "saturated from"),
+                    ("disk", "under", "Premium SSD disks: barely used below"), ("disk", "saturated", "close to the limit from"))
 
 # page kind -> (title, dataset kinds, label of each assessment)
 KINDS = {
@@ -58,6 +67,8 @@ KINDS = {
     "aks": ("AKS clusters", ("aks",), kind_labels("aks")),
     "cosmos": ("Cosmos DB accounts", ("cosmos",), kind_labels("cosmos")),
     "redis": ("Redis caches", ("redis",), kind_labels("redis")),
+    "vmss": ("Scale sets", ("vmss",), kind_labels("vmss")),
+    "disk": ("Premium SSD disks", ("disk",), kind_labels("disk")),
     "storage": ("Storage accounts", ("storage",), kind_labels("storage")),
 }
 
@@ -158,7 +169,7 @@ def reassess(metrics, saved):
         counted = Counter(r["assessment"] for r in mine)
         distribution[source] = {**{name: counted.get(name, 0) for name in ASSESSMENTS}, "nodata": old.get("nodata", 0)}
     return {**metrics, "resources": records, "distribution": distribution}, limits
-HIDDEN_WHEN_EMPTY = {"storage": ("under", "saturated"), "sql": ("idle",), "plan": ("idle",), "aks": ("idle",), "cosmos": ("idle",), "redis": ("idle",)}
+HIDDEN_WHEN_EMPTY = {"storage": ("under", "saturated"), "sql": ("idle",), "plan": ("idle",), "aks": ("idle",), "cosmos": ("idle",), "redis": ("idle",), "vmss": ("idle",), "disk": ("idle",)}
 
 
 def counts(metrics, kind):
@@ -196,8 +207,10 @@ KIND_TYPES = {
     "aks": ("microsoft.containerservice/managedclusters",),
     "cosmos": ("microsoft.documentdb/databaseaccounts",),
     "redis": ("microsoft.cache/redis",),
+    "vmss": ("microsoft.compute/virtualmachinescalesets",),
+    "disk": ("microsoft.compute/disks",),
 }
-AVG_LABEL = {"vm": "CPU", "sql": "DTU", "plan": "CPU", "aks": "node CPU", "cosmos": "RU", "redis": "CPU"}
+AVG_LABEL = {"vm": "CPU", "sql": "DTU", "plan": "CPU", "aks": "node CPU", "cosmos": "RU", "redis": "CPU", "vmss": "CPU", "disk": "IOPS"}
 WITH_MEMORY = ("plan", "aks", "redis")
 FACETS = {"subscription": ("subscriptionId", "Subscription"), "group": ("resourceGroup", "Resource group"),
           "assessment": ("assessment", "Assessment")}
@@ -216,7 +229,9 @@ def marks(kind, limits=None):
             "sql_mi": ((sql["under"], "Oversized"), (sql["saturated"], "Saturated")),
             "aks": ((limits["aks"]["under"], "Underutilized"), (limits["aks"]["saturated"], "Saturated")),
             "cosmos": ((limits["cosmos"]["under"], "Mostly unused"), (limits["cosmos"]["saturated"], "Close to the limit")),
-            "redis": ((limits["redis"]["under"], "Underutilized"), (limits["redis"]["saturated"], "Saturated"))}.get(kind, ())
+            "redis": ((limits["redis"]["under"], "Underutilized"), (limits["redis"]["saturated"], "Saturated")),
+            "vmss": ((limits["vmss"]["under"], "Underutilized"), (limits["vmss"]["saturated"], "Saturated")),
+            "disk": ((limits["disk"]["under"], "Barely used"), (limits["disk"]["saturated"], "Close to the limit"))}.get(kind, ())
 
 
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
