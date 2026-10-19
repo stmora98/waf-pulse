@@ -62,12 +62,15 @@
         </div>
         <div class="actions">
           {% if user %}<span class="muted">{{ user }}</span>{% endif %}
+          <button id="scope-btn" class="icon-button{% if scope_active %} scoped{% endif %}" type="button" aria-haspopup="dialog" aria-expanded="false"
+                  title="Choose the subscriptions, management groups and tags to look at">Scope: {{ scope_label }}</button>
           <button id="theme-toggle" class="icon-button" type="button" aria-label="Change the color theme" title="Color theme: automatic, light or dark">Theme</button>
           <button id="refresh" type="button">Refresh now</button>
         </div>
       </header>
       <p id="refresh-message" class="muted" role="status" aria-live="polite"></p>
 
+      {% if scope_unfiltered %}<p class="notice scope-note">This page always shows the whole tenant: the scope ({{ scope_label }}) does not apply to it.</p>{% endif %}
       <main>
         {% block content %}{% endblock %}
       </main>

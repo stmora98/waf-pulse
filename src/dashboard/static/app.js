@@ -704,3 +704,185 @@ function fitPopover(pop, container, anchor) {
   document.addEventListener("keydown", function (event) { if (event.key === "Escape") { pop.hidden = true; } });
 })();
 
+(function () {
+  var button = document.getElementById("scope-btn");
+  if (!button) { return; }
+  var pop = document.createElement("div");
+  pop.className = "sup-pop scope-pop";
+  pop.hidden = true;
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Scope");
+  document.body.appendChild(pop);
+  var loaded = null;
+
+  function element(tag, text, className) {
+    var node = document.createElement(tag);
+    if (text) { node.textContent = text; }
+    if (className) { node.className = className; }
+    return node;
+  }
+
+  function place() {
+    pop.hidden = false;
+    var rect = button.getBoundingClientRect();
+    pop.style.maxHeight = Math.max(window.innerHeight - 24, 200) + "px";
+    pop.style.left = Math.max(8, Math.min(rect.right - pop.offsetWidth, window.innerWidth - pop.offsetWidth - 8)) + "px";
+    pop.style.top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - pop.offsetHeight - 8)) + "px";
+  }
+
+  function save(body, error) {
+    return fetch("/api/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-WAF-Pulse": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (response.ok) { window.location.reload(); return null; }
+      return response.json().then(function (result) { throw new Error(result.error || "failed"); });
+    }).catch(function (problem) { error.textContent = problem.message === "failed" ? "The scope could not be saved." : problem.message; });
+  }
+
+  function section(title) {
+    var box = element("div", "", "scope-section");
+    box.appendChild(element("h4", title));
+    return box;
+  }
+
+  function checks(items, chosen, search) {
+    var list = element("div", "", "fopts");
+    var rows = [];
+    items.forEach(function (item) {
+      var label = element("label");
+      var check = element("input");
+      check.type = "checkbox";
+      check.value = item.value;
+      check.checked = chosen.indexOf(item.value.toLowerCase()) !== -1;
+      label.appendChild(check);
+      label.appendChild(element("span", item.text));
+      if (item.count !== undefined) { label.appendChild(element("span", String(item.count), "count")); }
+      list.appendChild(label);
+      rows.push({ label: label, text: item.text.toLowerCase(), check: check });
+    });
+    if (!items.length) { list.appendChild(element("p", "Nothing to choose from.", "muted")); }
+    search.addEventListener("input", function () {
+      var needle = search.value.trim().toLowerCase();
+      rows.forEach(function (row) { row.label.hidden = needle !== "" && row.text.indexOf(needle) === -1; });
+    });
+    return { node: list, values: function () { return rows.filter(function (r) { return r.check.checked; }).map(function (r) { return r.check.value; }); } };
+  }
+
+  function render(options, current) {
+    pop.textContent = "";
+    pop.appendChild(element("h4", "Scope"));
+    pop.appendChild(element("p", "Everything on the dashboard, except cost, governance and history, shows only what is in the scope.", "muted"));
+
+    var subs = section("Subscriptions");
+    var subSearch = element("input", "", "lz-input");
+    subSearch.type = "search";
+    subSearch.placeholder = "Search subscriptions";
+    subs.appendChild(subSearch);
+    var subChecks = checks(options.subscriptions.map(function (s) { return { value: s.id, text: s.name, count: s.resources }; }), current.subs || [], subSearch);
+    subs.appendChild(subChecks.node);
+    pop.appendChild(subs);
+
+    var groups = section("Management groups");
+    var groupSearch = element("input", "", "lz-input");
+    groupSearch.type = "search";
+    groupSearch.placeholder = "Search management groups";
+    groups.appendChild(groupSearch);
+    var chosenGroups = (current.mgs || []).map(function (g) { return g.toLowerCase(); });
+    var groupChecks = checks(options.managementGroups.map(function (g) { return { value: g.name, text: g.displayName, count: g.subscriptions }; }), chosenGroups, groupSearch);
+    groups.appendChild(groupChecks.node);
+    groups.appendChild(element("p", "A management group includes the subscriptions of every group below it.", "muted"));
+    pop.appendChild(groups);
+
+    var tags = section("Tags");
+    var tagState = (current.tags || []).slice();
+    var tagList = element("div", "", "scope-tags");
+    var keySelect = element("select");
+    keySelect.setAttribute("aria-label", "Tag key");
+    var valueSelect = element("select");
+    valueSelect.setAttribute("aria-label", "Tag value");
+    var addTag = element("button", "Add tag", "icon-button");
+    addTag.type = "button";
+    function drawTags() {
+      tagList.textContent = "";
+      tagState.forEach(function (item) {
+        var chip = element("span", item, "chip");
+        var remove = element("button", "\u00d7", "chip-remove");
+        remove.type = "button";
+        remove.setAttribute("aria-label", "Remove " + item);
+        remove.addEventListener("click", function () { tagState = tagState.filter(function (x) { return x !== item; }); drawTags(); });
+        chip.appendChild(remove);
+        tagList.appendChild(chip);
+      });
+    }
+    function drawValues() {
+      valueSelect.textContent = "";
+      var key = options.tags.filter(function (t) { return t.key === keySelect.value; })[0];
+      (key ? key.values : []).forEach(function (v) {
+        var option = element("option", v.value + " (" + v.count + ")");
+        option.value = v.value;
+        valueSelect.appendChild(option);
+      });
+    }
+    if (options.tagsAvailable && options.tags.length) {
+      options.tags.forEach(function (t) {
+        var option = element("option", t.key + " (" + t.total + ")");
+        option.value = t.key;
+        keySelect.appendChild(option);
+      });
+      keySelect.addEventListener("change", drawValues);
+      addTag.addEventListener("click", function () {
+        var item = keySelect.value + "=" + valueSelect.value;
+        if (keySelect.value && tagState.indexOf(item) === -1) { tagState.push(item); drawTags(); }
+      });
+      var row = element("div", "", "lz-row");
+      row.appendChild(keySelect);
+      row.appendChild(valueSelect);
+      row.appendChild(addTag);
+      tags.appendChild(row);
+      drawValues();
+    } else {
+      tags.appendChild(element("p", options.tagsAvailable ? "No tags found." : "Tags appear after the next refresh.", "muted"));
+    }
+    tags.appendChild(tagList);
+    tags.appendChild(element("p", "Resources must carry every key (with any of its chosen values).", "muted"));
+    drawTags();
+    pop.appendChild(tags);
+
+    var error = element("p", "", "lz-error");
+    pop.appendChild(error);
+    var actions = element("div", "", "lz-row");
+    var apply = element("button", "Apply");
+    apply.type = "button";
+    apply.addEventListener("click", function () {
+      apply.disabled = true;
+      save({ subs: subChecks.values(), mgs: groupChecks.values(), tags: tagState }, error).then(function () { apply.disabled = false; });
+    });
+    var clear = element("button", "Show everything", "icon-button");
+    clear.type = "button";
+    clear.addEventListener("click", function () { save({ clear: true }, error); });
+    actions.appendChild(apply);
+    actions.appendChild(clear);
+    pop.appendChild(actions);
+    place();
+  }
+
+  button.addEventListener("click", function (event) {
+    event.stopPropagation();
+    if (!pop.hidden) { pop.hidden = true; button.setAttribute("aria-expanded", "false"); return; }
+    button.setAttribute("aria-expanded", "true");
+    if (loaded) { render(loaded.options, loaded.current); return; }
+    pop.textContent = "Loading...";
+    place();
+    fetch("/api/scope-options").then(function (response) {
+      if (!response.ok) { throw new Error("failed"); }
+      return response.json();
+    }).then(function (result) { loaded = result; render(result.options, result.current); })
+      .catch(function () { pop.textContent = "The scope options could not be loaded."; });
+  });
+  pop.addEventListener("click", function (event) { event.stopPropagation(); });
+  document.addEventListener("click", function () { pop.hidden = true; button.setAttribute("aria-expanded", "false"); });
+  document.addEventListener("keydown", function (event) { if (event.key === "Escape") { pop.hidden = true; } });
+})();
+

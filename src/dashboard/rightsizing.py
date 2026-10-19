@@ -353,6 +353,18 @@ def schedule_text(schedule):
 PRODUCTION = re.compile(r"^(prod|production|prd|live)", re.I)
 
 
+def scope_metrics(metrics, keep):
+    """A copy of the metrics dataset with only the resources `keep` accepts, and the distribution counted again from them."""
+    if not metrics:
+        return metrics
+    records = [r for r in metrics.get("resources") or [] if keep(r)]
+    distribution = {}
+    for source, old in (metrics.get("distribution") or {}).items():
+        counted = Counter(r["assessment"] for r in records if r.get("kind") == source)
+        distribution[source] = {**{name: counted.get(name, 0) for name in ASSESSMENTS}, "nodata": 0}
+    return {**metrics, "resources": records, "distribution": distribution}
+
+
 def risk(row):
     """What to weigh before changing a machine: {level, reasons}. Only virtual machines carry the context."""
     reasons = []

@@ -509,3 +509,13 @@ ul.plain li { padding: 3px 0; }
 .sup-pop p { margin: 0; font-size: 0.85rem; }
 .suppress-btn { font-size: 0.8rem; padding: 3px 10px; }
 
+/* scope picker */
+#scope-btn.scoped { border-color: var(--accent); color: var(--accent); }
+.scope-pop { width: 340px; overflow-y: auto; }
+.scope-section { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.scope-section h4 { margin: 0; }
+.scope-section .fopts { max-height: 150px; overflow-y: auto; }
+.scope-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-remove { margin-left: 6px; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 2px; }
+.scope-note { margin: 0 0 8px; }
+

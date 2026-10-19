@@ -20,6 +20,7 @@
         <a href="{{ url_for('compare_page') }}">What changed since the previous run?</a>
       </section>
 
+      {% if summary.scopeNote %}<p class="muted">{{ summary.scopeNote }}</p>{% endif %}
       <section class="cards">
         {% for pillar in pillars %}
           {% set score = (summary.scores or {}).get(pillar) %}
@@ -27,8 +28,8 @@
           <a class="card {% if score is none %}na{% elif score >= 80 %}good{% elif score >= 50 %}warn{% else %}bad{% endif %}"
              href="{{ url_for('pillar_page', slug=slugs[pillar]) }}">
             <span class="card-title">{{ pillar }}</span>
-            <span class="card-score">{% if score is none %}n/a{% else %}{{ score }}{% endif %}</span>
-            <span class="muted">{% if score is none %}Not evaluated{% else %}{{ (counts.values() | sum) }} findings{% if counts.get('critical') or counts.get('high') %} · {{ (counts.get('critical', 0) + counts.get('high', 0)) }} critical or high{% endif %}{% endif %}</span>
+            <span class="card-score">{% if score is none %}{% if summary.scoped %}{{ counts.values() | sum }}{% else %}n/a{% endif %}{% else %}{{ score }}{% endif %}</span>
+            <span class="muted">{% if score is none %}{% if summary.scoped %}findings in the scope{% else %}Not evaluated{% endif %}{% else %}{{ (counts.values() | sum) }} findings{% if counts.get('critical') or counts.get('high') %} · {{ (counts.get('critical', 0) + counts.get('high', 0)) }} critical or high{% endif %}{% endif %}</span>
           </a>
         {% endfor %}
       </section>

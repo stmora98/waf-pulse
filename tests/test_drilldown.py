@@ -159,7 +159,7 @@ def test_the_resource_list_is_cleaned_and_capped(monkeypatch):
     cleaned, truncated = collect.collect_resource_list(None, ["s1"])
     assert truncated is True and len(cleaned) == 3
     assert cleaned[0] == {"id": "/s/a", "name": "A", "type": "microsoft.compute/virtualmachines", "subscriptionId": "s1",
-                          "resourceGroup": "rg", "location": "eastus", "detail": "D2", "tags": 0}
+                          "resourceGroup": "rg", "location": "eastus", "detail": "D2", "tags": 0, "tagList": []}
     monkeypatch.setattr(collect, "MAX_RESOURCE_LIST", 10)
     assert collect.collect_resource_list(None, ["s1"])[1] is False
 
@@ -411,3 +411,11 @@ def test_start_run_still_starts_when_cleaning_up_fails(monkeypatch):
     monkeypatch.setattr(store, "container", lambda name: Runs())
     store.start_run("new", "t", "manual")
     assert [d["id"] for d in saved] == ["new"]
+
+
+def test_the_tags_of_a_resource_go_to_the_inventory_shortened_and_capped():
+    bag = {f"key{i}": "v" * 100 for i in range(12)}
+    tags = collect.clean_tags(bag)
+    assert len(tags) == collect.MAX_TAGS_PER_RESOURCE and tags[0] == ["key0", "v" * 64]
+    assert collect.clean_tags(None) == [] and collect.clean_tags("junk") == []
+    assert "tagBag = tags" in collect.RESOURCE_LIST_QUERY

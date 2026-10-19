@@ -18,6 +18,7 @@ import governance_view
 import history
 import insights
 import landing_zone
+import scope
 import suppress
 import rightsizing
 
@@ -82,11 +83,33 @@ def _allowed(value, options):
     return value if value in options else None
 
 
+def _scope():
+    """What the visitor chose to look at (subscriptions, management groups, tags), from the cookie."""
+    cached = getattr(request, "_scope", None)
+    if cached is None:
+        cached = request._scope = scope.decode(request.cookies.get(scope.COOKIE))
+    return cached
+
+
+def _resolved(summary):
+    """The scope ready to filter with. Tags need the inventory, which is read only when a tag is in the scope."""
+    cached = getattr(request, "_resolved", None)
+    if cached is None:
+        chosen = _scope()
+        rows = data.resources(summary["runId"])[0] if summary and chosen["tags"] else None
+        groups = ((summary or {}).get("governance") or {}).get("managementGroups")
+        cached = request._resolved = scope.resolve(chosen, groups, rows)
+    return cached
+
+
 def _latest():
-    """Returns (latest run, summary of the latest completed run or None). Raises when the data store is down."""
+    """Returns (latest run, summary of the latest completed run or None) for the scope. Raises when the data store is down."""
     latest = data.latest_run()
     completed = latest if latest and latest.get("status") == "completed" else data.latest_run(True)
-    return latest, (data.summary(completed["id"]) if completed else None)
+    summary = data.summary(completed["id"]) if completed else None
+    if summary and scope.is_active(_scope()):
+        summary = scope.apply_summary(summary, _resolved(summary))
+    return latest, summary
 
 
 SUPPRESSIONS_SETTING = "suppressions"
@@ -112,6 +135,10 @@ def _all_findings(summary, pillar=None, rule_id=None, limit=data.MAX_FINDINGS, r
     extra = {"resource_id": resource_id} if resource_id else {}
     found = data.all_findings(summary["runId"], pillar, rule_id, limit, **extra)
     visible, suppressed = suppress.split(found, _suppressions())
+    chosen = _resolved(summary)
+    if chosen.active:
+        visible = [f for f in visible if chosen.finding_ok(f)]
+        suppressed = [f for f in suppressed if chosen.finding_ok(f)]
     return suppressed if hidden else visible
 
 
@@ -182,6 +209,9 @@ def index():
         return render_template("index.html", latest=None, summary=None, error="The data store is not reachable right now.",
                                pillars=data.PILLARS, slugs=insights.PILLAR_SLUG, source_labels=data.SOURCE_LABELS), 503
     rules = insights.group_rules(findings)
+    if summary and summary.get("scoped"):
+        summary = {**summary, "counts": {pillar: counts for pillar, counts in insights.by_pillar(findings, data.PILLARS)},
+                   "severityTotals": insights.severity_totals(findings), "findingCount": len(findings)}
     pillar_rows = [
         (pillar, counts, url_for("pillar_page", slug=insights.PILLAR_SLUG[pillar]))
         for pillar, counts in insights.by_pillar(findings, data.PILLARS)
@@ -370,9 +400,14 @@ GROUP_FILTER = re.compile(r"^[A-Za-z0-9._()\-]{1,90}$")
 RESOURCE_ID = re.compile(r"^/[A-Za-z0-9._()/:@ %'+,=-]{1,600}$")
 
 
-def _inventory(summary):
-    """(rows, truncated) of the latest run; empty when the run predates the list or there is no run."""
-    return data.resources(summary["runId"]) if summary else ([], False)
+def _inventory(summary, scoped=True):
+    """(rows, truncated) of the latest run for the scope (`scoped=False`: all of it); empty when the run predates the list or
+    there is no run."""
+    if not summary:
+        return [], False
+    rows, truncated = data.resources(summary["runId"])
+    chosen = _resolved(summary) if scoped else None
+    return ([r for r in rows if chosen.row_ok(r)] if chosen and chosen.active else rows), truncated
 
 
 @app.get("/resources")
@@ -437,7 +472,7 @@ def resource_page():
         abort(404)
     try:
         _, summary = _latest()
-        rows, _ = _inventory(summary)
+        rows, _ = _inventory(summary, scoped=False)
         findings = _all_findings(summary, resource_id=resource_id, limit=500)
     except Exception:
         logging.exception("Could not load the resource")
@@ -534,13 +569,16 @@ def _csv(filename, header, rows):
 TRACKED_RUNS = 8
 
 
-def _tracking():
-    """The Advisor savings of the last runs, or None when there are not two runs with advice or the store fails."""
+def _tracking(keep=None):
+    """The Advisor savings of the last runs (of the scope when `keep` is given), or None when there are not two runs with advice
+    or the store fails."""
     try:
         runs = [r for r in data.history(TRACKED_RUNS + 4) if r.get("status") == "completed"][:TRACKED_RUNS]
         entries = []
         for run in reversed(runs):
             rows = data.rows_of(run["id"], "advice")
+            if rows and keep:
+                rows = [a for a in rows if keep(a)]
             if rows:
                 entries.append((_short_time(run), rows))
         return rightsizing.track(entries)
@@ -561,6 +599,11 @@ def _rightsizing_context(include_all=False):
         return {"summary": summary, "metrics": None}
     advice = data.rows_of(summary["runId"], "advice")
     costs = data.rows_of(summary["runId"], "costs")
+    chosen = _resolved(summary)
+    if chosen.active:
+        metrics = rightsizing.scope_metrics(metrics, chosen.row_ok)
+        advice = [a for a in advice if chosen.row_ok(a)]
+        costs = [c for c in costs if chosen.row_ok(c)]
     kind = _allowed(request.args.get("kind"), rightsizing.KINDS)
     kind = kind or next((key for key in rightsizing.KINDS if any(rightsizing.counts(metrics, key).values())), "vm")
     names = {sub["id"].lower(): sub["name"] for sub in summary.get("subscriptions", [])}
@@ -610,7 +653,8 @@ def rightsizing_page():
     }
     rows = [{**r, "risk": rightsizing.risk(r)} if kind == "vm" else r for r in ctx["rows"]]
     page_args = {"kind": kind, **_filter_args(filters)}
-    tracking = _tracking()
+    chosen = _resolved(ctx["summary"])
+    tracking = _tracking(chosen.row_ok if chosen.active else None)
     tracking_chart = charts.sparkline(tracking["points"]) if tracking else None
     return render_template(
         "rightsizing.html", error=None, metrics=metrics, cards=cards, kind=kind, title=rightsizing.KINDS[kind][0], labels=labels,
@@ -760,9 +804,45 @@ def api_findings():
     return jsonify(runId=summary["runId"] if summary else None, findings=findings)
 
 
+UNSCOPED_PAGES = ("governance_page", "history_page", "compare_page", "suppressions_page", "landing_zone_page")
+
+
 @app.context_processor
 def inject_user():
-    return {"user": request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""), "nav_pillars": list(insights.PILLAR_PAGES.items())}
+    chosen = _scope()
+    unscoped = request.endpoint in UNSCOPED_PAGES or (request.endpoint == "pillar_page" and (request.view_args or {}).get("slug") == "cost")
+    return {"user": request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", ""), "nav_pillars": list(insights.PILLAR_PAGES.items()),
+            "scope_active": scope.is_active(chosen), "scope_label": scope.label(chosen), "scope_unfiltered": unscoped and scope.is_active(chosen)}
+
+
+@app.get("/api/scope-options")
+def api_scope_options():
+    try:
+        raw = data.latest_run()
+        completed = raw if raw and raw.get("status") == "completed" else data.latest_run(True)
+        summary = data.summary(completed["id"]) if completed else None
+        rows = data.resources(summary["runId"])[0] if summary else []
+    except Exception:
+        logging.exception("Could not load the scope options")
+        return jsonify(error="The data store is not reachable right now."), 503
+    return jsonify(options=scope.options(summary, rows), current=_scope())
+
+
+@app.post("/api/scope")
+def api_scope():
+    """Saves the scope the visitor picked in a cookie ({"clear": true} goes back to everything)."""
+    if _cross_site():
+        return jsonify(error="Forbidden"), 403
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    chosen = scope.sanitize(None if body.get("clear") else body)
+    response = jsonify(scope=chosen, label=scope.label(chosen))
+    if scope.is_active(chosen):
+        secure = request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
+        response.set_cookie(scope.COOKIE, scope.encode(chosen), max_age=60 * 60 * 24 * 30, httponly=True, samesite="Lax", secure=secure)
+    else:
+        response.delete_cookie(scope.COOKIE)
+    return response
 
 
 RUN_ID = re.compile(r"^[0-9a-fA-F-]{36}$")

@@ -51,9 +51,18 @@ resources
     type =~ 'microsoft.web/serverfarms', strcat(tostring(sku.name), ' x', tostring(sku.capacity)),
     tostring(sku.name))
 | project id, name, type = tolower(type), subscriptionId, resourceGroup, location, detail,
-          tags = array_length(bag_keys(tags))
+          tags = array_length(bag_keys(tags)), tagBag = tags
 """
 MAX_RESOURCE_LIST = 5000
+MAX_TAGS_PER_RESOURCE = 8
+
+
+def clean_tags(bag):
+    """[[key, value], ...] of the tags of a resource for the inventory, so the dashboard can scope by tag: at most
+    MAX_TAGS_PER_RESOURCE of them, each shortened."""
+    if not isinstance(bag, dict):
+        return []
+    return [[str(k)[:64], str(v)[:64]] for k, v in list(bag.items())[:MAX_TAGS_PER_RESOURCE]]
 
 
 def collect_resource_list(credential, subscription_ids):
@@ -67,7 +76,8 @@ def collect_resource_list(credential, subscription_ids):
     cleaned = [
         {"id": str(r.get("id", "")), "name": str(r.get("name", "")), "type": str(r.get("type", "")).lower(),
          "subscriptionId": str(r.get("subscriptionId", "")).lower(), "resourceGroup": str(r.get("resourceGroup", "")),
-         "location": str(r.get("location", "")), "detail": str(r.get("detail") or "").strip(" ·"), "tags": int(r.get("tags") or 0)}
+         "location": str(r.get("location", "")), "detail": str(r.get("detail") or "").strip(" ·"), "tags": int(r.get("tags") or 0),
+         "tagList": clean_tags(r.get("tagBag"))}
         for r in rows[:MAX_RESOURCE_LIST]
     ]
     return cleaned, len(rows) > MAX_RESOURCE_LIST
