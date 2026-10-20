@@ -110,7 +110,8 @@ resources
         "query": """
 resources
 | where type =~ 'microsoft.containerservice/managedclusters'
-| mv-apply pool = properties.agentPoolProfiles on (summarize nodes = sum(toint(pool['count'])), sizes = make_set(tostring(pool['vmSize'])))
+| mv-expand pool = properties.agentPoolProfiles
+| summarize nodes = sum(toint(pool['count'])), sizes = make_set(tostring(pool['vmSize'])) by id, name, subscriptionId, location
 | project id, name, subscriptionId, location, detail = strcat(tostring(nodes), ' nodes · ', strcat_array(sizes, ', '))
 """,
     },

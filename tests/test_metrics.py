@@ -505,3 +505,8 @@ def test_fetch_hourly_asks_for_seven_days_of_hourly_cpu(monkeypatch):
     REAL_FETCH_HOURLY(Credential(), SUB, "eastus", ["/x"], now=NOW)
     assert captured["params"]["interval"] == "PT1H" and captured["params"]["metricnames"] == "Percentage CPU"
     assert captured["params"]["starttime"] == "2026-10-08T00:00:00Z"
+
+def test_no_query_uses_mv_apply_which_resource_graph_rejects():
+    from waf_pulse import aoe_rules, security, security_rules
+    queries = [t["query"] for t in metrics.TARGETS.values()] + [r.query for r in aoe_rules.RULES_EXTRA] + [r.query for r in security_rules.RULES_SECURITY] + list(security.QUERIES.values())
+    assert not [q for q in queries if "mv-apply" in q]
