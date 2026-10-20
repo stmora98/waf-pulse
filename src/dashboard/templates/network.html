@@ -10,7 +10,7 @@
     {% else %}
       {% set f = ctx.facts %}
       <p class="muted">The virtual networks of your subscriptions, how they connect, and what to improve. Everything follows the filters above.</p>
-      {% if ctx.truncated %}<p class="notice scope-note">The tenant has more private endpoints or public IPs than this page keeps; the biggest are shown.</p>{% endif %}
+      {% if ctx.truncated %}<p class="notice scope-note">The tenant has more networks, public IPs, private endpoints or devices than this page keeps. The collector keeps the edge devices and the exposed services first; the Network findings and the counts in the findings pages are complete.</p>{% endif %}
       <section class="cards compact">
         <div class="card na"><span class="card-title">Virtual networks</span><span class="card-score">{{ f.vnets }}</span><span class="muted">{{ f.subnets }} subnets · {{ f.peerings }} peering(s)</span></div>
         <div class="card {% if f.noNsg %}warn{% else %}good{% endif %}"><span class="card-title">Subnets without NSG</span><span class="card-score">{{ f.noNsg }}</span><span class="muted">reserved subnets excluded</span></div>
@@ -26,11 +26,21 @@
         {% endfor %}
       </nav>
 
+      {% if tab in ('topology', 'networks') %}
+        <form class="filterbar fb-search" method="get" action="{{ url_for('network_page') }}" role="search">
+          <input type="hidden" name="tab" value="{{ tab }}">
+          <input type="search" name="q" value="{{ q }}" maxlength="80" placeholder="Name, group, region, subnet or IP" aria-label="Search networks">
+          <button type="submit">Search</button>
+          {% if q %}<a class="chip" href="{{ url_for('network_page', tab=tab) }}">Clear search</a>{% endif %}
+        </form>
+      {% endif %}
+
       {% if tab == 'topology' %}
         {% if diagram %}
           <section class="panel" id="topology">
             <h3>Topology</h3>
-            <p class="muted">Hubs sit on top with the networks that peer to them below; networks with no peering are listed apart. Select a network to see its subnets, peerings and what was found.</p>
+            <p class="muted">Hubs sit on top with the networks that peer to them below; networks with no peering are listed apart. Select a network to see its subnets, peerings and what was found.
+              {% if diagram.folded %}With this many networks the drawing shows the ones with the most findings and folds {{ diagram.folded }} into a "more" box: <a href="{{ url_for('network_page', tab='topology', all=1, q=q or None) }}#topology">show them all</a> or search above. The <a href="{{ url_for('network_page', tab='networks') }}">Virtual networks</a> tab lists every one.{% elif expand %}<a href="{{ url_for('network_page', tab='topology', q=q or None) }}#topology">Fold the long lists</a>.{% endif %}</p>
             <div class="diagram-scroll">
               <svg class="net" viewBox="0 0 {{ diagram.width }} {{ diagram.height }}" width="{{ diagram.width }}" height="{{ diagram.height }}" role="img" aria-label="Network topology">
                 {% for b in diagram.bands %}<text class="net-band" x="{{ b.x }}" y="{{ b.y }}">{{ b.text }}</text>{% endfor %}
@@ -39,7 +49,17 @@
                   {% if e.label %}<text class="net-edge-label" x="{{ e.lx }}" y="{{ e.ly }}" text-anchor="middle">{{ e.label }}</text>{% endif %}
                 {% endfor %}
                 {% for n in diagram.nodes %}
-                  {% if n.onprem %}
+                  {% if n.more %}
+                    <a href="{{ url_for('network_page', tab='topology', all=1, q=q or None) }}#topology">
+                      <g class="net-node onprem" transform="translate({{ n.x }},{{ n.y }})">
+                        <title>Show every network</title>
+                        <rect width="{{ n.w }}" height="{{ n.h }}" rx="10"></rect>
+                        <text x="12" y="30" class="net-title">{{ n.name }}</text>
+                        <text x="12" y="52" class="net-sub">{{ n.address }}</text>
+                        <text x="12" y="72" class="net-sub">{{ n.meta }}</text>
+                      </g>
+                    </a>
+                  {% elif n.onprem %}
                     <g class="net-node onprem" transform="translate({{ n.x }},{{ n.y }})">
                       <rect width="{{ n.w }}" height="{{ n.h }}" rx="27"></rect>
                       <text x="{{ n.w // 2 }}" y="23" text-anchor="middle" class="net-title">{{ n.name }}</text>
@@ -66,7 +86,7 @@
             <p class="muted net-legend"><span class="key ok"></span> peering connected <span class="key broken"></span> peering broken or on one side only <span class="key sev"></span> number of findings on the network</p>
           </section>
         {% else %}
-          <section class="notice">No virtual network matches the filters.</section>
+          <section class="notice">No virtual network matches {% if q %}"{{ q }}" with the filters{% else %}the filters{% endif %}.</section>
         {% endif %}
 
         {% if selected and detail is defined %}
@@ -134,7 +154,7 @@
             </tbody>
           </table></div>
         {% else %}
-          <section class="notice">No virtual network matches the filters.</section>
+          <section class="notice">No virtual network matches {% if q %}"{{ q }}" with the filters{% else %}the filters{% endif %}.</section>
         {% endif %}
 
       {% elif tab == 'security' %}

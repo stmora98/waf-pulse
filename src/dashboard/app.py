@@ -1260,13 +1260,15 @@ def network_page():
     except Exception:
         logging.exception("Could not load the network data")
         return render_template("network.html", error="The data store is not reachable right now.", ctx=None, summary=None, tabs=NETWORK_TABS, tab=tab), 503
-    extra = {}
+    extra = {"q": request.args.get("q", "").strip()[:80], "expand": request.args.get("all") == "1"}
     if context:
+        if extra["q"] and tab in ("topology", "networks"):
+            context["vnets"] = network_view.search(context["vnets"], extra["q"])
         selected = str(request.args.get("vnet") or "").lower()
         extra["selected"] = next((v for v in context["vnets"] if str(v["id"]).lower() == selected), None)
         if tab == "topology":
             key = str(extra["selected"]["id"]).lower() if extra["selected"] else ""
-            extra["diagram"] = network_view.layout(context["vnets"], context["devices"], context["by_resource"], key) if context["vnets"] else None
+            extra["diagram"] = network_view.layout(context["vnets"], context["devices"], context["by_resource"], key, expand=extra["expand"]) if context["vnets"] else None
             if extra["selected"]:
                 attached = network_view.devices_by_vnet(context["devices"]).get(key, [])
                 extra["detail"] = {"subnets": network_view.subnet_rows(extra["selected"]), "devices": attached, "findings": context["by_resource"].get(key, []),

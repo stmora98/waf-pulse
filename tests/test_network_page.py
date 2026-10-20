@@ -150,3 +150,18 @@ def test_nav_and_data_source_row(client, monkeypatch):
     assert 'href="/network"' in client.get("/network").get_data(as_text=True)
     sources = dashboard_app._data_sources({"network": {"vnets": 1}, "errors": [{"ruleId": "network-pes", "error": "x"}], "sources": {}})
     assert next(s for s in sources if s["name"] == "Network topology")["status"] == "partial"
+
+
+def test_search_and_show_all_on_the_page(client, monkeypatch):
+    names = [f"spoke-{i:03d}" for i in range(40)]
+    rows = [vnet("hub", peers=tuple(names), prefix="10.0.0.0/16")] + [vnet(n, prefix=f"10.{i + 1}.0.0/16", peers=("hub",)) for i, n in enumerate(names)]
+    serve(monkeypatch, rows=rows)
+    folded = client.get("/network").get_data(as_text=True)
+    assert "more network(s)" in folded and "show them all" in folded and "spoke-039" not in folded
+    everything = client.get("/network?all=1").get_data(as_text=True)
+    assert "spoke-039" in everything and "more network(s)" not in everything and "Fold the long lists" in everything
+    found = client.get("/network?tab=networks&q=10.5.3.3").get_data(as_text=True)
+    assert "spoke-004" in found and "spoke-005" not in found and "Clear search" in found
+    assert "No virtual network matches" in client.get("/network?q=nothing-like-this").get_data(as_text=True)
+    escaped = client.get("/network?q=<script>").get_data(as_text=True)
+    assert 'value="&lt;script&gt;"' in escaped and "<script>alert" not in escaped

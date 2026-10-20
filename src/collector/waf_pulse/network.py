@@ -17,6 +17,8 @@ RESERVED_SUBNETS = {"gatewaysubnet", "azurefirewallsubnet", "azurefirewallmanage
 WORKERS = 4
 MAX_ROWS = {"vnet": 800, "device": 2500}
 MAX_KIND_ROWS = 600     # per device kind, the biggest ones first (private endpoints and public IPs can be thousands)
+# What the page keeps first when there are more devices than MAX_ROWS["device"]: the edge and the exposure, then the plumbing.
+KEEP_ORDER = ("firewall", "gateway", "bastion", "appgw", "lb", "natgw", "paas", "nsg", "routetable", "pe", "pip", "dns")
 INTERNET_SOURCES = {"*", "internet", "any", "0.0.0.0/0", "0.0.0.0", "/0"}
 
 RULES = {
@@ -368,8 +370,8 @@ def evaluate(run_id, raw):
             entry["applicable"] += 1
             entry["affected"] += 1 if rid in flagged[rule] else 0
         stats.extend({"ruleId": rule, "source": SOURCE, "pillar": pillar, "severity": severity, "subscriptionId": sub, **value} for sub, value in per_sub.items())
-    rows = rows_for_page(vnets, raw)
-    return findings, stats, summarize(vnets, raw, findings), rows
+    rows, truncated = rows_for_page(vnets, raw)
+    return findings, stats, {**summarize(vnets, raw, findings), "truncated": truncated}, rows
 
 
 def _exposure(raw):
@@ -427,7 +429,10 @@ def rows_for_page(vnets, raw):
         if public and int(row.get("endpoints") or 0) == 0:
             kept.append(_device("paas", row, type=lower(row["type"])))
     devices.extend(kept[:MAX_KIND_ROWS])
-    return rows + devices[:MAX_ROWS["device"]]
+    devices.sort(key=lambda d: (KEEP_ORDER.index(d["kind"]) if d["kind"] in KEEP_ORDER else len(KEEP_ORDER), 0 if d.get("internetPorts") else 1))
+    truncated = (len(vnets) > MAX_ROWS["vnet"] or len(devices) > MAX_ROWS["device"] or len(raw.get("pes") or []) > MAX_KIND_ROWS
+                 or len(raw.get("pips") or []) > MAX_KIND_ROWS or len(kept) > MAX_KIND_ROWS)
+    return rows + devices[:MAX_ROWS["device"]], truncated
 
 
 def summarize(vnets, raw, findings):
@@ -441,8 +446,7 @@ def summarize(vnets, raw, findings):
             "peerings": peerings // 2 if peerings else 0, "firewalls": count("firewalls"), "gateways": count("gateways"), "bastions": count("bastions"),
             "appGateways": count("appgws"), "loadBalancers": count("lbs"), "natGateways": count("natgws"), "privateEndpoints": count("pes"),
             "publicIps": count("pips"), "publicIpsUnattached": sum(1 for r in raw.get("pips") or [] if not r.get("attached")), "nsgs": count("nsgs"),
-            "routeTables": count("routetables"), "privateDnsZones": count("dnszones"), "findings": len(findings),
-            "truncated": len(vnets) > MAX_ROWS["vnet"] or count("pes") > MAX_KIND_ROWS or count("pips") > MAX_KIND_ROWS}
+            "routeTables": count("routetables"), "privateDnsZones": count("dnszones"), "findings": len(findings)}
 
 
 def collect(credential, run_id, subscription_ids):

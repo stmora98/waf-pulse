@@ -1,6 +1,7 @@
 """The Network page: a topology of the virtual networks the collector found (hubs, spokes, peerings, on-premises links), the facts of each
 network and the network insights. Everything is drawn from the rows the collector kept (`netrows`); the layout is a pure function so it
 can be tested without a browser."""
+import ipaddress
 from collections import Counter, defaultdict
 
 NODE_W, NODE_H = 236, 108
@@ -8,6 +9,8 @@ GAP_X, GAP_Y, GAP_GROUP, MARGIN = 36, 96, 70, 24
 ONPREM_W, ONPREM_H = 150, 54
 BAND_MAX = 1500
 PER_ROW = 6
+MAX_DRAWN = 18        # networks drawn around one hub (or in the not peered list); the rest folds into one "more" node
+MAX_EDGE_LABELS = 12  # with more peerings than this, the "gateway transit" labels would hide the drawing
 LABEL_HEIGHT = 26
 
 # Rules whose findings belong on the Network page: the ones of the network source and the older network rules of other sources.
@@ -30,6 +33,36 @@ PAAS_LABELS = {"microsoft.storage/storageaccounts": "Storage account", "microsof
 def split_rows(rows):
     """(virtual networks, devices) of the kept rows."""
     return [r for r in rows if r.get("t") == "vnet"], [r for r in rows if r.get("t") == "device"]
+
+
+def search(vnets, text):
+    """The networks that match a search: part of a name, resource group, region, subnet name or address range, or an IP address that falls
+    inside one of the networks (so "10.2.4.7" finds the network that holds it)."""
+    text = str(text or "").strip().lower()
+    if not text:
+        return vnets
+    try:
+        address = ipaddress.ip_address(text)
+    except ValueError:
+        address = None
+    found = []
+    for vnet in vnets:
+        if address is not None:
+            hit = any(address in net for prefix in vnet.get("prefixes", []) for net in _networks_of(prefix))
+        else:
+            haystack = [vnet["name"], vnet.get("rg", ""), vnet.get("loc", ""), *vnet.get("prefixes", []), *(s["name"] for s in vnet.get("subnets", [])),
+                        *(s["prefix"] for s in vnet.get("subnets", []))]
+            hit = any(text in str(item).lower() for item in haystack)
+        if hit:
+            found.append(vnet)
+    return found
+
+
+def _networks_of(prefix):
+    try:
+        return [ipaddress.ip_network(str(prefix), strict=False)]
+    except ValueError:
+        return []
 
 
 def probe(row):
@@ -118,9 +151,11 @@ def _badges(vnet, devices):
     return out
 
 
-def layout(vnets, devices, findings_for, selected=""):
+def layout(vnets, devices, findings_for, selected="", expand=False, limit=MAX_DRAWN):
     """Positions for the topology: connected groups of networks (hubs on top, spokes below), then the networks that are not peered.
-    Returns {width, height, nodes, edges, bands}; every coordinate is absolute."""
+    A group with more than `limit` spokes (or more than `limit` networks without peering) draws the ones with the most findings and
+    folds the rest into a "+N more networks" node, unless `expand`. The selected network is always drawn.
+    Returns {width, height, nodes, edges, bands, folded}; every coordinate is absolute."""
     attached = devices_by_vnet(devices)
     by_id = {str(v["id"]).lower(): v for v in vnets}
     edges = edges_of(vnets)
@@ -134,14 +169,27 @@ def layout(vnets, devices, findings_for, selected=""):
     groups.sort(key=lambda g: (-len(g), by_id[g[0]]["name"].lower()))
 
     placed = {}     # vnet id -> (x, y) relative to its group
-    sizes, onprem = [], {}
-    plans = []
+    onprem, plans, folded, more = {}, [], 0, {}   # more: node key -> {hub, count}
+    trunks = {}     # (hub, spoke) -> x of the trunk the spoke hangs from
+
+    def keep(ids, slots):
+        """The `slots` networks to draw out of `ids` when they are too many: the selected one, then the most findings; and how many fold."""
+        if expand or len(ids) <= limit:
+            return ids, 0
+        ranked = sorted(ids, key=lambda v: (v != selected, -len(findings_for.get(v, [])), by_id[v]["name"].lower()))
+        return ranked[:slots - 1], len(ids) - (slots - 1)
+
     for group in groups:
         hubs = [v for v in group if core[v] or degree[v] >= 2]
         if not hubs:
             hubs = [max(group, key=lambda v: (degree[v], by_id[v]["name"].lower()))]
         hubs.sort(key=lambda v: (not core[v], -degree[v], by_id[v]["name"].lower()))
-        spokes = [v for v in group if v not in hubs]
+        spokes, hidden = keep([v for v in group if v not in hubs], limit)
+        if hidden:
+            key = f"more:{hubs[0]}"
+            spokes = spokes + [key]
+            more[key] = {"hub": hubs[0], "count": hidden}
+            folded += hidden
         gateways = {h: [d for d in attached.get(h, []) if d["kind"] == "gateway"] for h in hubs}
         has_onprem = any(gateways.values())
         hub_rows = [hubs[i:i + PER_ROW] for i in range(0, len(hubs), PER_ROW)]
@@ -149,15 +197,23 @@ def layout(vnets, devices, findings_for, selected=""):
         columns = max([len(r) for r in hub_rows + spoke_rows] or [1])
         width = columns * (NODE_W + GAP_X) - GAP_X
         top = (ONPREM_H + GAP_Y // 2) if has_onprem else 0
+        tree = len(spoke_rows) > 1 and len(hub_rows) == 1   # many spokes: they hang from one trunk that runs down the gap between the middle columns
         positions, y = {}, top
-        for row in hub_rows + spoke_rows:
+        for number, row in enumerate(hub_rows + spoke_rows):
             row_w = len(row) * (NODE_W + GAP_X) - GAP_X
+            aligned = tree and number >= len(hub_rows)
             for index, vid in enumerate(row):
-                positions[vid] = ((width - row_w) // 2 + index * (NODE_W + GAP_X), y)
+                positions[vid] = ((0 if aligned else (width - row_w) // 2) + index * (NODE_W + GAP_X), y)
             y += NODE_H + GAP_Y
         height = y - GAP_Y
-        plans.append({"width": width, "height": height, "positions": positions, "onprem": {h: g for h, g in gateways.items() if g}, "title": by_id[hubs[0]]["name"], "count": len(group)})
+        plans.append({"width": width, "height": height, "positions": positions, "onprem": {h: g for h, g in gateways.items() if g}, "title": by_id[hubs[0]]["name"], "count": len(group),
+                      "tree": {"hub": hubs[0], "x": width // 2, "spokes": set(spokes)} if tree else None})
     if alone:
+        alone, hidden = keep(alone, limit)
+        if hidden:
+            alone = alone + ["more:alone"]
+            more["more:alone"] = {"hub": "", "count": hidden}
+            folded += hidden
         per_row = max(min(len(alone), PER_ROW), 1)
         width = per_row * (NODE_W + GAP_X) - GAP_X
         positions = {vid: ((i % per_row) * (NODE_W + GAP_X), (i // per_row) * (NODE_H + GAP_Y // 2)) for i, vid in enumerate(alone)}
@@ -174,6 +230,8 @@ def layout(vnets, devices, findings_for, selected=""):
         bands.append({"x": cursor_x, "y": label_y + 14, "text": "Not peered" if plan.get("alone") else f"{plan['title']} and {plan['count'] - 1} connected" if plan["count"] > 1 else plan["title"]})
         for vid, (x, y) in plan["positions"].items():
             placed[vid] = (cursor_x + x, cursor_y + LABEL_HEIGHT + y)
+        if plan.get("tree"):
+            trunks.update({(plan["tree"]["hub"], spoke): cursor_x + plan["tree"]["x"] for spoke in plan["tree"]["spokes"]})
         for hub, gateways in plan["onprem"].items():
             hx, hy = placed[hub]
             kinds = sorted({g.get("gatewayType") or "Gateway" for g in gateways})
@@ -185,6 +243,10 @@ def layout(vnets, devices, findings_for, selected=""):
     height = cursor_y + band_h + MARGIN
 
     for vid, (x, y) in placed.items():
+        if vid in more:
+            nodes.append({"id": "", "key": vid, "x": x, "y": y, "w": NODE_W, "h": NODE_H, "name": f"+{more[vid]['count']} more network(s)", "full": "More networks", "address": "Show all",
+                          "meta": "folded to keep the drawing readable", "badges": [], "severity": "", "findings": 0, "selected": False, "more": True})
+            continue
         vnet = by_id[vid]
         found = findings_for.get(vid, [])
         prefixes = vnet.get("prefixes") or []
@@ -197,9 +259,16 @@ def layout(vnets, devices, findings_for, selected=""):
         nodes.append({"id": "", "key": f"onprem:{hub}", "x": spec["x"], "y": spec["y"], "w": ONPREM_W, "h": ONPREM_H, "name": "On-premises", "full": "On-premises", "address": " + ".join(spec["kinds"]),
                       "meta": spec["status"], "badges": [], "severity": "", "findings": 0, "selected": False, "onprem": True})
         lines.append({"d": f"M {spec['x'] + ONPREM_W // 2} {spec['y'] + ONPREM_H} L {hx + NODE_W // 2} {hy}", "cls": "onprem", "label": "", "lx": 0, "ly": 0})
-    for edge in edges:
+    drawn = [e for e in edges if e["a"] in placed and e["b"] in placed]
+    drawn += [{"a": more[key]["hub"], "b": key, "ok": True, "transit": False, "more": True} for key in more if more[key]["hub"]]
+    for edge in drawn:
         (ax, ay), (bx, by) = placed[edge["a"]], placed[edge["b"]]
-        if ay == by:
+        trunk = trunks.get((edge["a"], edge["b"]), trunks.get((edge["b"], edge["a"])))
+        if trunk is not None:
+            (hx_, hy_), (sx_, sy_) = ((ax, ay), (bx, by)) if (edge["a"], edge["b"]) in trunks else ((bx, by), (ax, ay))
+            bus = sy_ - GAP_Y // 2
+            d, lx, ly = f"M {trunk} {hy_ + NODE_H} V {bus} H {sx_ + NODE_W // 2} V {sy_}", sx_ + NODE_W // 2, bus - 4
+        elif ay == by:
             left, right = sorted(((ax, ay), (bx, by)))
             if right[0] - left[0] <= NODE_W + GAP_X + 1:
                 d, lx, ly = f"M {left[0] + NODE_W} {ay + NODE_H // 2} L {right[0]} {by + NODE_H // 2}", (left[0] + NODE_W + right[0]) // 2, ay + NODE_H // 2 - 6
@@ -211,8 +280,9 @@ def layout(vnets, devices, findings_for, selected=""):
             x1, y1, x2, y2 = ux + NODE_W // 2, uy + NODE_H, lx_ + NODE_W // 2, ly_
             mid = (y1 + y2) // 2
             d, lx, ly = f"M {x1} {y1} C {x1} {mid} {x2} {mid} {x2} {y2}", (x1 + x2) // 2, mid - 4
-        lines.append({"d": d, "cls": "ok" if edge["ok"] else "broken", "label": "gateway transit" if edge["transit"] else "", "lx": lx, "ly": ly})
-    return {"width": max(total_w, 320), "height": max(height, 120), "nodes": nodes, "edges": lines, "bands": bands}
+        label = "gateway transit" if edge["transit"] and len(drawn) <= MAX_EDGE_LABELS else ""
+        lines.append({"d": d, "cls": "onprem" if edge.get("more") else "ok" if edge["ok"] else "broken", "label": label, "lx": lx, "ly": ly})
+    return {"width": max(total_w, 320), "height": max(height, 120), "nodes": nodes, "edges": lines, "bands": bands, "folded": folded}
 
 
 def subnet_rows(vnet):

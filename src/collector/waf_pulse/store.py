@@ -100,10 +100,27 @@ def save_resources(run_id, rows, truncated=False):
                            {"rows": rows[index:index + RESOURCE_CHUNK], "truncated": truncated})
 
 
+MAX_DOCUMENT_BYTES = 900_000   # a Cosmos DB item is limited to 2 MB; this leaves room for the envelope and for non ASCII text
+
+
+def split_rows(rows, chunk=RESOURCE_CHUNK, max_bytes=MAX_DOCUMENT_BYTES):
+    """Rows in groups of at most `chunk` rows and `max_bytes` of JSON, so a few very large rows cannot make a document too big."""
+    groups, current, size = [], [], 0
+    for row in rows:
+        row_bytes = len(json.dumps(row, ensure_ascii=False).encode("utf-8")) + 1
+        if current and (len(current) >= chunk or size + row_bytes > max_bytes):
+            groups.append(current)
+            current, size = [], 0
+        current.append(row)
+        size += row_bytes
+    groups.append(current)
+    return groups
+
+
 def save_rows(run_id, kind, rows, chunk=RESOURCE_CHUNK):
-    """Rows kept next to a run but apart from its summary (advice per resource, cost per resource), in chunks."""
-    for index in range(0, max(len(rows), 1), chunk):
-        _save_run_document(run_id, kind, f"{kind}:{index // chunk}", {"rows": rows[index:index + chunk]})
+    """Rows kept next to a run but apart from its summary (advice per resource, cost per resource), in chunks of rows and of bytes."""
+    for index, group in enumerate(split_rows(rows, chunk)):
+        _save_run_document(run_id, kind, f"{kind}:{index}", {"rows": group})
 
 
 def _save_run_document(run_id, kind, key, payload):
