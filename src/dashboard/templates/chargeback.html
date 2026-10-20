@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "_macros.html" import stacked_columns, azure_link %}
+{% block title %}Chargeback · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Chargeback</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not ctx %}
+      <section class="notice">There is no cost data yet. Run a refresh once the collector can read Cost Management (the Cost Management Reader role).</section>
+    {% else %}
+      <p class="muted">Who spent what, in amortized cost (commitments spread over their term), {{ ctx.currency }}. Use it to charge a team back or to show it its bill.</p>
+      {% if ctx.limited %}<p class="notice scope-note">Filters on a type, region or tag need a resource, so they do not apply to the totals of resource groups; the subscription, management group and resource group filters do.</p>{% endif %}
+
+      <nav class="tabs" aria-label="Chargeback views">
+        <a class="tab{% if ctx.view == 'hierarchy' %} active{% endif %}" href="{{ url_for('chargeback_page', view='hierarchy', month=ctx.period) }}"{% if ctx.view == 'hierarchy' %} aria-current="page"{% endif %}>Subscriptions and resource groups</a>
+        <a class="tab{% if ctx.view == 'tag' %} active{% endif %}" href="{{ url_for('chargeback_page', view='tag', month=ctx.period) }}"{% if ctx.view == 'tag' %} aria-current="page"{% endif %}>By tag</a>
+      </nav>
+
+      <form class="filterbar" method="get" action="{{ url_for('chargeback_page') }}">
+        <input type="hidden" name="view" value="{{ ctx.view }}">
+        <label class="muted" for="cb-month">Period</label>
+        <select id="cb-month" name="month" onchange="this.form.submit()">
+          {% for m in ctx.months|reverse %}<option value="{{ m }}"{% if m == ctx.period %} selected{% endif %}>{{ m }}{% if m >= ctx.current %} (in progress){% endif %}</option>{% endfor %}
+          <option value="all"{% if ctx.period == 'all' %} selected{% endif %}>All {{ ctx.months|length }} months</option>
+        </select>
+        {% if ctx.view == 'tag' and ctx.tag_keys %}
+          <label class="muted" for="cb-key">Tag</label>
+          <select id="cb-key" name="key" onchange="this.form.submit()">
+            {% for k in ctx.tag_keys %}<option value="{{ k }}"{% if k == ctx.key %} selected{% endif %}>{{ k }}</option>{% endfor %}
+          </select>
+        {% endif %}
+        <noscript><button type="submit">Show</button></noscript>
+        <a class="chip" href="{{ url_for('chargeback_csv', view=ctx.view, month=ctx.period, key=ctx.key) }}">Download CSV</a>
+      </form>
+
+      {% if ctx.chart %}
+        <section class="panel">
+          <h3>Monthly cost by {{ 'value of ' ~ ctx.key if ctx.view == 'tag' else 'subscription' }}</h3>
+          {{ stacked_columns(ctx.chart, "Monthly cost") }}
+        </section>
+      {% endif %}
+
+      {% if ctx.view == 'tag' %}
+        {% if not ctx.tag_keys %}
+          <section class="notice">No tag cost was collected. The collector picks the tag keys with few distinct values (a cost center, an owner) from your resources; set <code>COST_TAG_KEYS</code> on the function app (for example <code>CostCenter,Owner</code>) to choose them yourself.</section>
+        {% elif ctx.tags %}
+          <section class="cards compact">
+            <div class="card na"><span class="card-title">Cost in {{ ctx.period }}</span><span class="card-score">{{ '{:,.0f}'.format(ctx.tags.total) }}</span><span class="muted">{{ ctx.currency }} · tag <code>{{ ctx.key }}</code></span></div>
+            <div class="card {% if ctx.tags.untaggedPercent is none %}na{% elif ctx.tags.untaggedPercent > 30 %}bad{% elif ctx.tags.untaggedPercent > 10 %}warn{% else %}good{% endif %}">
+              <span class="card-title">Without this tag</span>
+              <span class="card-score">{{ ctx.tags.untaggedPercent if ctx.tags.untaggedPercent is not none else 'n/a' }}{% if ctx.tags.untaggedPercent is not none %}%{% endif %}</span>
+              <span class="muted">{{ '{:,.0f}'.format(ctx.tags.untagged) }} {{ ctx.currency }} nobody can be charged for</span>
+            </div>
+          </section>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>{{ ctx.key }}</th><th>Cost ({{ ctx.currency }})</th><th>Share</th></tr></thead>
+              <tbody>
+                {% for v in ctx.tags.entries %}
+                  <tr{% if v.untagged %} class="muted"{% endif %}>
+                    <td>{% if v.untagged %}<span class="chip">{{ v.value }}</span>{% else %}{{ v.value }}{% endif %}</td>
+                    <td>{{ '{:,.0f}'.format(v.cost) }}</td><td>{{ v.share }}%</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <section class="notice">No cost for this tag in {{ ctx.period }}.</section>
+        {% endif %}
+      {% else %}
+        {% if not ctx.have_rows %}
+          <section class="notice">This run has no cost per resource group yet. Refresh to collect it.</section>
+        {% elif ctx.subs %}
+          <p class="muted">Resource groups show their cost in {{ ctx.period }}. The resources listed under a group are its most expensive ones in the last 30 days.</p>
+          {% for s in ctx.subs %}
+            <section class="panel">
+              <h3>{{ s.name }} <span class="muted">· {{ '{:,.0f}'.format(s.total) }} {{ ctx.currency }} · {{ s.share }}%</span></h3>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Resource group</th><th>Cost ({{ ctx.currency }})</th><th>Share</th></tr></thead>
+                  <tbody>
+                    {% for g in s.groups %}
+                      <tr>
+                        <td>
+                          {% if g.resources %}
+                            <details><summary>{{ g.rg or '(not in a resource group)' }}</summary>
+                              <ul class="plain">
+                                {% for r in g.resources %}
+                                  <li><a href="{{ url_for('resource_page', id=r.id) }}">{{ r.name }}</a> <span class="muted">{{ '{:,.0f}'.format(r.cost) }} · 30 days</span> {{ azure_link(r.id, 'Azure') }}</li>
+                                {% endfor %}
+                              </ul>
+                            </details>
+                          {% else %}{{ g.rg or '(not in a resource group)' }}{% endif %}
+                        </td>
+                        <td>{{ '{:,.0f}'.format(g.total) }}</td><td>{{ g.share }}%</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          {% endfor %}
+        {% else %}
+          <section class="notice">Nothing to show in {{ ctx.period }} for the current filters.</section>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+{% endblock %}

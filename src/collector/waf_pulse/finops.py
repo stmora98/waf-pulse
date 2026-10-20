@@ -466,9 +466,11 @@ def collect(credential, run_id, subscription_ids, now=None):
 
         scopes = ([f"/providers/Microsoft.Management/managementGroups/{tenant_id}"] if mode == "tenant"
                   else [f"/subscriptions/{sub}" for sub, item in results.items() if item.get("costStatus") == "ok"])
-        resource_costs = []
+        resource_costs, extras = [], {}
         try:
-            section, partial = spend.collect(token, scopes, now, _now() + BREAKDOWN_BUDGET_SECONDS, _now, costs=resource_costs)
+            tag_keys = spend.discover_tag_keys(credential, subscription_ids, os.environ.get("COST_TAG_KEYS", ""))
+            section, partial = spend.collect(token, scopes, now, _now() + BREAKDOWN_BUDGET_SECONDS, _now, costs=resource_costs,
+                                             tag_keys=tag_keys, extras=extras)
         except Exception:
             logging.exception("Cost breakdowns could not be read")
             section, partial = {}, True
@@ -478,4 +480,6 @@ def collect(credential, run_id, subscription_ids, now=None):
             findings.extend(extra_findings)
             stats.extend(extra_stats)
         dataset["resourceCosts"] = resource_costs  # kept apart from the summary by the activity
+        dataset["chargebackRows"] = extras.get("chargeback", [])
+        dataset["tagCostRows"] = extras.get("tagCosts", [])
     return findings, stats, dataset, errors

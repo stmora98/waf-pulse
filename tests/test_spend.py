@@ -82,7 +82,7 @@ def test_finops_collect_stores_the_breakdowns_next_to_the_totals(monkeypatch):
     monkeypatch.setattr(finops, "fetch_budgets", lambda *a: ("ok", []))
     seen = {}
 
-    def fake_collect(token, scopes, now, deadline, clock, costs=None):
+    def fake_collect(token, scopes, now, deadline, clock, costs=None, **kwargs):
         seen["scopes"] = scopes
         costs.append({"id": "/s/x", "cost": 4.0})
         return {"byService": {"series": ["S"], "periods": [month], "values": {"S": {month: 5.0}}}}, False

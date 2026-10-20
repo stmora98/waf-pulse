@@ -11,6 +11,7 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, url_for
 from werkzeug.exceptions import HTTPException
 
+import chargeback
 import charts
 import cost_view
 import data
@@ -1225,6 +1226,69 @@ def suppressions_page():
     entries = sorted(_suppressions(), key=lambda e: (bool(e["until"]) and e["until"] < today, e["ruleId"], e["resourceName"]))
     rows = [{**e, "expired": bool(e["until"]) and e["until"] < today} for e in entries]
     return render_template("suppressions.html", error=None, entries=rows, summary=summary, durations=suppress.DURATIONS)
+
+
+CHARGEBACK_VIEWS = ("hierarchy", "tag")
+
+
+def _chargeback_context(summary):
+    """What the Chargeback page and its CSV show, or None when the run has no cost data. The view is the subscriptions and resource
+    groups or one tag; the period is a month or all of them."""
+    finops = (summary or {}).get("finops") or {}
+    if not finops or not (finops.get("breakdowns") or finops.get("months")):
+        return None
+    run_id = summary["runId"]
+    rows, tags = data.rows_of(run_id, "chargeback"), data.rows_of(run_id, "tagcosts")
+    chosen = _resolved(summary)
+    view = _allowed(request.args.get("view"), CHARGEBACK_VIEWS) or "hierarchy"
+    months = chargeback.months_of(rows or tags)
+    current = datetime.now(timezone.utc).strftime("%Y-%m")
+    period = chargeback.pick_period(months, request.args.get("month"), current)
+    names = {sub["id"].lower(): sub["name"] for sub in summary.get("subscriptions", [])}
+    keys = chargeback.tag_keys(tags)
+    key = request.args.get("key") if request.args.get("key") in keys else (keys[0] if keys else None)
+    context = {"finops": finops, "view": view, "months": months, "period": period, "current": current, "currency": finops.get("currency", ""),
+               "tag_keys": keys, "key": key, "have_rows": bool(rows), "limited": chargeback.limited(chosen), "names": names}
+    if view == "tag":
+        context["tags"] = chargeback.tag_values([r for r in tags if r["key"] == key], key, chosen, period) if key else None
+        visible = [r for r in tags if r["key"] == key and chosen.sub_ok(r["sub"])]
+        context["chart"] = cost_view.stacked_columns(chargeback.matrix(visible, lambda r: r["value"] or chargeback.UNTAGGED, months), partial_from=current) if visible else None
+    else:
+        costs = [c for c in data.rows_of(run_id, "costs") if chosen.row_ok(c)]
+        context["subs"] = chargeback.hierarchy(rows, chosen, names, period, costs)
+        visible = [r for r in rows if chargeback.group_ok(chosen, r["sub"], r["rg"])]
+        context["chart"] = cost_view.stacked_columns(chargeback.matrix(visible, lambda r: names.get(r["sub"], r["sub"]), months), partial_from=current) if visible else None
+    return context
+
+
+@app.get("/chargeback")
+def chargeback_page():
+    try:
+        _, summary = _latest()
+        context = _chargeback_context(summary) if summary else None
+    except Exception:
+        logging.exception("Could not load the chargeback data")
+        return render_template("chargeback.html", error="The data store is not reachable right now.", ctx=None, summary=None), 503
+    return render_template("chargeback.html", error=None, ctx=context, summary=summary)
+
+
+@app.get("/chargeback.csv")
+def chargeback_csv():
+    try:
+        _, summary = _latest()
+        context = _chargeback_context(summary) if summary else None
+    except Exception:
+        logging.exception("Could not load the chargeback data")
+        abort(503)
+    if not context:
+        abort(404)
+    if context["view"] == "tag":
+        if not context.get("tags"):
+            abort(404)
+        header, rows = chargeback.tag_csv(context["tags"], context["key"], context["period"])
+        return _csv(f"waf-pulse-cost-by-tag-{context['period']}.csv", header, rows)
+    header, rows = chargeback.hierarchy_csv(context["subs"], context["period"])
+    return _csv(f"waf-pulse-chargeback-{context['period']}.csv", header, rows)
 
 
 STALE_RUN_MINUTES = 20

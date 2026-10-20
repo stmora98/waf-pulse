@@ -43,6 +43,7 @@
         {% endfor %}
         <p class="side-group">Optimize</p>
         {{ link('rightsizing_page', 'Right-sizing', 'rightsizing', request.endpoint == 'rightsizing_page') }}
+        {{ link('chargeback_page', 'Chargeback', 'cost', request.endpoint == 'chargeback_page') }}
         <p class="side-group">Manage</p>
         {{ link('resources_page', 'Resources', 'resources', request.endpoint in ('resources_page', 'resource_page')) }}
         {{ link('governance_page', 'Governance', 'governance', request.endpoint == 'governance_page') }}

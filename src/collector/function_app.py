@@ -248,6 +248,8 @@ def act_finops(payload: dict):
         store.save_findings(findings)
         store.save_stats(run_id, "finops", {"stats": stats, "errors": errors})
         store.save_rows(run_id, "costs", dataset.pop("resourceCosts", []))
+        store.save_rows(run_id, "chargeback", dataset.pop("chargebackRows", []))
+        store.save_rows(run_id, "tagcosts", dataset.pop("tagCostRows", []))
         store.save_dataset(run_id, "finops", dataset)
         return {"key": "finops", "findings": len(findings)}
     except Exception as exc:

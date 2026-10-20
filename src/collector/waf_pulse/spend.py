@@ -28,7 +28,17 @@ QUERIES = {
     "pricing": ("Monthly", ("PricingModel",), None),
     "benefits": ("Monthly", ("BenefitName", "ChargeType"), None),
     "resources": ("None", ("ResourceId",), RESOURCE_DAYS),
+    "subGroup": ("Monthly", ("SubscriptionId", "ResourceGroupName"), None),
 }
+TAG_PREFIX = "tag:"
+TAG_DIMENSIONS = ("TagKey", "TagValue", "SubscriptionId")
+MAX_TAG_KEYS = 6
+MAX_TAG_VALUES = 40
+MAX_CHARGEBACK = 600
+OTHER_VALUES = "(other values)"
+# Tag keys that usually carry a cost owner, tried before the rest.
+ALLOCATION_KEYS = ("costcenter", "cost-center", "cost_center", "businessunit", "business-unit", "department", "team", "owner",
+                   "project", "application", "app", "workload", "environment", "env")
 
 
 def parse_grouped(properties, dimensions):
@@ -59,7 +69,19 @@ def parse_grouped(properties, dimensions):
     return rows
 
 
+def tag_body(now, key):
+    """Monthly amortized cost per value of one tag and per subscription. Cost without the tag comes back with a null TagValue."""
+    body = finops.query_body(now, kind="AmortizedCost", granularity="Monthly", grouping=())
+    body["dataset"]["grouping"] = [{"type": "TagKey", "name": key}, {"type": "Dimension", "name": "SubscriptionId"}]
+    return body
+
+
 def fetch(token, scope, name, now):
+    if name.startswith(TAG_PREFIX):
+        status, pages = finops._query(token, scope, tag_body(now, name[len(TAG_PREFIX):]))
+        if status != "ok":
+            return None
+        return [row for page in pages for row in parse_grouped(page, TAG_DIMENSIONS)]
     granularity, grouping, days = QUERIES[name]
     body = finops.query_body(now, kind="AmortizedCost", granularity=granularity, grouping=grouping, days=days)
     status, pages = finops._query(token, scope, body)
@@ -149,6 +171,59 @@ def commitment_utilization(rows, now):
     return result[:30]
 
 
+def discover_tag_keys(credential, subscriptions, override=""):
+    """The tag keys worth a cost allocation view: those in COST_TAG_KEYS (comma separated) when set, else the keys with few distinct
+    values (an owner or a cost center, not a timestamp), the usual allocation keys first. Empty when Resource Graph cannot be read."""
+    wanted = [key.strip() for key in (override or "").split(",") if key.strip()]
+    if wanted:
+        return wanted[:MAX_TAG_KEYS]
+    from . import graph
+
+    kql = ("resources | where isnotempty(tags) | extend k = bag_keys(tags) | mv-expand k to typeof(string) "
+           "| extend v = tostring(tags[k]) | summarize resources = count(), distinctValues = dcount(v) by k "
+           "| where distinctValues <= 60 | top 40 by resources desc")
+    try:
+        rows = graph.query(credential, list(subscriptions), kql, max_rows=60)
+    except Exception:
+        return []
+    keys = [(str(row.get("k") or ""), int(row.get("resources") or 0)) for row in rows if row.get("k")]
+    keys.sort(key=lambda item: (ALLOCATION_KEYS.index(item[0].lower()) if item[0].lower() in ALLOCATION_KEYS else len(ALLOCATION_KEYS), -item[1]))
+    return [key for key, _ in keys[:MAX_TAG_KEYS]]
+
+
+def chargeback_rows(rows):
+    """What each resource group cost per month: [{sub, rg, months: {month: cost}}], the most expensive first. Cost that belongs to
+    no resource group (marketplace, support) comes with an empty rg."""
+    merged = {}
+    for row in rows:
+        sub = row.get("SubscriptionId", "").lower()
+        key = (sub, row.get("ResourceGroupName", "").lower())
+        entry = merged.setdefault(key, {"sub": sub, "rg": row.get("ResourceGroupName", ""), "months": defaultdict(float)})
+        entry["months"][monthly(row)] += row["cost"]
+    result = [{"sub": e["sub"], "rg": e["rg"], "months": {m: round(c, 2) for m, c in sorted(e["months"].items()) if m}} for e in merged.values()]
+    result = [r for r in result if any(c for c in r["months"].values())]
+    result.sort(key=lambda r: -sum(r["months"].values()))
+    return result[:MAX_CHARGEBACK]
+
+
+def tag_rows(key, rows):
+    """Cost per value of one tag, per subscription and month: [{key, value, sub, months}]. The values beyond the biggest
+    MAX_TAG_VALUES are added up as "(other values)" per subscription; an empty value is cost without the tag."""
+    totals = defaultdict(float)
+    for row in rows:
+        totals[row.get("TagValue", "")] += row["cost"]
+    keep = {value for value, _ in sorted(totals.items(), key=lambda item: -item[1])[:MAX_TAG_VALUES]}
+    merged = {}
+    for row in rows:
+        value = row.get("TagValue", "")
+        value = value if value in keep else OTHER_VALUES
+        sub = row.get("SubscriptionId", "").lower()
+        entry = merged.setdefault((value.lower(), sub), {"key": key, "value": value, "sub": sub, "months": defaultdict(float)})
+        entry["months"][monthly(row)] += row["cost"]
+    result = [{**e, "months": {m: round(c, 2) for m, c in sorted(e["months"].items()) if m}} for e in merged.values()]
+    return [r for r in result if any(c for c in r["months"].values())]
+
+
 def top_resources(rows):
     totals = defaultdict(float)
     for row in rows:
@@ -189,13 +264,18 @@ def build(raw, now):
         out["commitmentUtilization"] = commitment_utilization(raw["benefits"], now)
     if raw.get("resources"):
         out["topResources"] = top_resources(raw["resources"])
+    tag_keys = [name[len(TAG_PREFIX):] for name, rows in raw.items() if name.startswith(TAG_PREFIX) and rows]
+    if tag_keys:
+        out["tagKeys"] = tag_keys
     return out
 
 
-def collect(token, scopes, now, deadline, clock=time.monotonic, costs=None):
+def collect(token, scopes, now, deadline, clock=time.monotonic, costs=None, tag_keys=(), extras=None):
     """scopes: one tenant scope, or one scope per subscription. Rows of the same query are added together.
+    `tag_keys` adds one cost query per tag key; `extras` receives the rows kept apart from the summary (chargeback, tagCosts).
     Returns (section, partial) where partial says some scope could not be read within the time budget."""
-    raw, partial = {name: None for name in QUERIES}, False
+    names = [*QUERIES, *(TAG_PREFIX + key for key in tag_keys)]
+    raw, partial = {name: None for name in names}, False
 
     def run(job):
         scope, name = job
@@ -206,7 +286,7 @@ def collect(token, scopes, now, deadline, clock=time.monotonic, costs=None):
         except Exception:
             return name, None, False
 
-    jobs = [(scope, name) for scope in scopes for name in QUERIES]
+    jobs = [(scope, name) for scope in scopes for name in names]
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         for name, rows, skipped in pool.map(run, jobs):
             partial = partial or skipped or rows is None
@@ -214,4 +294,7 @@ def collect(token, scopes, now, deadline, clock=time.monotonic, costs=None):
                 raw[name] = (raw[name] or []) + rows
     if costs is not None and raw.get("resources"):
         costs.extend(resource_costs(raw["resources"]))
+    if extras is not None:
+        extras["chargeback"] = chargeback_rows(raw["subGroup"]) if raw.get("subGroup") else []
+        extras["tagCosts"] = [row for key in tag_keys if raw.get(TAG_PREFIX + key) for row in tag_rows(key, raw[TAG_PREFIX + key])]
     return build(raw, now), partial
