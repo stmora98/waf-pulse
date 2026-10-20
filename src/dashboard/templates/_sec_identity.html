@@ -1,0 +1,82 @@
+<h3 class="spend">Identity</h3>
+{% set e = summary.entra if summary and summary.entra else None %}
+{% if scope_active %}<p class="muted">Identity is about the whole tenant: the filters do not apply to it.</p>{% endif %}
+{% if not e %}
+  <section class="notice">No identity data yet. It comes from Microsoft Graph, with optional application permissions on the collector's app registration (see the README).</section>
+{% else %}
+  {% set av = e.available or {} %}{% set perm = e.permissions or {} %}
+  {% macro unavailable(key, extra='') %}<p class="muted">Not available. Grant the Microsoft Graph application permission <strong>{{ perm.get(key, key) }}</strong> to the collector.{{ extra }}</p>{% endmacro %}
+  <section class="cards compact">
+    {% if av.policies and e.policies %}
+      <div class="card {{ 'good' if e.policies.mfaAllUsers and e.policies.legacyBlocked else 'bad' if not e.policies.securityDefaults and not e.policies.mfaAllUsers else 'warn' }}">
+        <span class="card-title">Conditional Access</span><span class="card-score">{{ e.policies.enabled }}</span>
+        <span class="muted">of {{ e.policies.total }} policies enabled{% if e.policies.securityDefaults %} · security defaults on{% endif %}</span>
+      </div>
+    {% endif %}
+    {% if av.roles and e.roles %}
+      <div class="card {{ 'bad' if e.roles.globalAdministrators > 5 else 'good' }}"><span class="card-title">Global Administrators</span><span class="card-score">{{ e.roles.globalAdministrators }}</span><span class="muted">{{ e.roles.privilegedAssignments }} privileged assignments</span></div>
+    {% endif %}
+    {% if av.mfa and e.mfa %}
+      <div class="card {{ 'good' if e.mfa.registeredPercent is not none and e.mfa.registeredPercent >= 95 else 'warn' }}"><span class="card-title">MFA registered</span><span class="card-score">{{ e.mfa.registeredPercent if e.mfa.registeredPercent is not none else 'n/a' }}{% if e.mfa.registeredPercent is not none %}%{% endif %}</span><span class="muted">{{ e.mfa.withoutMfa }} of {{ e.mfa.members }} members without{% if e.mfa.adminsWithoutMfa %} · {{ e.mfa.adminsWithoutMfa }} admin(s){% endif %}</span></div>
+    {% endif %}
+    {% if av.risky and e.risky %}
+      <div class="card {{ 'bad' if e.risky.atRisk else 'good' }}"><span class="card-title">Users at risk</span><span class="card-score">{{ e.risky.atRisk }}</span><span class="muted">Entra ID Protection</span></div>
+    {% endif %}
+    {% if av.recommendations and e.recommendations %}
+      <div class="card {{ 'warn' if e.recommendations.active else 'good' }}"><span class="card-title">Entra recommendations</span><span class="card-score">{{ e.recommendations.active }}</span><span class="muted">active</span></div>
+    {% endif %}
+  </section>
+
+  <section class="insights two">
+    <div class="panel">
+      <h3>Conditional Access</h3>
+      {% if av.policies and e.policies %}
+        <ul class="plain">
+          <li>{{ 'Covered' if e.policies.securityDefaults or e.policies.mfaAllUsers else 'Missing' }}: MFA for all users{% if e.policies.securityDefaults %} <span class="muted">(security defaults)</span>{% endif %}</li>
+          <li>{{ 'Covered' if e.policies.securityDefaults or e.policies.mfaAdmins or e.policies.mfaAllUsers else 'Missing' }}: MFA for administrators</li>
+          <li>{{ 'Covered' if e.policies.securityDefaults or e.policies.legacyBlocked else 'Missing' }}: legacy authentication blocked</li>
+          <li>{{ e.policies.reportOnly }} in report-only mode · {{ e.policies.disabled }} disabled</li>
+        </ul>
+        {% if e.policies.policies %}
+          <div class="table-wrap"><table class="narrow"><thead><tr><th>Policy</th><th>State</th></tr></thead>
+            <tbody>{% for p in e.policies.policies %}<tr><td>{{ p.name }}</td><td><span class="chip {{ 'as-right' if p.state == 'enabled' else 'as-under' }}">{{ {'enabled': 'Enabled', 'disabled': 'Disabled', 'enabledForReportingButNotEnforced': 'Report-only'}.get(p.state, p.state) }}</span></td></tr>{% endfor %}</tbody></table></div>
+        {% endif %}
+      {% else %}{{ unavailable('policies') }}{% endif %}
+    </div>
+    <div class="panel">
+      <h3>Privileged roles</h3>
+      {% if av.roles and e.roles %}
+        <p class="muted">Active assignments of the most powerful directory roles.{% if e.roles.eligibleAssignments is none %} PIM eligibility could not be read (it needs Entra ID P2 and <strong>{{ perm.get('eligible', '') }}</strong>).{% else %} {{ e.roles.eligibleAssignments }} eligible through PIM.{% endif %}</p>
+        <ul class="plain">{% for role, count in e.roles.byRole.items() %}<li>{{ role }} <span class="muted">· {{ count }}</span></li>{% endfor %}</ul>
+        {% if e.roles.guests or e.roles.servicePrincipals %}<p>{% if e.roles.guests %}<span class="chip high">{{ e.roles.guests }} guest(s)</span> {% endif %}{% if e.roles.servicePrincipals %}<span class="chip medium">{{ e.roles.servicePrincipals }} service principal(s)</span>{% endif %}</p>{% endif %}
+        {% if e.roles.assignments %}
+          <div class="table-wrap"><table class="narrow"><thead><tr><th>Who</th><th>Role</th><th>Type</th></tr></thead>
+            <tbody>{% for a in e.roles.assignments %}<tr><td>{{ a.name }}</td><td>{{ a.role }}</td><td class="muted">{{ 'Guest' if a.guest else 'Service principal' if a.kind.endswith('servicePrincipal') else 'Group' if a.kind.endswith('group') else 'User' }}</td></tr>{% endfor %}</tbody></table></div>
+        {% endif %}
+      {% else %}{{ unavailable('roles') }}{% endif %}
+    </div>
+  </section>
+
+  <section class="insights two">
+    <div class="panel">
+      <h3>Multifactor authentication</h3>
+      {% if av.mfa and e.mfa %}
+        <p class="big">{{ e.mfa.registeredPercent if e.mfa.registeredPercent is not none else 'n/a' }}{% if e.mfa.registeredPercent is not none %}%{% endif %}</p>
+        <p class="muted">{{ e.mfa.members - e.mfa.withoutMfa }} of {{ e.mfa.members }} member users have an MFA method registered.</p>
+        {% if e.mfa.adminsWithout %}<h4>Administrators without MFA</h4><ul class="plain">{% for a in e.mfa.adminsWithout %}<li>{{ a.name }} <span class="muted">· {{ a.upn }}</span></li>{% endfor %}</ul>{% endif %}
+      {% else %}{{ unavailable('mfa', ' It also needs Microsoft Entra ID P1.') }}{% endif %}
+    </div>
+    <div class="panel">
+      <h3>Entra ID Protection and recommendations</h3>
+      {% if av.risky and e.risky %}
+        <p>{{ e.risky.atRisk }} user(s) at risk{% for level, count in e.risky.byLevel.items() %} · {{ count }} {{ level }}{% endfor %}</p>
+        {% if e.risky.users %}<ul class="plain">{% for u in e.risky.users[:10] %}<li>{{ u.name }} <span class="chip {{ u.level }}">{{ u.level }}</span></li>{% endfor %}</ul>{% endif %}
+      {% else %}{{ unavailable('risky', ' It also needs Microsoft Entra ID P2.') }}{% endif %}
+      {% if av.recommendations and e.recommendations %}
+        <h4>Active recommendations</h4>
+        {% if e.recommendations.items %}<ul class="plain">{% for r in e.recommendations['items'] %}<li>{{ r.name }} <span class="chip {{ r.priority }}">{{ r.priority }}</span></li>{% endfor %}</ul>{% else %}<p class="muted">None.</p>{% endif %}
+      {% else %}{{ unavailable('recommendations') }}{% endif %}
+    </div>
+  </section>
+  <p class="muted">The findings behind these cards are in <a href="{{ url_for('actions_page', pillar='Security', source='entra') }}">Action items</a>.</p>
+{% endif %}

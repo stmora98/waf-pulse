@@ -18,6 +18,7 @@ import governance_view
 import history
 import insights
 import landing_zone
+import priority
 import scope
 import security_view
 import suppress
@@ -255,8 +256,22 @@ def index():
         resource_chart=charts.hbars([(name, count, url_for("resource_page", id=resource_id))
                                      for name, resource_id, count in insights.worst_resources(findings, 8)]),
         action_items=len(rules), high_items=sum(1 for r in rules if r["severity"] in ("critical", "high")),
-        data_sources=_data_sources(summary or {}),
+        data_sources=_data_sources(summary or {}), fix_first=_fix_first(summary, rules, findings),
+        trend=_trend(),
     )
+
+
+def _trend(pillar=None):
+    """The score trend of the last runs (the whole tenant: scores of past runs are not available for the filters), or None."""
+    try:
+        runs = data.history(30)
+    except Exception:
+        logging.exception("Could not load the run history")
+        return None
+    result = history.trend(runs)
+    if pillar:
+        result["series"] = [s for s in result["series"] if s["pillar"] == pillar]
+    return result if result["runs"] > 1 else None
 
 
 @app.get("/actions")
@@ -315,7 +330,8 @@ def pillar_page(slug):
         except Exception:
             logging.exception("Could not read the spend of the filtered resources")
     return render_template(
-        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, tab=tab, security_tabs=security_view.SECURITY_TABS, **spend,
+        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, tab=tab,
+        fix_first=_fix_first(summary, rules, findings, pillar, 8) if summary else [], trend=_trend(pillar), security_tabs=security_view.SECURITY_TABS, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("affected_page", pillar=pillar, source=name))
@@ -364,6 +380,28 @@ def _scoped_spend(summary):
             "top": sorted(kept, key=lambda r: -r["cost"])[:SCOPED_SPEND_ROWS], "names": names}
 
 
+def _fix_first(summary, rules, findings, pillar=None, limit=10):
+    """The rules to fix first for the filters, with the points of score each would give. Empty when the run has no rule statistics."""
+    try:
+        rulestats = data.rows_of(summary["runId"], "rulestats")
+    except Exception:
+        logging.exception("Could not read the rule statistics")
+        return []
+    if not rulestats:
+        return []
+    chosen = _resolved(summary)
+    stats = scope.scoped_stats(rulestats, chosen, findings if chosen.resource_level else None)
+    exposed = set()
+    try:
+        for row in data.rows_of(summary["runId"], "secrows"):
+            if row.get("t") == "exposed" or (row.get("t") == "nsgrule" and security_view.port_class(row.get("ports"))):
+                exposed.add(str(row.get("id", "")).lower())
+    except Exception:
+        logging.exception("Could not read the exposure rows")
+    return priority.fix_first([{"ruleId": s["ruleId"], "pillar": s["pillar"], "severity": s["severity"], "affected": s["affected"], "applicable": s["applicable"]} for s in stats],
+                              rules, findings, exposed, pillar, limit)
+
+
 def _security_rows(summary):
     """The security rows the collector kept, for the filters (rows of a resource follow every filter, the rest only the subscription ones)."""
     try:
@@ -381,6 +419,15 @@ def _security_tab_context(summary, tab):
     rows, ok = _security_rows(summary)
     names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
     security = (summary or {}).get("security") or {}
+    if tab == "access":
+        try:
+            rows, ok = data.rows_of(summary["runId"], "accrows"), True
+            chosen = _resolved(summary)
+            if chosen.active:
+                rows = [r for r in rows if (chosen.row_ok(r) if r.get("id") else chosen.sub_row_ok(r))]
+        except Exception:
+            logging.exception("Could not read the access rows")
+            rows, ok = [], False
     context = {"sec_tab": tab, "sec_ok": ok, "sec_names": names, "sec_data": security, "sec_name_of": security_view.name_of}
     if tab == "vulnerabilities":
         context["vuln"] = security_view.vulnerabilities(rows)
@@ -388,6 +435,9 @@ def _security_tab_context(summary, tab):
         context["expo"] = security_view.exposure(rows)
     elif tab == "alerts":
         context["alerts"] = security_view.alerts(rows)
+    elif tab == "access":
+        context["acc"] = security_view.access(rows)
+        context["acc_data"] = (summary or {}).get("access") or {}
     elif tab == "compliance":
         context["comp"] = security_view.compliance(rows)
     elif tab == "changes":

@@ -91,5 +91,5 @@ def test_collect_keeps_the_parts_that_are_allowed(monkeypatch):
     monkeypatch.setattr(entra.rest, "get", fake_get)
     findings, stats, dataset, errors = entra.collect(Cred(), "r1", now=NOW)
     assert [f["ruleId"] for f in findings] == ["OPS-APP-002"] and errors == []
-    assert dataset["available"] == {"apps": True, "guests": False, "incidents": False}
+    assert dataset["available"] == {"apps": True, "guests": False, "incidents": False, "policies": False, "roles": False, "mfa": False, "risky": False, "recommendations": False}
     assert "guests" not in dataset and dataset["permissions"]["guests"] == "User.Read.All"

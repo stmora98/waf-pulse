@@ -16,7 +16,7 @@ import azure.durable_functions as df
 import azure.functions as func
 
 from waf_pulse import (
-    advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, lifecycle, metrics,
+    access, advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, lifecycle, metrics,
     security, store, suppress,
 )
 
@@ -84,6 +84,7 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_keyvault", scope))
             tasks.append(context.call_activity("act_lifecycle", scope))
             tasks.append(context.call_activity("act_security", scope))
+            tasks.append(context.call_activity("act_access", scope))
             tasks.append(context.call_activity("act_entra", scope))
         yield context.task_all(tasks)
 
@@ -265,6 +266,22 @@ def act_diagnostics(payload: dict):
         return {"key": "diagnostics", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "diagnostics", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_access(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, rows, errors = access.collect(
+            credentials.collector_credential(), run_id, payload["subscriptions"], datetime.now(timezone.utc).date().isoformat()
+        )
+        store.save_findings(findings)
+        store.save_stats(run_id, "access", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "access", dataset)
+        store.save_rows(run_id, "accrows", rows, chunk=250)
+        return {"key": "access", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "access", exc)
 
 
 @app.activity_trigger(input_name="payload")

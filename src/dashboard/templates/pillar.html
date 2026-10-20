@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import hbar_chart %}
+{% from "_macros.html" import hbar_chart, fix_first_table, score_trend %}
 {% block title %}{{ pillar }} · WAF Pulse{% endblock %}
 {% block content %}
     <h2>{{ pillar }}</h2>
@@ -27,6 +27,10 @@
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
 
       {% if slug == 'security' %}{% include "_sec_nav.html" %}{% endif %}
+      {% if slug != 'security' or tab == 'posture' %}
+        {{ fix_first_table(fix_first, false) }}
+        {{ score_trend(trend, pillar ~ ' score over time') }}
+      {% endif %}
       {% if slug == 'security' and tab != 'posture' %}
         {% include "_sec_" ~ tab ~ ".html" %}
       {% else %}

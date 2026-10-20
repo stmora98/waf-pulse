@@ -1,0 +1,60 @@
+{% from "_macros.html" import azure_link %}
+{% set rd = acc_data.rbac if acc_data and acc_data.rbac else None %}
+<section class="cards compact">
+  <div class="card {{ 'warn' if acc.flagged else 'good' }}"><span class="card-title">Flagged role assignments</span><span class="card-score">{{ acc.flagged }}</span><span class="muted">powerful roles given to users or applications at subscription or group scope</span></div>
+  <div class="card na"><span class="card-title">Subscription owners</span><span class="card-score">{{ acc.owners }}</span><span class="muted">Owner assignments at subscription scope</span></div>
+  <div class="card {{ 'bad' if acc.noncompliant else 'good' }}"><span class="card-title">Non-compliant resources</span><span class="card-score">{{ acc.noncompliant | length }}</span><span class="muted">against the policy assignments</span></div>
+  <div class="card {{ 'warn' if acc.expired else 'na' }}"><span class="card-title">Expired exemptions</span><span class="card-score">{{ acc.expired }}</span><span class="muted">of {{ acc.exemptions | length }} policy exemptions</span></div>
+</section>
+{% if not sec_ok %}
+  <section class="notice error">The access data could not be read right now.</section>
+{% elif not acc.rbac and not acc.assignments and not acc.exemptions and not acc.noncompliant %}
+  <section class="notice">No access or policy data{% if scope_active %} for the filters{% endif %}.</section>
+{% endif %}
+{% if acc.rbac %}
+  <section class="panel">
+    <h3>Powerful role assignments</h3>
+    <p class="muted">Owner, User Access Administrator, Role Based Access Control Administrator and Contributor. Resource Graph has object ids, not names: look an id up in Microsoft Entra.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Role</th><th>Scope</th><th>Who</th><th>Created</th><th></th></tr></thead>
+      <tbody>{% for r in acc.rbac[:60] %}
+        <tr><td>{{ r.role }}</td><td>{{ r.level }}{% if r.subscriptionId %}<br><span class="muted">{{ sec_names.get(r.subscriptionId, r.subscriptionId) }}</span>{% endif %}</td>
+          <td>{{ r.principalType or 'n/a' }}<br><span class="muted"><code>{{ r.principalId }}</code></span></td><td class="muted">{{ r.createdOn }}</td>
+          <td>{% if r.flag == 'SEC-RBAC-001' %}<span class="chip high">Direct to a user</span>{% elif r.flag == 'SEC-RBAC-002' %}<span class="chip high">Application with control role</span>{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% if acc.assignments %}
+  <section class="panel">
+    <h3>Policy compliance by assignment</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Assignment</th><th>Non-compliant</th><th>Compliant</th><th>Exempt</th><th>Compliance</th></tr></thead>
+      <tbody>{% for a in acc.assignments[:40] %}
+        <tr><td>{{ a.assignment }}{% if a.initiative %}<br><span class="muted">{{ a.initiative }}</span>{% endif %}</td><td>{{ a.nonCompliant }}</td><td>{{ a.compliant }}</td><td>{{ a.exempt }}</td>
+          <td>{% if a.percent is none %}<span class="muted">–</span>{% else %}{{ a.percent }}%{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% if acc.noncompliant %}
+  <section class="panel">
+    <h3>Non-compliant resources</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Resource</th><th>Policy assignment</th><th>Effect</th><th>Azure</th></tr></thead>
+      <tbody>{% for r in acc.noncompliant[:60] %}
+        <tr><td><a href="{{ url_for('resource_page', id=r.id) }}">{{ sec_name_of(r.id) }}</a><br><span class="muted">{{ r.type }}</span></td><td>{{ r.assignment }}</td><td>{{ r.action or '–' }}</td><td>{{ azure_link(r.id) }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% if acc.exemptions %}
+  <section class="panel">
+    <h3>Policy exemptions</h3>
+    <div class="table-wrap"><table class="narrow">
+      <thead><tr><th>Exemption</th><th>Category</th><th>Expires</th></tr></thead>
+      <tbody>{% for e in acc.exemptions[:40] %}<tr><td>{{ e.name }}</td><td>{{ e.category or '–' }}</td><td>{% if e.expiresOn %}{{ e.expiresOn }}{% if e.expired %} <span class="chip high">expired</span>{% endif %}{% else %}<span class="muted">no expiry</span>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+<p class="muted">The findings behind these tables are in <a href="{{ url_for('actions_page', pillar='Security', source='access') }}">Action items</a>. Management groups, locks and the landing zone are in <a href="{{ url_for('governance_page') }}">Governance</a>.</p>

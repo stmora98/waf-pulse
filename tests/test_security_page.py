@@ -148,3 +148,82 @@ def test_a_store_failure_is_reported_on_the_tab(client, monkeypatch):
     serve(monkeypatch)
     monkeypatch.setattr(data, "rows_of", lambda run_id, kind: (_ for _ in ()).throw(RuntimeError("down")))
     assert "could not be read right now" in page(client, "alerts")
+
+# --- the identity tab ----------------------------------------------------------------------------------------------
+
+ENTRA = {
+    "available": {"apps": True, "policies": True, "roles": True, "eligible": False, "mfa": True, "risky": False, "recommendations": True},
+    "permissions": {"policies": "Policy.Read.All", "roles": "RoleManagement.Read.Directory", "eligible": "RoleEligibilitySchedule.Read.Directory", "mfa": "Reports.Read.All and AuditLog.Read.All",
+                    "risky": "IdentityRiskyUser.Read.All", "recommendations": "DirectoryRecommendations.Read.All"},
+    "policies": {"total": 7, "enabled": 5, "reportOnly": 2, "disabled": 0, "securityDefaults": False, "mfaAllUsers": True, "mfaAdmins": False, "legacyBlocked": False,
+                 "policies": [{"name": "MFA for partners", "state": "enabled"}, {"name": "Risk sign-in", "state": "enabledForReportingButNotEnforced"}]},
+    "roles": {"privilegedAssignments": 16, "globalAdministrators": 15, "byRole": {"Global Administrator": 15, "Exchange Administrator": 1}, "guests": 1, "servicePrincipals": 7, "eligibleAssignments": None,
+              "assignments": [{"kind": "#microsoft.graph.user", "name": "Ana", "guest": False, "id": "1", "role": "Global Administrator"},
+                              {"kind": "#microsoft.graph.servicePrincipal", "name": "deploy-app", "guest": False, "id": "2", "role": "Global Administrator"}]},
+    "mfa": {"members": 100, "withoutMfa": 20, "adminsWithoutMfa": 1, "registeredPercent": 80.0, "adminsWithout": [{"name": "Admin <b>A</b>", "upn": "a@x"}]},
+    "recommendations": {"active": 2, "byPriority": {"high": 1, "medium": 1}, "items": [{"name": "Turn on MFA", "priority": "high"}]},
+}
+
+
+def test_identity_tab_shows_what_was_read_and_what_is_missing(client, monkeypatch):
+    serve(monkeypatch, summary={**SUMMARY, "entra": ENTRA})
+    html = page(client, "identity")
+    assert ">Identity</a>" in html and "MFA for partners" in html and "Report-only" in html and "Global Administrators" in html and ">15<" in html
+    assert "Missing: legacy authentication blocked" in html and "Covered: MFA for all users" in html
+    assert "deploy-app" in html and "Service principal" in html and "1 guest(s)" in html and "PIM eligibility could not be read" in html
+    assert "80.0%" in html and "Admin &lt;b&gt;A&lt;/b&gt;" in html and "<b>A</b>" not in html and "Turn on MFA" in html
+    assert "Not available. Grant the Microsoft Graph application permission <strong>IdentityRiskyUser.Read.All</strong>" in html and "Microsoft Entra ID P2" in html
+
+
+def test_identity_tab_without_data_and_with_filters(client, monkeypatch):
+    serve(monkeypatch)
+    assert "No identity data yet" in page(client, "identity")
+    serve(monkeypatch, summary={**SUMMARY, "entra": ENTRA})
+    client.set_cookie(scope.COOKIE, scope.encode(scope.sanitize([{"f": "sub", "v": [S1]}])), domain="localhost")
+    assert "Identity is about the whole tenant" in page(client, "identity")
+
+# --- the access tab ------------------------------------------------------------------------------------------------
+
+ACCESS_ROWS = [
+    {"t": "rbac", "id": f"/subscriptions/{S1}", "subscriptionId": S1, "role": "Owner", "principalType": "User", "principalId": "abc-123", "level": "subscription", "createdOn": "2026-01-02", "flag": "SEC-RBAC-001"},
+    {"t": "rbac", "id": f"/subscriptions/{S1}", "subscriptionId": S1, "role": "Contributor", "principalType": "Group", "principalId": "grp-1", "level": "subscription", "createdOn": "2025-05-05", "flag": ""},
+    {"t": "rbac", "id": f"/subscriptions/{S2}", "subscriptionId": S2, "role": "User Access Administrator", "principalType": "ServicePrincipal", "principalId": "app-9", "level": "subscription", "createdOn": "2025-06-06", "flag": "SEC-RBAC-002"},
+    {"t": "policy", "subscriptionId": S1, "assignment": "baseline", "initiative": "mcsb", "nonCompliant": 2, "compliant": 6, "exempt": 3},
+    {"t": "policy", "subscriptionId": S2, "assignment": "baseline", "initiative": "mcsb", "nonCompliant": 1, "compliant": 1, "exempt": 0},
+    {"t": "noncompliant", "id": vm(S1, "web1"), "subscriptionId": S1, "assignment": "baseline", "definition": "d", "action": "audit", "type": "microsoft.compute/virtualmachines"},
+    {"t": "exemption", "id": f"/subscriptions/{S1}/providers/Microsoft.Authorization/policyExemptions/e1", "subscriptionId": S1, "name": "Old <i>waiver</i>", "category": "Waiver", "expiresOn": "2026-01-01", "expired": True},
+    {"t": "exemption", "id": f"/subscriptions/{S1}/providers/Microsoft.Authorization/policyExemptions/e2", "subscriptionId": S1, "name": "Open", "category": "Mitigated", "expiresOn": "", "expired": False},
+]
+
+
+def test_access_view_helper():
+    acc = security_view.access(ACCESS_ROWS)
+    assert [r["role"] for r in acc["rbac"]][:2] == ["Owner", "User Access Administrator"] and acc["flagged"] == 2 and acc["owners"] == 1
+    assert acc["assignments"] == [{"assignment": "baseline", "initiative": "mcsb", "nonCompliant": 3, "compliant": 7, "exempt": 3, "percent": 70.0}]
+    assert [e["name"] for e in acc["exemptions"]][0].startswith("Old") and acc["expired"] == 1 and len(acc["noncompliant"]) == 1
+    assert security_view.access([]) == {"rbac": [], "flagged": 0, "assignments": [], "noncompliant": [], "exemptions": [], "expired": 0, "owners": 0}
+
+
+def serve_access(monkeypatch, rows=None):
+    serve(monkeypatch)
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: list(ACCESS_ROWS if rows is None else rows) if kind == "accrows" else [])
+
+
+def test_access_tab(client, monkeypatch):
+    serve_access(monkeypatch)
+    html = page(client, "access")
+    assert ">Access and policy</a>" in html and "Powerful role assignments" in html and "abc-123" in html and "Direct to a user" in html and "Application with control role" in html
+    assert "Policy compliance by assignment" in html and "70.0%" in html and ">web1<" in html and "Old &lt;i&gt;waiver&lt;/i&gt;" in html and "<i>waiver</i>" not in html
+    assert "expired" in html and "no expiry" in html
+
+
+def test_access_tab_follows_the_filters_and_handles_no_data(client, monkeypatch):
+    serve_access(monkeypatch)
+    client.set_cookie(scope.COOKIE, scope.encode(scope.sanitize([{"f": "sub", "v": [S2]}])), domain="localhost")
+    html = page(client, "access")
+    assert "app-9" in html and "abc-123" not in html and ">web1<" not in html and "50.0%" in html
+    serve_access(monkeypatch, rows=[])
+    client.set_cookie(scope.COOKIE, "[]", domain="localhost")
+    assert "No access or policy data" in page(client, "access")
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: (_ for _ in ()).throw(RuntimeError("down")))
+    assert "could not be read right now" in page(client, "access")

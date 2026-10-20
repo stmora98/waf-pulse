@@ -131,3 +131,43 @@
   {%- set url = azure_url(resource_id) -%}
   {%- if url %}<a class="azure-link" href="{{ url }}" target="_blank" rel="noopener noreferrer" title="Open this resource in the Azure portal">{{ label }} &#8599;</a>{% else %}<span class="muted">–</span>{% endif -%}
 {% endmacro %}
+
+{% macro score_trend(trend, title='Score over time') %}
+  {% if trend and trend.runs > 1 and trend.series %}
+    <section class="panel">
+      <h3>{{ title }}</h3>
+      <svg class="chart" viewBox="0 0 {{ trend.width }} {{ trend.height }}" role="img" aria-label="Score per pillar over the last {{ trend.runs }} completed runs">
+        {% for g in trend.grid %}
+          <line class="grid" x1="{{ trend.left }}" x2="{{ trend.right }}" y1="{{ g.y }}" y2="{{ g.y }}"></line>
+          <text class="axis" x="{{ trend.left - 6 }}" y="{{ g.y + 4 }}" text-anchor="end">{{ g.label }}</text>
+        {% endfor %}
+        {% for s in trend.series %}
+          <polyline class="line line-{{ s.slug }}" fill="none" points="{{ s.points }}"></polyline>
+          {% for d in s.dots %}<circle class="dot line-{{ s.slug }}" cx="{{ d.x }}" cy="{{ d.y }}" r="3"></circle>{% endfor %}
+        {% endfor %}
+        {% for l in trend.labels %}<text class="axis" x="{{ l.x }}" y="{{ trend.label_y }}" text-anchor="{{ l.anchor }}">{{ l.text }}</text>{% endfor %}
+      </svg>
+      <ul class="legend">{% for s in trend.series %}<li><span class="swatch line-{{ s.slug }}"></span>{{ s.pillar }}</li>{% endfor %}</ul>
+      <p class="muted">The scores of the whole tenant in each run; they are not recalculated for the filters.</p>
+    </section>
+  {% endif %}
+{% endmacro %}
+
+{% macro fix_first_table(items, show_pillar=true) %}
+  {% if items %}
+    <section class="panel" id="fix-first">
+      <h3>Fix first</h3>
+      <p class="muted">The recommendations that would raise the score the most if they were fixed everywhere, then the ones that reach resources facing the internet.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Recommendation</th><th>Severity</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Resources</th><th>Facing the internet</th><th>Score</th></tr></thead>
+        <tbody>{% for r in items %}
+          <tr><td>{{ loop.index }}</td><td><a href="{{ url_for('rule_page', rule_id=r.ruleId) }}">{{ r.title }}</a></td><td><span class="chip {{ r.severity }}">{{ r.severity }}</span></td>
+            {% if show_pillar %}<td>{{ r.pillar }}</td>{% endif %}<td><a href="{{ url_for('affected_page', rule=r.ruleId) }}">{{ r.resources }}</a></td>
+            <td>{% if r.internet %}<span class="chip high">{{ r.internet }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+            <td>{% if r.points %}<strong>+{{ r.points }}</strong> <span class="muted">points</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+    </section>
+  {% endif %}
+{% endmacro %}
+

@@ -3,7 +3,7 @@ each tab shows. Pure functions over lists of rows."""
 from collections import Counter, defaultdict
 
 SECURITY_TABS = (("posture", "Posture"), ("vulnerabilities", "Vulnerabilities"), ("exposure", "Exposure"), ("alerts", "Alerts"),
-                 ("compliance", "Compliance"), ("changes", "Changes"))
+                 ("identity", "Identity"), ("access", "Access and policy"), ("compliance", "Compliance"), ("changes", "Changes"))
 TAB_KEYS = tuple(key for key, _ in SECURITY_TABS)
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "informational": 3}
 MANAGEMENT_PORTS = (22, 23, 3389, 5985, 5986)
@@ -82,6 +82,25 @@ def compliance(rows):
         item["description"] = item["description"] or r.get("description", "")
     failed = sorted(({"standard": s, "control": c, **v} for (s, c), v in controls.items()), key=lambda r: -r["failed"])
     return {"standards": summary, "controls": failed[:60]}
+
+
+def access(rows):
+    """The Access and policy tab: powerful role assignments, policy compliance by assignment, non-compliant resources and exemptions."""
+    rbac = sorted(by_type(rows, "rbac"), key=lambda r: (not r.get("flag"), r.get("role", ""), r.get("level", "")))
+    policy = defaultdict(lambda: Counter())
+    initiatives = {}
+    for r in by_type(rows, "policy"):
+        for key in ("nonCompliant", "compliant", "exempt"):
+            policy[r["assignment"]][key] += r.get(key) or 0
+        initiatives[r["assignment"]] = r.get("initiative") or initiatives.get(r["assignment"], "")
+    assignments = [{"assignment": name, "initiative": initiatives.get(name, ""), **counts,
+                    "percent": round(100 * counts["compliant"] / (counts["compliant"] + counts["nonCompliant"]), 1) if counts["compliant"] + counts["nonCompliant"] else None}
+                   for name, counts in policy.items()]
+    assignments.sort(key=lambda a: (-a["nonCompliant"], a["assignment"]))
+    resources = by_type(rows, "noncompliant")
+    exemptions = sorted(by_type(rows, "exemption"), key=lambda r: (not r.get("expired"), r.get("expiresOn") or "9999"))
+    return {"rbac": rbac, "flagged": sum(1 for r in rbac if r.get("flag")), "assignments": assignments, "noncompliant": resources,
+            "exemptions": exemptions, "expired": sum(1 for e in exemptions if e.get("expired")), "owners": sum(1 for r in rbac if r.get("role") == "Owner" and r.get("level") == "subscription")}
 
 
 def changes(rows):

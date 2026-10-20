@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import hbar_chart, stacked_chart, severity_legend %}
+{% from "_macros.html" import hbar_chart, stacked_chart, severity_legend, fix_first_table, score_trend %}
 {% block content %}
     {% if error %}
       <section class="notice error">{{ error }}</section>
@@ -34,6 +34,8 @@
         {% endfor %}
       </section>
 
+      {{ fix_first_table(fix_first) }}
+      {{ score_trend(trend) }}
       {% if partial %}<p class="muted">Charts show the first {{ cap }} findings of the run.</p>{% endif %}
       <section class="insights two">
         <div class="panel">

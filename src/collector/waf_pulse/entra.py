@@ -7,11 +7,13 @@ an error. Only metadata is read, never a secret value.
 """
 from datetime import datetime, timedelta, timezone
 
-from . import rest
+from . import identity, rest
 from .findings import make_finding
 
 SCOPE = "https://graph.microsoft.com/.default"
 BASE = "https://graph.microsoft.com/v1.0"
+BETA = "https://graph.microsoft.com/beta"  # Entra recommendations are only there
+NOT_AVAILABLE_CODES = ("AadPremiumLicenseRequired", "Forbidden", "Request_ResourceNotFound", "Authentication_MSGraphPermissionMissing")
 TENANT = "tenant"
 SOON_DAYS = 30
 LONG_LIVED_DAYS = 730
@@ -35,15 +37,25 @@ INCIDENT_SEVERITY = {"high": "high", "medium": "medium", "low": "low", "informat
 OPEN_INCIDENT = {"active", "inprogress"}
 
 
-def fetch_all(token, path, params=None, headers=None):
-    """Follows @odata.nextLink. Returns (items, status) with status 'ok', 'denied' or 'error'."""
-    items, url = [], f"{BASE}{path}"
+def _not_available(response):
+    """True for a refusal that is about the tenant (no license, feature not there) and not a failure: it shows as 'not available'."""
+    try:
+        error = (response.json() or {}).get("error") or {}
+    except ValueError:
+        return False
+    message = str(error.get("message", ""))
+    return error.get("code") in NOT_AVAILABLE_CODES or "not licensed" in message or "Resource not found for the segment" in message
+
+
+def fetch_all(token, path, params=None, headers=None, base=BASE):
+    """Follows @odata.nextLink. Returns (items, status) with status 'ok', 'denied' (no permission, license or feature) or 'error'."""
+    items, url = [], f"{base}{path}"
     for _ in range(MAX_PAGES):
         response = rest.get(url, token, params, headers)
         if response.status_code in (401, 403):
             return items, "denied"
         if response.status_code >= 400:
-            return items, "error"
+            return items, "denied" if _not_available(response) else "error"
         body = response.json()
         items.extend(body.get("value", []))
         url, params = body.get("@odata.nextLink"), None
@@ -168,10 +180,10 @@ def collect(credential, run_id, subscription_ids=None, now=None):
     token = credential.get_token(SCOPE).token
     findings, stats, errors = [], [], []
     dataset = {"available": {}, "permissions": {"apps": "Application.Read.All", "guests": "User.Read.All",
-                                                  "incidents": "SecurityIncident.Read.All"}}
+                                                  "incidents": "SecurityIncident.Read.All", **identity.PERMISSIONS}}
 
-    def part(name, path, params, headers, evaluate):
-        items, status = fetch_all(token, path, params, headers)
+    def part(name, path, params, headers, evaluate, base=BASE):
+        items, status = fetch_all(token, path, params, headers, base)
         dataset["available"][name] = status == "ok"
         if status == "error":
             errors.append({"ruleId": f"entra-{name}", "error": "Microsoft Graph returned an error"})
@@ -191,4 +203,29 @@ def collect(credential, run_id, subscription_ids=None, now=None):
          lambda items: evaluate_guests(run_id, items, now))
     part("incidents", "/security/incidents", {"$top": 50}, None,
          lambda items: tuple(evaluate_incidents(run_id, items)))
+    collect_identity(token, run_id, part, dataset)
     return findings, stats, dataset, errors
+
+
+def security_defaults_on(token):
+    """True when the tenant uses security defaults (Microsoft then requires MFA and blocks legacy authentication itself)."""
+    response = rest.get(f"{BASE}/policies/identitySecurityDefaultsEnforcementPolicy", token)
+    return response.status_code == 200 and bool(response.json().get("isEnabled"))
+
+
+def collect_identity(token, run_id, part, dataset):
+    """The identity parts: Conditional Access, directory roles, MFA registration, risky users and Entra recommendations."""
+    part("policies", "/identity/conditionalAccess/policies", {"$top": 200}, None,
+         lambda items: identity.evaluate_policies(run_id, items, security_defaults_on(token)))
+
+    def roles(assignments):
+        definitions, _ = fetch_all(token, "/roleManagement/directory/roleDefinitions", {"$select": "id,displayName"})
+        eligible, status = fetch_all(token, "/roleManagement/directory/roleEligibilitySchedules", {"$top": 200})
+        dataset["available"]["eligible"] = status == "ok"
+        return identity.evaluate_roles(run_id, assignments, definitions, eligible if status == "ok" else None)
+
+    part("roles", "/roleManagement/directory/roleAssignments", {"$expand": "principal", "$top": 999}, None, roles)
+    part("mfa", "/reports/authenticationMethods/userRegistrationDetails", {"$top": 999}, None, lambda items: identity.evaluate_mfa(run_id, items))
+    part("risky", "/identityProtection/riskyUsers", {"$filter": "riskState eq 'atRisk'", "$top": 500}, None,
+         lambda items: identity.evaluate_risky(run_id, items))
+    part("recommendations", "/directory/recommendations", None, None, lambda items: identity.evaluate_recommendations(run_id, items), base=BETA)
