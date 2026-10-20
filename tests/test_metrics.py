@@ -308,7 +308,7 @@ def test_sizes_are_read_from_the_skus_api():
         {"resourceType": "virtualMachines", "name": "Standard_X", "capabilities": [], "restrictions": [{"reasonCode": "NotAvailableForSubscription"}]},
         {"resourceType": "disks", "name": "Premium_LRS", "capabilities": []}]}
     sizes = skus.parse(body)
-    assert sizes["standard_d4as_v5"] == {"vcpus": 4, "memoryGB": 16, "iops": 6400, "restricted": False}
+    assert sizes["standard_d4as_v5"] == {"name": "Standard_D4as_v5", "vcpus": 4, "memoryGB": 16, "iops": 6400, "arch": "x64", "gpus": 0, "premium": False, "restricted": False}
     assert sizes["standard_x"]["restricted"] is True and sizes["standard_x"]["vcpus"] is None and "premium_lrs" not in sizes
     assert skus.parse(None) == {}
 

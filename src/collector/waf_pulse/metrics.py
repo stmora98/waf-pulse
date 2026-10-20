@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import graph, skus
+from . import fit, graph, prices, skus
 from .findings import make_finding
 
 BATCH_SIZE = 50
@@ -33,7 +33,8 @@ resources
 | where tostring(properties.extended.instanceView.powerState.code) =~ 'PowerState/running'
 | extend environment = tostring(coalesce(tags['environment'], tags['Environment'], tags['env'], tags['Env'], tags['ENVIRONMENT']))
 | extend availability = iff(isnotempty(tostring(properties.availabilitySet.id)), 'set', iff(array_length(zones) > 0, 'zone', 'none'))
-| project id, name, subscriptionId, location, detail = tostring(properties.hardwareProfile.vmSize), environment, availability
+| project id, name, subscriptionId, location, detail = tostring(properties.hardwareProfile.vmSize), environment, availability,
+    osType = tostring(properties.storageProfile.osDisk.osType)
 """,
     },
     "sql_dtu": {
@@ -468,6 +469,32 @@ def series_of(kind, metrics):
     return result
 
 
+PRICE_BUDGET_SECONDS = 120
+
+
+def attach_alternatives(records, rows, sizes, price=prices.vm_monthly, clock=time.monotonic):
+    """Adds `alternatives` (the smaller sizes that fit, with list prices) to the idle and underutilized virtual machines. Returns the
+    number of machines it looked at. Price calls stop when the time budget ends."""
+    by_id = {str(r["id"]).lower(): r for r in rows}
+    cache, looked, deadline = {}, 0, clock() + PRICE_BUDGET_SECONDS
+    for record in records:
+        if record.get("kind") != "vm" or record.get("assessment") not in ("idle", "under") or looked >= fit.MAX_MACHINES:
+            continue
+        if clock() > deadline:
+            break
+        row = by_id.get(str(record["id"]).lower())
+        if not row:
+            continue
+        catalog = (sizes or {}).get((str(row.get("subscriptionId", "")).lower(), str(row.get("location", "")).lower()))
+        if not catalog:
+            continue
+        looked += 1
+        found = fit.alternatives(record, catalog, str(row.get("osType", "")).lower() == "windows", str(row.get("location", "")).lower(), cache, price=price)
+        if found:
+            record["alternatives"] = found
+    return looked
+
+
 def resource_group_of(resource_id):
     parts = str(resource_id).split("/")
     lowered = [p.lower() for p in parts]
@@ -686,5 +713,9 @@ def collect(credential, run_id, subscription_ids, thresholds=None):
             except Exception as exc:
                 errors.append({"ruleId": f"metrics-schedule-{region}", "error": str(exc).splitlines()[0][:200]})
     findings, stats, dataset = evaluate(run_id, resources, measurements, sizes, thresholds, hourly)
+    try:
+        attach_alternatives(dataset["resources"], resources.get("vm", []), sizes)
+    except Exception as exc:
+        errors.append({"ruleId": "metrics-prices", "error": str(exc).splitlines()[0][:200]})
     dataset["thresholds"] = resolve_thresholds(thresholds)
     return findings, stats, dataset, errors

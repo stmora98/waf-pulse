@@ -163,6 +163,20 @@
         </p>
       </div>
     {% endif %}
+    {% if commitment_use %}
+      <div class="panel">
+        <h3>Utilization of the reservations and savings plans you bought</h3>
+        <p class="muted">The share of each commitment that was used in {{ commitment_use[0].month }}. What is not used is paid anyway.</p>
+        <div class="table-wrap"><table class="narrow">
+          <thead><tr><th>Commitment</th><th>Type</th><th>Used</th><th>Unused ({{ commitment_use[0].currency }})</th></tr></thead>
+          <tbody>{% for c in commitment_use[:15] %}
+            <tr><td>{{ c.name }}</td><td class="muted">{{ {'reservation': 'Reservation', 'savingsplan': 'Savings plan'}.get(c.kind, 'Commitment') }}</td>
+              <td>{% if c.percent is none %}–{% else %}<span class="chip {{ 'as-right' if c.percent >= 80 else 'as-under' if c.percent >= 50 else 'as-saturated' }}">{{ c.percent }}%</span>{% endif %}</td>
+              <td>{{ '{:,.0f}'.format(c.unused) }}</td></tr>
+          {% endfor %}</tbody>
+        </table></div>
+      </div>
+    {% endif %}
     <div class="panel">
       <h3>Reservations and savings plans</h3>
       {% if summary and summary.commitments %}

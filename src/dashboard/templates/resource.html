@@ -47,6 +47,9 @@
                   {% if a.monthlySavings %}<span class="muted">· saves {{ '{:,.0f}'.format(a.monthlySavings) }} {{ a.currency }} per month</span>{% endif %}</td></tr>
               {% endif %}
               {% if r and r.schedule %}<tr><th>Usage pattern</th><td>{{ usage.schedule_text }}{% if r.scheduleCandidate %} <span class="muted">· an automatic shutdown could switch off about {{ (r.schedule.saving * 100) | round | int }}% of its hours</span>{% endif %}</td></tr>{% endif %}
+              {% if r and r.alternatives %}<tr><th>Sizes that fit</th><td>
+                {% for o in r.alternatives.options %}<div><strong>{{ o.size }}</strong> <span class="muted">· {{ '{:g}'.format(o.vcpus) }} vCPU, {{ '{:g}'.format(o.memoryGB) }} GiB · fit {{ o.fit }}% (peak would be {{ o.projected }}%) · {{ '{:,.0f}'.format(o.monthly) }} {{ r.alternatives.currency }}/mo, saves {{ '{:,.0f}'.format(o.saving) }}</span></div>{% endfor %}
+                <span class="muted">List prices, pay as you go; the current size costs {{ '{:,.0f}'.format(r.alternatives.currentMonthly) }} {{ r.alternatives.currency }}/mo. Fit: how close the peak, projected on that size, is to 70%.</span></td></tr>{% endif %}
               {% if usage.cost is not none %}<tr><th>Cost, last 30 days</th><td>{{ '{:,.0f}'.format(usage.cost) }}</td></tr>{% endif %}
             </tbody>
           </table>

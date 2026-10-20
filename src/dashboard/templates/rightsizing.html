@@ -169,6 +169,7 @@
                         {% if r.advice.monthlySavings %}<br><span class="muted">saves {{ '{:,.0f}'.format(r.advice.monthlySavings) }} {{ r.advice.currency }}/mo</span>{% endif %}
                         {% if r.advice.cpuP95 is not none or r.advice.memoryP95 is not none %}<br><span class="muted">P95 CPU {{ r.advice.cpuP95 if r.advice.cpuP95 is not none else '–' }}% · memory {{ r.advice.memoryP95 if r.advice.memoryP95 is not none else '–' }}%</span>{% endif %}
                       {% else %}<span class="muted">–</span>{% endif %}
+                      {% if r.alternatives %}<br><span class="chip">Fit</span> {% for o in r.alternatives.options %}<span class="muted">{{ o.size }} · fit {{ o.fit }}% · saves {{ '{:,.0f}'.format(o.saving) }} {{ r.alternatives.currency }}/mo</span>{% if not loop.last %}<br>{% endif %}{% endfor %}{% endif %}
                       {% if r.scheduleCandidate %}<br><span class="chip">Schedule</span> <span class="muted">{{ schedule_text(r.schedule) }}{% if r.scheduleSaving %} · could save about {{ '{:,.0f}'.format(r.scheduleSaving) }}/mo{% endif %}</span>{% endif %}
                     </td>
                     <td>{{ azure_link(r.id) }}</td>

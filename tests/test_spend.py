@@ -113,3 +113,45 @@ def test_collect_hands_the_resource_costs_back_only_when_asked(monkeypatch):
     spend.collect("t", ["/subscriptions/a"], NOW, deadline=1e12, clock=lambda: 0, costs=costs)
     assert costs == [{"id": "/s/a", "cost": 7.0}]
     assert spend.collect("t", ["/subscriptions/a"], NOW, deadline=1e12, clock=lambda: 0)[1] in (True, False)
+
+# --- commitment utilization --------------------------------------------------------------------------------------
+
+def benefit(month, cost, name="", charge="Usage", currency="USD"):
+    return {"period": f"{month}-01", "cost": cost, "BenefitName": name, "ChargeType": charge, "currency": currency}
+
+
+def test_utilization_of_reservations_and_savings_plans_of_the_last_full_month():
+    rows = [benefit("2026-09", 700, "ri-vms"), benefit("2026-09", 300, "ri-vms", "UnusedReservation"),
+            benefit("2026-09", 1000, "sp-compute"), benefit("2026-09", 20, "sp-compute", "UnusedSavingsPlan"),
+            benefit("2026-09", 5000), benefit("2026-08", 10, "ri-vms", "UnusedReservation"), benefit("2026-10", 99, "ri-vms", "UnusedReservation")]
+    items = spend.commitment_utilization(rows, NOW)
+    assert [(i["name"], i["kind"], i["percent"], i["unused"], i["used"]) for i in items] == [
+        ("ri-vms", "reservation", 70.0, 300.0, 700.0), ("sp-compute", "savingsplan", 98.0, 20.0, 1000.0)]
+    assert items[0]["month"] == "2026-09" and items[0]["currency"] == "USD"
+    assert spend.commitment_utilization([benefit("2026-09", 5000)], NOW) == []  # no commitments
+    assert spend.commitment_utilization([benefit("2026-10", 5, "x", "UnusedReservation")], NOW) == []  # no full month yet
+    assert spend.commitment_utilization([], NOW) == []
+
+
+def test_an_unused_charge_without_a_name_is_still_listed():
+    items = spend.commitment_utilization([benefit("2026-09", 80, "", "UnusedReservation")], NOW)
+    assert items == [{"name": "(unnamed reservation)", "kind": "reservation", "month": "2026-09", "used": 0.0, "unused": 80.0, "percent": 0.0, "currency": "USD"}]
+
+
+def test_the_breakdowns_carry_the_utilization():
+    built = spend.build({"benefits": [benefit("2026-09", 700, "ri", "Usage"), benefit("2026-09", 300, "ri", "UnusedReservation")]}, NOW)
+    assert built["commitmentUtilization"][0]["percent"] == 70.0
+    assert "commitmentUtilization" not in spend.build({"benefits": None}, NOW)
+    assert "benefits" in spend.QUERIES and spend.QUERIES["benefits"][1] == ("BenefitName", "ChargeType")
+
+
+def test_under_used_commitments_become_findings_by_how_bad_they_are():
+    items = [{"name": "ri-bad", "kind": "reservation", "month": "2026-09", "used": 400, "unused": 600, "percent": 40.0, "currency": "USD"},
+             {"name": "sp-meh", "kind": "savingsplan", "month": "2026-09", "used": 700, "unused": 300, "percent": 70.0, "currency": "USD"},
+             {"name": "ri-fine", "kind": "reservation", "month": "2026-09", "used": 950, "unused": 50, "percent": 95.0, "currency": "USD"},
+             {"name": "ri-tiny", "kind": "reservation", "month": "2026-09", "used": 1, "unused": 10, "percent": 9.1, "currency": "USD"}]
+    findings, stats = finops.commitment_findings("r", items)
+    assert [(f["resourceName"], f["severity"]) for f in findings] == [("ri-bad", "high"), ("sp-meh", "medium")]
+    assert "Reservation 'ri-bad' was used 40% in 2026-09: 600 USD paid for nothing" == findings[0]["title"] and findings[1]["title"].startswith("Savings plan 'sp-meh'")
+    assert stats == [{"ruleId": "FIN-COM-001", "source": "finops", "pillar": "Cost Optimization", "severity": "medium", "subscriptionId": "tenant", "affected": 2, "applicable": 4}]
+    assert finops.commitment_findings("r", []) == ([], [])

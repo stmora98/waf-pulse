@@ -1,0 +1,17 @@
+{% from "_macros.html" import azure_link %}
+<section class="panel" id="waste">
+  <h3>Waste you can remove</h3>
+  <p class="muted">What the resources behind the findings that ask to delete or shut something down cost in the last 30 days (amortized): the most that removing them saves.
+    {{ waste.costed }} of the {{ waste.resources }} resource(s) are among the most expensive resources of the tenant, which are the ones with a known cost; the rest count as zero.</p>
+  <section class="cards compact">
+    <div class="card {{ 'good' if waste.total else 'na' }}"><span class="card-title">Up to</span><span class="card-score">{{ '{:,.0f}'.format(waste.total) }}</span><span class="muted">{{ waste.currency }} per month · {{ waste.rules | length }} recommendation(s)</span></div>
+  </section>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Recommendation</th><th>Resources</th><th>Saves (30 d)</th><th>Most expensive</th></tr></thead>
+    <tbody>{% for r in waste.rules %}
+      <tr><td><a href="{{ url_for('rule_page', rule_id=r.ruleId) }}">{{ r.action }}</a></td><td>{{ r.resources }}</td>
+        <td>{% if r.saves %}<strong>{{ '{:,.0f}'.format(r.saves) }}</strong> <span class="muted">{{ waste.currency }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td>{% for t in r.top %}<a href="{{ url_for('resource_page', id=t.id) }}">{{ t.name }}</a> <span class="muted">{{ '{:,.0f}'.format(t.cost) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% if not r.top %}<span class="muted">no cost known</span>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</section>

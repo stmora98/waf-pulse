@@ -22,6 +22,7 @@ import priority
 import scope
 import security_view
 import suppress
+import waste
 import rightsizing
 
 app = Flask(__name__)
@@ -289,8 +290,9 @@ def actions_page():
     rules = insights.group_rules(findings)
     counts = {level: sum(1 for r in rules if r["severity"] == level) for level in data.SEVERITIES}
     shown = [r for r in rules if not severity or r["severity"] == severity]
+    saved = _waste(summary, findings)
     return render_template(
-        "actions.html", summary=summary, error=None, pillars=data.PILLARS, severities=data.SEVERITIES, sources=data.SOURCES,
+        "actions.html", summary=summary, error=None, pillars=data.PILLARS, severities=data.SEVERITIES, sources=data.SOURCES, saves=saved,
         source_labels=data.SOURCE_LABELS, selected_pillar=pillar, selected_severity=severity, selected_source=source,
         rules=shown[:MAX_ACTIONS], total_items=len(shown), counts=counts, cap=data.MAX_FINDINGS,
         total_resources=len({str(f.get("resourceId", "")).lower() for f in findings
@@ -319,11 +321,15 @@ def pillar_page(slug):
     rules = insights.group_rules(findings)
     spend = _spend_context(summary, rules) if slug == "cost" else {}
     tab = "posture"
+    if slug == "reliability":
+        spend = {"names": {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}}
     if slug == "security":
         spend = _security_context(summary)
         tab = _allowed(request.args.get("tab"), security_view.TAB_KEYS) or "posture"
         if tab != "posture":
             spend = {**spend, **_security_tab_context(summary, tab)}
+    if slug == "cost" and summary:
+        spend = {**spend, "waste": _waste(summary, findings)}
     if slug == "cost" and summary and scope.is_active(_scope()):
         try:
             spend = {**spend, "scoped_spend": _scoped_spend(summary)}
@@ -380,6 +386,22 @@ def _scoped_spend(summary):
             "top": sorted(kept, key=lambda r: -r["cost"])[:SCOPED_SPEND_ROWS], "names": names}
 
 
+def _waste(summary, findings):
+    """What the findings that ask to remove something cost, or None when the run has no per-resource costs."""
+    if not summary:
+        return None
+    try:
+        costs = data.rows_of(summary["runId"], "costs")
+    except Exception:
+        logging.exception("Could not read the per-resource costs")
+        return None
+    if not costs:
+        return None
+    result = waste.savings(findings, costs)
+    result["currency"] = ((summary.get("finops") or {}).get("currency")) or ""
+    return result
+
+
 def _fix_first(summary, rules, findings, pillar=None, limit=10):
     """The rules to fix first for the filters, with the points of score each would give. Empty when the run has no rule statistics."""
     try:
@@ -398,8 +420,12 @@ def _fix_first(summary, rules, findings, pillar=None, limit=10):
                 exposed.add(str(row.get("id", "")).lower())
     except Exception:
         logging.exception("Could not read the exposure rows")
-    return priority.fix_first([{"ruleId": s["ruleId"], "pillar": s["pillar"], "severity": s["severity"], "affected": s["affected"], "applicable": s["applicable"]} for s in stats],
+    rows = priority.fix_first([{"ruleId": s["ruleId"], "pillar": s["pillar"], "severity": s["severity"], "affected": s["affected"], "applicable": s["applicable"]} for s in stats],
                               rules, findings, exposed, pillar, limit)
+    saved = _waste(summary, findings)
+    for row in rows:
+        row["saves"] = (saved or {}).get("by_rule", {}).get(row["ruleId"])
+    return rows
 
 
 def _security_rows(summary):
@@ -499,6 +525,7 @@ def _spend_context(summary, rules):
         "resources_chart": charts.hbars([(r["name"], r["cost"], None) for r in resources[:10]]) if resources else None,
         "resource_days": 30,
         "pricing_chart": cost_view.stacked_columns(pricing, partial_from=current) if pricing and pricing.get("series") else None,
+        "commitment_use": breakdowns.get("commitmentUtilization") or [],
         "coverage_last": coverage["percent"] if coverage else None,
     }
 
@@ -833,12 +860,13 @@ def rightsizing_csv():
         return jsonify(error="No utilization data yet."), 404
     names, labels = ctx["names"], ctx["labels"]
     header = ["Name", "Type", "Subscription", "Resource group", "Size", "Avg %", "Max %", "Assessment", "Cost last 30 days",
-              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Schedule", "Resource ID"]
+              "Advisor action", "Advisor target size", "Advisor monthly savings", "Advisor currency", "P95 CPU %", "P95 memory %", "Memory in use %", "Disk IOPS %", "Network Mbps", "Schedule", "Best size that fits", "Resource ID"]
     rows = [[r["name"], ctx["kind"], names.get(r["subscriptionId"], r["subscriptionId"]), r.get("resourceGroup", ""), r.get("detail", ""), r.get("avg"), r.get("max"),
              labels.get(r["assessment"], r["assessment"]), r["cost"], (r["advice"] or {}).get("action"), "" if str((r["advice"] or {}).get("action")).lower() == "shutdown" else (r["advice"] or {}).get("targetSku"),
              (r["advice"] or {}).get("monthlySavings"), (r["advice"] or {}).get("currency"), (r["advice"] or {}).get("cpuP95"),
              (r["advice"] or {}).get("memoryP95"), r.get("memory"), r.get("iops"), r.get("net"),
-             rightsizing.schedule_text(r["schedule"]) if r.get("scheduleCandidate") else "", r["id"]] for r in ctx["rows"]]
+             rightsizing.schedule_text(r["schedule"]) if r.get("scheduleCandidate") else "",
+             ((r.get("alternatives") or {}).get("options") or [{}])[0].get("size", ""), r["id"]] for r in ctx["rows"]]
     return _csv(f"right-sizing-{ctx['kind']}.csv", header, rows)
 
 

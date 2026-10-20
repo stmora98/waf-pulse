@@ -26,6 +26,7 @@ QUERIES = {
     "groupType": ("Monthly", ("ResourceGroupName", "ResourceType"), None),
     "dailyService": ("Daily", ("ServiceName",), finops.DAILY_WINDOW_DAYS),
     "pricing": ("Monthly", ("PricingModel",), None),
+    "benefits": ("Monthly", ("BenefitName", "ChargeType"), None),
     "resources": ("None", ("ResourceId",), RESOURCE_DAYS),
 }
 
@@ -112,6 +113,42 @@ def commitment_coverage(rows, now):
     return result
 
 
+UNUSED_CHARGES = {"unusedreservation": "reservation", "unusedsavingsplan": "savingsplan"}
+MIN_UNUSED = 25.0          # unused commitment (in the currency) below which an under-used one is not worth a finding
+UNDERUSED_PERCENT = 80.0   # utilization below this is under-used
+
+
+def commitment_utilization(rows, now):
+    """How much of each reservation and savings plan was used in the last full month, from the amortized cost: the cost of the
+    usage it covered (used) against the charges for the part nobody used (unused). [{name, kind, month, used, unused, percent,
+    currency}], the least used first. Empty when there are no commitments."""
+    current = now.strftime("%Y-%m")
+    months = sorted({monthly(row) for row in rows if monthly(row)})
+    last = next((m for m in reversed(months) if m < current), None)
+    if not last:
+        return []
+    items = {}
+    for row in rows:
+        if monthly(row) != last:
+            continue
+        kind = UNUSED_CHARGES.get(str(row.get("ChargeType", "")).lower().replace(" ", ""))
+        name = row.get("BenefitName", "")
+        if not kind and not name:
+            continue
+        entry = items.setdefault(name or f"(unnamed {kind})", {"kind": "", "used": 0.0, "unused": 0.0, "currency": row.get("currency", "")})
+        if kind:
+            entry["kind"], entry["unused"] = kind, entry["unused"] + row["cost"]
+        else:
+            entry["used"] += row["cost"]
+    result = []
+    for name, entry in items.items():
+        total = entry["used"] + entry["unused"]
+        result.append({"name": name, "kind": entry["kind"] or "commitment", "month": last, "used": round(entry["used"], 2), "unused": round(entry["unused"], 2),
+                       "percent": round(100 * entry["used"] / total, 1) if total > 0 else None, "currency": entry["currency"]})
+    result.sort(key=lambda item: (item["percent"] is None, item["percent"] if item["percent"] is not None else 0, -item["unused"]))
+    return result[:30]
+
+
 def top_resources(rows):
     totals = defaultdict(float)
     for row in rows:
@@ -148,6 +185,8 @@ def build(raw, now):
     if raw.get("pricing"):
         out["byPricingModel"] = matrix(raw["pricing"], "PricingModel", monthly)
         out["commitmentCoverage"] = commitment_coverage(raw["pricing"], now)
+    if raw.get("benefits"):
+        out["commitmentUtilization"] = commitment_utilization(raw["benefits"], now)
     if raw.get("resources"):
         out["topResources"] = top_resources(raw["resources"])
     return out

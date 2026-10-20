@@ -47,7 +47,7 @@
 
       <section class="panel">
         {% if rules %}
-          {{ recommendations_table(rules, source_labels, filter=true, show_pillar=true) }}
+          {{ recommendations_table(rules, source_labels, filter=true, show_pillar=true, saves=saves) }}
           {% if total_items > rules | length %}<p class="muted">Showing {{ rules | length }} of {{ total_items }} action items.</p>{% endif %}
         {% else %}
           <p class="muted">No action items for this filter.</p>

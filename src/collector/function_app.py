@@ -17,7 +17,7 @@ import azure.functions as func
 
 from waf_pulse import (
     access, advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, lifecycle, metrics,
-    security, store, suppress,
+    quotas, security, store, suppress,
 )
 
 app = df.DFApp()
@@ -85,6 +85,7 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_lifecycle", scope))
             tasks.append(context.call_activity("act_security", scope))
             tasks.append(context.call_activity("act_access", scope))
+            tasks.append(context.call_activity("act_quotas", scope))
             tasks.append(context.call_activity("act_entra", scope))
         yield context.task_all(tasks)
 
@@ -266,6 +267,19 @@ def act_diagnostics(payload: dict):
         return {"key": "diagnostics", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "diagnostics", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_quotas(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, errors = quotas.collect(credentials.collector_credential(), run_id, payload["subscriptions"])
+        store.save_findings(findings)
+        store.save_stats(run_id, "quotas", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "quotas", dataset)
+        return {"key": "quotas", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "quotas", exc)
 
 
 @app.activity_trigger(input_name="payload")

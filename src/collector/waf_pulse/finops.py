@@ -385,6 +385,29 @@ def evaluate(run_id, results, now=None, tenant=None, mode="subscriptions"):
     return findings, stats, dataset, errors
 
 
+COMMITMENT_KIND = {"reservation": "Reservation", "savingsplan": "Savings plan", "commitment": "Commitment"}
+
+
+def commitment_findings(run_id, items):
+    """(findings, stats) of the reservations and savings plans that were used less than they should: they are paid whether used or not."""
+    from . import spend
+
+    findings, under = [], 0
+    for item in items:
+        if item["percent"] is None or item["percent"] >= spend.UNDERUSED_PERCENT or item["unused"] < spend.MIN_UNUSED:
+            continue
+        under += 1
+        label = COMMITMENT_KIND.get(item["kind"], "Commitment")
+        findings.append(make_finding(
+            run_id, rule_id="FIN-COM-001", source="finops", pillar="Cost Optimization", severity="high" if item["percent"] < 50 else "medium",
+            title=f"{label} '{item['name']}' was used {item['percent']:g}% in {item['month']}: {item['unused']:,.0f} {item['currency']} paid for nothing".strip(),
+            recommendation="Exchange or resize the commitment (reservations can be exchanged), move workloads onto it, or stop renewing it.",
+            resource_id=f"/commitments/{item['kind']}/{item['name']}", resource_name=item["name"], subscription_id=TENANT))
+    stats = [{"ruleId": "FIN-COM-001", "source": "finops", "pillar": "Cost Optimization", "severity": "medium", "subscriptionId": TENANT,
+              "affected": under, "applicable": len(items)}] if items else []
+    return findings, stats
+
+
 def collect(credential, run_id, subscription_ids, now=None):
     """Tenant scope first (one call for every subscription, like the FinOps hub reading a billing scope), then
     one subscription at a time where the tenant scope cannot be queried."""
@@ -451,5 +474,8 @@ def collect(credential, run_id, subscription_ids, now=None):
             section, partial = {}, True
         if section:
             dataset["breakdowns"] = {**section, "partial": partial}
+            extra_findings, extra_stats = commitment_findings(run_id, section.get("commitmentUtilization") or [])
+            findings.extend(extra_findings)
+            stats.extend(extra_stats)
         dataset["resourceCosts"] = resource_costs  # kept apart from the summary by the activity
     return findings, stats, dataset, errors

@@ -355,3 +355,32 @@ def test_csv_of_storage_accounts_has_no_peak_and_still_downloads(client, monkeyp
     serve(monkeypatch, {"runId": "r1", "metrics": metrics, "subscriptions": [{"id": SUB, "name": "Prod"}]})
     response = client.get("/rightsizing.csv?kind=storage")
     assert response.status_code == 200 and "acct,storage,Prod,rg,Standard_LRS,120.0" in response.get_data(as_text=True)
+
+# ---- sizes that fit (fit score)
+
+ALTERNATIVES = {"currentMonthly": 280.0, "currency": "USD", "options": [
+    {"size": "Standard_D2s_v5", "vcpus": 2, "memoryGB": 8, "monthly": 70.0, "saving": 210.0, "fit": 85, "projected": 60.0},
+    {"size": "Standard_E2s_v5", "vcpus": 2, "memoryGB": 16, "monthly": 95.0, "saving": 185.0, "fit": 55, "projected": 40.0}]}
+
+
+def test_the_table_and_the_csv_show_the_sizes_that_fit(client, monkeypatch):
+    vm = {**METRICS["resources"][1], "alternatives": ALTERNATIVES}
+    serve(monkeypatch, {"runId": "r1", "metrics": {**METRICS, "resources": [vm]}, "subscriptions": [{"id": SUB, "name": "Prod", "resourceCount": 1}]})
+    html = page(client, "?kind=vm")
+    assert "Standard_D2s_v5 · fit 85% · saves 210 USD/mo" in html and "Standard_E2s_v5 · fit 55%" in html
+    csv = client.get("/rightsizing.csv?kind=vm").get_data(as_text=True)
+    assert "Best size that fits" in csv and "Standard_D2s_v5" in csv
+
+
+def test_the_resource_page_lists_the_sizes_that_fit(client, monkeypatch):
+    rid = "/subscriptions/" + SUB + "/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
+    vm = {**METRICS["resources"][0], "id": rid, "name": "vm1", "alternatives": ALTERNATIVES}
+    summary = {"runId": "r1", "metrics": {**METRICS, "resources": [vm]}, "subscriptions": [{"id": SUB, "name": "Prod"}]}
+    monkeypatch.setattr(data, "latest_run", lambda completed_only=False: {"id": "r1", "status": "completed"})
+    monkeypatch.setattr(data, "summary", lambda run_id: summary)
+    monkeypatch.setattr(data, "all_findings", lambda *a, **k: [])
+    monkeypatch.setattr(data, "resources", lambda run_id: ([{"id": rid, "name": "vm1", "type": "microsoft.compute/virtualmachines", "subscriptionId": SUB, "resourceGroup": "rg1", "location": "eastus", "detail": "x", "tags": 0}], False))
+    monkeypatch.setattr(data, "rows_of", lambda run_id, kind: [])
+    monkeypatch.setattr(data, "series_of", lambda run_id, resource_id: None)
+    html = client.get("/resource?id=" + rid).get_data(as_text=True)
+    assert "Sizes that fit" in html and "Standard_D2s_v5" in html and "fit 85% (peak would be 60.0%)" in html and "the current size costs 280 USD/mo" in html

@@ -14,7 +14,7 @@ PILLARS = (
     "Performance Efficiency",
 )
 SEVERITIES = ("critical", "high", "medium", "low")
-SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops", "diagnostics", "keyvault", "entra", "lifecycle", "security", "access")
+SOURCES = ("builtin", "checklist", "advisor", "defender", "governance", "metrics", "finops", "diagnostics", "keyvault", "entra", "lifecycle", "security", "access", "quotas")
 SOURCE_LABELS = {
     "builtin": "Built-in rules",
     "checklist": "Review checklists",
@@ -29,6 +29,7 @@ SOURCE_LABELS = {
     "lifecycle": "Storage lifecycle",
     "security": "Security signals",
     "access": "Access and policy",
+    "quotas": "Quotas",
 }
 TENANT_PARTITION = "tenant"
 QUEUE_NAME = "refresh-requests"

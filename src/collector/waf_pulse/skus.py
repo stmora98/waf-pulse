@@ -9,15 +9,16 @@ MAX_PAGES = 5
 
 
 def parse(body):
-    """{size name (lower): {vcpus, memoryGB, iops, restricted}} from one page of the SKUs API."""
+    """{size name (lower): {name, vcpus, memoryGB, iops, arch, gpus, premium, restricted}} from one page of the SKUs API."""
     sizes = {}
     for item in (body or {}).get("value", []):
         if str(item.get("resourceType", "")).lower() != "virtualmachines":
             continue
         caps = {c.get("name"): c.get("value") for c in item.get("capabilities", [])}
         sizes[str(item.get("name", "")).lower()] = {
-            "vcpus": _number(caps.get("vCPUs")), "memoryGB": _number(caps.get("MemoryGB")),
-            "iops": _number(caps.get("UncachedDiskIOPS")),
+            "name": item.get("name", ""), "vcpus": _number(caps.get("vCPUs")), "memoryGB": _number(caps.get("MemoryGB")),
+            "iops": _number(caps.get("UncachedDiskIOPS")), "arch": caps.get("CpuArchitectureType") or "x64",
+            "gpus": _number(caps.get("GPUs")) or 0, "premium": str(caps.get("PremiumIO", "")).lower() == "true",
             "restricted": any(r.get("reasonCode") for r in item.get("restrictions", [])),
         }
     return sizes

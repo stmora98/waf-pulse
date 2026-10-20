@@ -368,6 +368,10 @@ def apply_summary(summary, resolved, rulestats=None, findings=None):
                 for currency, amount in currencies.items():
                     totals[currency] += amount
         scoped["advisorSavings"] = {currency: round(amount, 2) for currency, amount in totals.items()}
+    quotas = summary.get("quotas")
+    if quotas:
+        rows = [r for r in quotas.get("rows", []) if str(r.get("subscriptionId", "")).lower() in kept]
+        scoped["quotas"] = {**quotas, "rows": rows, "atRisk": sum(1 for r in rows if r["percent"] >= 80), "checked": len(rows)}
     commitments = summary.get("commitments")
     if commitments:
         items = [i for i in commitments.get("items", []) if str(i.get("subscriptionId", "")).lower() in kept]
@@ -376,8 +380,8 @@ def apply_summary(summary, resolved, rulestats=None, findings=None):
             for term, amount in item["terms"].items():
                 totals[item["currency"]][term] += amount
         scoped["commitments"] = {"items": items, "totals": {c: {t: round(a, 2) for t, a in terms.items()} for c, terms in totals.items()}} if items else {}
-    if resolved.resource_level and (summary.get("secureScore") or commitments or summary.get("advisorSavings")):
-        notes.append("Secure Score, Defender plans, commitments and usage savings are reported per subscription: only the subscription and management group filters narrow them.")
+    if resolved.resource_level and (summary.get("secureScore") or commitments or summary.get("advisorSavings") or quotas):
+        notes.append("Secure Score, Defender plans, commitments, quotas and usage savings are reported per subscription: only the subscription and management group filters narrow them.")
     scoped["scopeNotes"] = notes
     return scoped
 

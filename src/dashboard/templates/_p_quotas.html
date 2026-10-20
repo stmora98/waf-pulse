@@ -1,0 +1,16 @@
+{% set q = summary.quotas if summary and summary.quotas else None %}
+{% if q and q.rows %}
+  <div class="panel" id="quotas">
+    <h3>Quota usage</h3>
+    <p class="muted">{{ q.checked }} compute and network quotas in use in the regions with resources; {{ q.atRisk }} at 80% or more. The ones closest to the limit come first.</p>
+    <div class="table-wrap"><table class="narrow">
+      <thead><tr><th>Quota</th><th>Region</th><th>Subscription</th><th>Used</th></tr></thead>
+      <tbody>{% for r in q.rows[:12] %}
+        <tr><td>{{ r.name }}</td><td>{{ r.region }}</td><td class="muted">{{ names.get(r.subscriptionId, r.subscriptionId) if names else r.subscriptionId }}</td>
+          <td><span class="chip {{ 'as-saturated' if r.percent >= 95 else 'as-under' if r.percent >= 80 else 'as-right' }}">{{ r.percent }}%</span> <span class="muted">{{ '{:g}'.format(r.current) }} of {{ '{:g}'.format(r.limit) }}</span></td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </div>
+{% elif q %}
+  <div class="panel" id="quotas"><h3>Quota usage</h3><p class="muted">No quota in use in the filtered subscriptions.</p></div>
+{% endif %}

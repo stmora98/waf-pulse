@@ -39,6 +39,7 @@
           {% include "_finops_scoped.html" %}
           <p class="muted">Below: the monthly trends, anomalies, rate options and budgets, which are always for the whole tenant.</p>
         {% endif %}
+        {% if waste and waste.rules %}{% include "_waste.html" %}{% endif %}
         {% include "_finops.html" %}
       {% endif %}
 
@@ -65,6 +66,8 @@
           {% include "_p_rightsizing.html" %}
         {% elif slug == 'performance' %}
           {% include "_p_rightsizing.html" %}
+        {% elif slug == 'reliability' %}
+          {% include "_p_quotas.html" %}
         {% elif slug == 'operations' %}
           {% include "_p_diagnostics.html" %}
           <div class="panel"><h3>Governance</h3><p class="muted">Management groups, policy, access and locks.</p><p><a href="{{ url_for('governance_page') }}">Open the Governance page</a></p></div>

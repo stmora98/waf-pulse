@@ -38,11 +38,11 @@
   </ul>
 {% endmacro %}
 
-{% macro recommendations_table(rows, source_labels, filter=false, show_pillar=false) %}
+{% macro recommendations_table(rows, source_labels, filter=false, show_pillar=false, saves=none) %}
   {% if filter %}<p class="filter"><label>Filter <input type="search" id="rec-filter" data-filter-table="recs" placeholder="Type to filter recommendations" autocomplete="off"></label></p>{% endif %}
   <div class="table-wrap">
     <table id="recs">
-      <thead><tr><th>Severity</th><th>Action</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Source</th><th>Resources</th></tr></thead>
+      <thead><tr><th>Severity</th><th>Action</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Source</th><th>Resources</th>{% if saves %}<th title="What the resources cost in the last 30 days: the most removing them saves">Saves (30 d)</th>{% endif %}</tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
@@ -51,6 +51,7 @@
             {% if show_pillar %}<td>{{ r.pillar }}</td>{% endif %}
             <td>{{ source_labels.get(r.source, r.source) }}</td>
             <td>{{ r.resources }}</td>
+            {% if saves %}<td>{% if saves.by_rule.get(r.ruleId) %}<strong>{{ '{:,.0f}'.format(saves.by_rule[r.ruleId]) }}</strong> <span class="muted">{{ saves.currency }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>{% endif %}
           </tr>
         {% endfor %}
       </tbody>
@@ -159,12 +160,13 @@
       <h3>Fix first</h3>
       <p class="muted">The recommendations that would raise the score the most if they were fixed everywhere, then the ones that reach resources facing the internet.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>Recommendation</th><th>Severity</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Resources</th><th>Facing the internet</th><th>Score</th></tr></thead>
+        <thead><tr><th>#</th><th>Recommendation</th><th>Severity</th>{% if show_pillar %}<th>Pillar</th>{% endif %}<th>Resources</th><th>Facing the internet</th><th>Score</th>{% if items | selectattr('saves') | list %}<th>Saves (30 d)</th>{% endif %}</tr></thead>
         <tbody>{% for r in items %}
           <tr><td>{{ loop.index }}</td><td><a href="{{ url_for('rule_page', rule_id=r.ruleId) }}">{{ r.title }}</a></td><td><span class="chip {{ r.severity }}">{{ r.severity }}</span></td>
             {% if show_pillar %}<td>{{ r.pillar }}</td>{% endif %}<td><a href="{{ url_for('affected_page', rule=r.ruleId) }}">{{ r.resources }}</a></td>
             <td>{% if r.internet %}<span class="chip high">{{ r.internet }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
-            <td>{% if r.points %}<strong>+{{ r.points }}</strong> <span class="muted">points</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>
+            <td>{% if r.points %}<strong>+{{ r.points }}</strong> <span class="muted">points</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+            {% if items | selectattr('saves') | list %}<td>{% if r.saves %}<strong>{{ '{:,.0f}'.format(r.saves) }}</strong>{% else %}<span class="muted">–</span>{% endif %}</td>{% endif %}</tr>
         {% endfor %}</tbody>
       </table></div>
     </section>
