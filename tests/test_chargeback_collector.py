@@ -43,6 +43,8 @@ def test_discover_tag_keys_override_and_ranking(monkeypatch):
     from waf_pulse import graph
     monkeypatch.setattr(graph, "query", lambda *a, **k: [{"k": "created-at", "resources": 99}, {"k": "Environment", "resources": 3}, {"k": "CostCenter", "resources": 1}])
     assert spend.discover_tag_keys(None, [SUB_A]) == ["CostCenter", "Environment", "created-at"]
+    monkeypatch.setattr(graph, "query", lambda *a, **k: [{"k": "environment", "resources": 5}, {"k": "Environment", "resources": 9}, {"k": "app", "resources": 1}])
+    assert spend.discover_tag_keys(None, [SUB_A]) == ["app", "Environment"]
     monkeypatch.setattr(graph, "query", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no")))
     assert spend.discover_tag_keys(None, [SUB_A]) == []
 

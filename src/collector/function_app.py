@@ -17,7 +17,7 @@ import azure.functions as func
 
 from waf_pulse import (
     access, advisor, checklists, collect, credentials, defender, diagnostics, entra, finops, governance, graph, keyvault, lifecycle, metrics,
-    quotas, security, store, suppress,
+    network, quotas, security, store, suppress,
 )
 
 app = df.DFApp()
@@ -86,6 +86,7 @@ def assessment_orchestrator(context: df.DurableOrchestrationContext):
             tasks.append(context.call_activity("act_security", scope))
             tasks.append(context.call_activity("act_access", scope))
             tasks.append(context.call_activity("act_quotas", scope))
+            tasks.append(context.call_activity("act_network", scope))
             tasks.append(context.call_activity("act_entra", scope))
         yield context.task_all(tasks)
 
@@ -298,6 +299,20 @@ def act_access(payload: dict):
         return {"key": "access", "findings": len(findings)}
     except Exception as exc:
         return _record_failure(run_id, "access", exc)
+
+
+@app.activity_trigger(input_name="payload")
+def act_network(payload: dict):
+    run_id = payload["runId"]
+    try:
+        findings, stats, dataset, rows, errors = network.collect(credentials.collector_credential(), run_id, payload["subscriptions"])
+        store.save_findings(findings)
+        store.save_stats(run_id, "network", {"stats": stats, "errors": errors})
+        store.save_dataset(run_id, "network", dataset)
+        store.save_rows(run_id, "netrows", rows, chunk=150)
+        return {"key": "network", "findings": len(findings)}
+    except Exception as exc:
+        return _record_failure(run_id, "network", exc)
 
 
 @app.activity_trigger(input_name="payload")

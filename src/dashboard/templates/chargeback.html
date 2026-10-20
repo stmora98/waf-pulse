@@ -16,6 +16,7 @@
         <a class="tab{% if ctx.view == 'tag' %} active{% endif %}" href="{{ url_for('chargeback_page', view='tag', month=ctx.period) }}"{% if ctx.view == 'tag' %} aria-current="page"{% endif %}>By tag</a>
       </nav>
 
+      {% if ctx.months %}
       <form class="filterbar" method="get" action="{{ url_for('chargeback_page') }}">
         <input type="hidden" name="view" value="{{ ctx.view }}">
         <label class="muted" for="cb-month">Period</label>
@@ -32,6 +33,7 @@
         <noscript><button type="submit">Show</button></noscript>
         <a class="chip" href="{{ url_for('chargeback_csv', view=ctx.view, month=ctx.period, key=ctx.key) }}">Download CSV</a>
       </form>
+      {% endif %}
 
       {% if ctx.chart %}
         <section class="panel">

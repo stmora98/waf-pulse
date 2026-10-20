@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% from "_macros.html" import azure_link %}
+{% block title %}Network · WAF Pulse{% endblock %}
+{% block content %}
+    <h2>Network</h2>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% elif not ctx %}
+      <section class="notice">There is no network data in this run yet. Refresh once the collector has run: it reads virtual networks, peerings, firewalls, gateways and security groups with the Reader role.</section>
+    {% else %}
+      {% set f = ctx.facts %}
+      <p class="muted">The virtual networks of your subscriptions, how they connect, and what to improve. Everything follows the filters above.</p>
+      {% if ctx.truncated %}<p class="notice scope-note">The tenant has more private endpoints or public IPs than this page keeps; the biggest are shown.</p>{% endif %}
+      <section class="cards compact">
+        <div class="card na"><span class="card-title">Virtual networks</span><span class="card-score">{{ f.vnets }}</span><span class="muted">{{ f.subnets }} subnets · {{ f.peerings }} peering(s)</span></div>
+        <div class="card {% if f.noNsg %}warn{% else %}good{% endif %}"><span class="card-title">Subnets without NSG</span><span class="card-score">{{ f.noNsg }}</span><span class="muted">reserved subnets excluded</span></div>
+        <div class="card {% if f.nsgExposed %}bad{% else %}good{% endif %}"><span class="card-title">NSGs open to the internet</span><span class="card-score">{{ f.nsgExposed }}</span><span class="muted">of {{ f.nsgs }} group(s)</span></div>
+        <div class="card na"><span class="card-title">Public IPs</span><span class="card-score">{{ f.publicIps }}</span><span class="muted">{{ f.publicIpsFree }} not attached</span></div>
+        <div class="card na"><span class="card-title">Edge and access</span><span class="card-score">{{ f.firewalls + f.gateways + f.bastions + f.appgws }}</span><span class="muted">{{ f.firewalls }} firewall · {{ f.gateways }} gateway · {{ f.bastions }} Bastion · {{ f.appgws }} App GW</span></div>
+        <div class="card {% if f.paasOpen %}warn{% else %}good{% endif %}"><span class="card-title">Services open to the internet</span><span class="card-score">{{ f.paasOpen }}</span><span class="muted">no private endpoint · {{ f.privateEndpoints }} endpoint(s) exist</span></div>
+      </section>
+
+      <nav class="tabs" aria-label="Network sections">
+        {% for key, label in tabs %}
+          <a class="tab{% if key == tab %} active{% endif %}" href="{{ url_for('network_page', tab=key) }}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+      </nav>
+
+      {% if tab == 'topology' %}
+        {% if diagram %}
+          <section class="panel" id="topology">
+            <h3>Topology</h3>
+            <p class="muted">Hubs sit on top with the networks that peer to them below; networks with no peering are listed apart. Select a network to see its subnets, peerings and what was found.</p>
+            <div class="diagram-scroll">
+              <svg class="net" viewBox="0 0 {{ diagram.width }} {{ diagram.height }}" width="{{ diagram.width }}" height="{{ diagram.height }}" role="img" aria-label="Network topology">
+                {% for b in diagram.bands %}<text class="net-band" x="{{ b.x }}" y="{{ b.y }}">{{ b.text }}</text>{% endfor %}
+                {% for e in diagram.edges %}
+                  <path class="net-edge {{ e.cls }}" d="{{ e.d }}"></path>
+                  {% if e.label %}<text class="net-edge-label" x="{{ e.lx }}" y="{{ e.ly }}" text-anchor="middle">{{ e.label }}</text>{% endif %}
+                {% endfor %}
+                {% for n in diagram.nodes %}
+                  {% if n.onprem %}
+                    <g class="net-node onprem" transform="translate({{ n.x }},{{ n.y }})">
+                      <rect width="{{ n.w }}" height="{{ n.h }}" rx="27"></rect>
+                      <text x="{{ n.w // 2 }}" y="23" text-anchor="middle" class="net-title">{{ n.name }}</text>
+                      <text x="{{ n.w // 2 }}" y="41" text-anchor="middle" class="net-sub">{{ n.address }}{% if n.meta %} · {{ n.meta }}{% endif %}</text>
+                    </g>
+                  {% else %}
+                    <a href="{{ url_for('network_page', tab='topology', vnet=n.id) }}#detail">
+                      <g class="net-node{% if n.severity %} sev-{{ n.severity }}{% endif %}{% if n.selected %} selected{% endif %}" transform="translate({{ n.x }},{{ n.y }})">
+                        <title>{{ n.full }}{% if n.findings %} · {{ n.findings }} finding(s){% endif %}</title>
+                        <rect width="{{ n.w }}" height="{{ n.h }}" rx="10"></rect>
+                        <text x="12" y="25" class="net-title">{{ n.name }}</text>
+                        <text x="12" y="46" class="net-sub">{{ n.address }}</text>
+                        <text x="12" y="64" class="net-sub">{{ n.meta }}</text>
+                        {% for b in n.badges %}
+                          <g transform="translate({{ b.x }},78)"><rect width="{{ b.w }}" height="20" rx="10" class="net-badge"></rect><text x="{{ b.w // 2 }}" y="14" text-anchor="middle" class="net-badge-text">{{ b.text }}</text></g>
+                        {% endfor %}
+                        {% if n.findings %}<g transform="translate({{ n.w - 38 }},8)"><rect width="30" height="18" rx="9" class="net-count"></rect><text x="15" y="13" text-anchor="middle" class="net-count-text">{{ n.findings }}</text></g>{% endif %}
+                      </g>
+                    </a>
+                  {% endif %}
+                {% endfor %}
+              </svg>
+            </div>
+            <p class="muted net-legend"><span class="key ok"></span> peering connected <span class="key broken"></span> peering broken or on one side only <span class="key sev"></span> number of findings on the network</p>
+          </section>
+        {% else %}
+          <section class="notice">No virtual network matches the filters.</section>
+        {% endif %}
+
+        {% if selected and detail is defined %}
+          <section class="panel" id="detail">
+            <h3>{{ selected.name }} <span class="muted">· {{ selected.loc }}</span> {{ azure_link(selected.id) }}</h3>
+            <p class="muted">Address space {{ selected.prefixes | join(', ') or '–' }} · DNS {{ selected.dns | join(', ') if selected.dns else 'Azure default' }} · resource group {{ selected.rg }}{% if selected.ddos %} · DDoS protection on{% endif %}</p>
+            {% if detail.findings %}
+              <div class="table-wrap"><table class="narrow">
+                <thead><tr><th>Severity</th><th>Finding</th></tr></thead>
+                <tbody>{% for x in detail.findings %}<tr><td><span class="chip {{ x.severity }}">{{ x.severity }}</span></td><td><a href="{{ url_for('rule_page', rule_id=x.ruleId) }}">{{ x.title }}</a></td></tr>{% endfor %}</tbody>
+              </table></div>
+            {% endif %}
+            <h4>Subnets</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Subnet</th><th>Range</th><th>In use</th><th>Security group</th><th>Route table</th><th>Delegated to</th></tr></thead>
+              <tbody>
+                {% for s in detail.subnets %}
+                  <tr>
+                    <td>{{ s.name }}{% if s.reserved %} <span class="chip">reserved</span>{% endif %}</td><td>{{ s.prefix }}</td>
+                    <td>{% if s.percent is none %}–{% else %}{{ s.used }} of {{ s.capacity }} ({{ s.percent }}%){% endif %}</td>
+                    <td>{% if s.nsg %}{{ s.nsgName }}{% elif s.reserved %}<span class="muted">not needed</span>{% else %}<span class="chip medium">none</span>{% endif %}</td>
+                    <td>{{ s.routeTableName or '–' }}</td><td>{{ s.delegation or '–' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table></div>
+            {% if detail.peerings %}
+              <h4>Peerings</h4>
+              <div class="table-wrap"><table class="narrow">
+                <thead><tr><th>Peered network</th><th>State</th><th>Options</th></tr></thead>
+                <tbody>
+                  {% for p in detail.peerings %}
+                    <tr>
+                      <td>{% if p.known %}<a href="{{ url_for('network_page', tab='topology', vnet=p.remote) }}#detail">{{ p.name }}</a>{% else %}{{ p.name }} <span class="muted">(outside the scan)</span>{% endif %}</td>
+                      <td>{% if p.state.lower() == 'connected' and not p.oneSided %}<span class="chip">Connected</span>{% else %}<span class="chip high">{{ 'One side only' if p.oneSided else p.state }}</span>{% endif %}</td>
+                      <td>{% if p.forwarded %}forwarded traffic{% endif %}{% if p.gatewayTransit %} · gateway transit{% endif %}{% if p.useRemoteGateways %} · uses remote gateways{% endif %}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table></div>
+            {% endif %}
+            {% if detail.devices %}
+              <h4>In this network</h4>
+              <ul class="plain">
+                {% for d in detail.devices %}<li>{{ labels.get(d.kind, d.kind) }}: <a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a>{% if d.sku %} <span class="muted">{{ d.sku }}</span>{% endif %}{% if d.kind == 'firewall' and d.threatIntel %} <span class="muted">threat intelligence {{ d.threatIntel | lower }}</span>{% endif %}{% if d.kind == 'pe' %} <span class="muted">→ {{ d.targetName }}</span>{% endif %} {{ azure_link(d.id, 'Azure') }}</li>{% endfor %}
+              </ul>
+            {% endif %}
+          </section>
+        {% endif %}
+
+      {% elif tab == 'networks' %}
+        {% if rows %}
+          <div class="table-wrap"><table>
+            <thead><tr><th>Network</th><th>Address space</th><th>Region</th><th>Subnets</th><th>No NSG</th><th>Peerings</th><th>DNS</th><th>Findings</th><th>Subscription</th><th></th></tr></thead>
+            <tbody>
+              {% for r in rows %}
+                <tr>
+                  <td><a href="{{ url_for('network_page', tab='topology', vnet=r.id) }}#detail">{{ r.name }}</a><br><span class="muted">{{ r.rg }}</span></td>
+                  <td>{{ r.address }}</td><td>{{ r.loc }}</td><td>{{ r.subnets }}</td>
+                  <td>{% if r.noNsg %}<span class="chip medium">{{ r.noNsg }}</span>{% else %}0{% endif %}</td><td>{{ r.peerings }}</td><td>{{ r.dns }}</td>
+                  <td>{% if r.findings %}<span class="chip {{ r.severity }}">{{ r.findings }}</span>{% else %}0{% endif %}</td><td>{{ r.sub }}</td>
+                  <td>{{ azure_link(r.id, 'Azure') }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table></div>
+        {% else %}
+          <section class="notice">No virtual network matches the filters.</section>
+        {% endif %}
+
+      {% elif tab == 'security' %}
+        <section class="panel">
+          <h3>Security groups open to the internet</h3>
+          {% if security.nsgs %}
+            <p class="muted">Inbound allow rules whose source is the internet or any address. A rule that allows a port is judged by itself; the deny rules around it are not evaluated.</p>
+            <div class="table-wrap"><table class="narrow">
+              <thead><tr><th>Network security group</th><th>Ports open</th><th>Subnets</th><th>NICs</th><th></th></tr></thead>
+              <tbody>{% for d in security.nsgs %}<tr><td><a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a></td>
+                <td>{% for p in d.internetPorts %}<span class="chip {{ 'critical' if p == '*' else 'high' if p in ('22','3389','1433','3306','5432') else 'medium' }}">{{ 'any port' if p == '*' else p }}</span> {% endfor %}</td>
+                <td>{{ d.subnets }}</td><td>{{ d.nics }}</td><td>{{ azure_link(d.id, 'Azure') }}</td></tr>{% endfor %}</tbody>
+            </table></div>
+          {% else %}<p class="muted">No network security group allows the internet in.</p>{% endif %}
+        </section>
+        <section class="panel">
+          <h3>Firewalls and web entry points</h3>
+          {% if security.firewalls or security.appgws %}
+            <div class="table-wrap"><table class="narrow">
+              <thead><tr><th>Resource</th><th>Kind</th><th>Tier</th><th>Protection</th><th></th></tr></thead>
+              <tbody>
+                {% for d in security.firewalls %}<tr><td><a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a></td><td>Azure Firewall</td><td>{{ d.sku or '–' }}</td>
+                  <td>{% if d.managed %}Secure hub{% elif d.policy %}Firewall policy{% elif d.threatIntel | lower == 'off' %}<span class="chip medium">threat intelligence off</span>{% else %}threat intelligence {{ d.threatIntel | lower }}{% endif %}</td><td>{{ azure_link(d.id, 'Azure') }}</td></tr>{% endfor %}
+                {% for d in security.appgws %}<tr><td><a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a></td><td>Application Gateway{% if d.public %} (public){% endif %}</td><td>{{ d.sku or '–' }}</td>
+                  <td>{% if d.waf %}WAF on{% elif d.public %}<span class="chip medium">no WAF</span>{% else %}internal{% endif %}</td><td>{{ azure_link(d.id, 'Azure') }}</td></tr>{% endfor %}
+              </tbody>
+            </table></div>
+          {% else %}<p class="muted">No Azure Firewall or Application Gateway in the filtered resources.</p>{% endif %}
+        </section>
+        <section class="panel">
+          <h3>Public IP addresses</h3>
+          {% if security.pips %}
+            <div class="table-wrap"><table class="narrow">
+              <thead><tr><th>Name</th><th>Address</th><th>SKU</th><th>Attached to</th><th></th></tr></thead>
+              <tbody>{% for d in security.pips %}<tr><td><a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a></td><td>{{ d.ip or '–' }}</td>
+                <td>{% if d.sku | lower == 'basic' %}<span class="chip high">Basic (retired)</span>{% else %}{{ d.sku or '–' }}{% endif %}</td>
+                <td>{% if d.attached %}{{ d.attachedName or 'a resource' }}{% else %}<span class="chip">not attached</span>{% endif %}</td><td>{{ azure_link(d.id, 'Azure') }}</td></tr>{% endfor %}</tbody>
+            </table></div>
+          {% else %}<p class="muted">No public IP address in the filtered resources.</p>{% endif %}
+        </section>
+        <section class="panel">
+          <h3>Services reachable from the internet without a private endpoint</h3>
+          {% if security.paas %}
+            <p class="muted">Storage accounts, Key Vaults, SQL servers, Cosmos DB accounts and container registries that accept public traffic and have no private endpoint. Use a private endpoint, or limit the firewall to the networks that need it.</p>
+            <div class="table-wrap"><table class="narrow">
+              <thead><tr><th>Resource</th><th>Kind</th><th>Region</th><th></th></tr></thead>
+              <tbody>{% for d in security.paas %}<tr><td><a href="{{ url_for('resource_page', id=d.id) }}">{{ d.name }}</a></td><td>{{ d.label }}</td><td>{{ d.loc }}</td><td>{{ azure_link(d.id, 'Azure') }}</td></tr>{% endfor %}</tbody>
+            </table></div>
+          {% else %}<p class="muted">Every supported service has a private endpoint or a closed firewall.</p>{% endif %}
+        </section>
+
+      {% else %}
+        {% if groups %}
+          <p class="muted">What to improve in the network, worst first. Select one to see every resource affected and what to do. Rules about security groups, public IPs and exposed services are included.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Severity</th><th>Recommendation</th><th>Pillar</th><th>Resources</th><th>Examples</th></tr></thead>
+            <tbody>
+              {% for g in groups %}
+                <tr>
+                  <td><span class="chip {{ g.severity }}">{{ g.severity }}</span></td>
+                  <td><a href="{{ url_for('rule_page', rule_id=g.ruleId) }}">{{ g.title }}</a><br><span class="muted"><code>{{ g.ruleId }}</code></span></td>
+                  <td>{{ g.pillar }}</td><td>{{ g.count }}</td><td>{{ g.resources | join(', ') }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table></div>
+        {% else %}
+          <section class="notice">No network finding for the filtered resources.</section>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+{% endblock %}

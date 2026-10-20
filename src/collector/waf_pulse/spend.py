@@ -186,7 +186,13 @@ def discover_tag_keys(credential, subscriptions, override=""):
         rows = graph.query(credential, list(subscriptions), kql, max_rows=60)
     except Exception:
         return []
-    keys = [(str(row.get("k") or ""), int(row.get("resources") or 0)) for row in rows if row.get("k")]
+    merged = {}   # Azure tag keys are not case sensitive: Environment and environment are one key (the most used spelling is kept)
+    for row in rows:
+        if row.get("k"):
+            key, count = str(row["k"]), int(row.get("resources") or 0)
+            seen = merged.get(key.lower())
+            merged[key.lower()] = (key if not seen or count > seen[1] else seen[0], (seen[1] if seen else 0) + count)
+    keys = list(merged.values())
     keys.sort(key=lambda item: (ALLOCATION_KEYS.index(item[0].lower()) if item[0].lower() in ALLOCATION_KEYS else len(ALLOCATION_KEYS), -item[1]))
     return [key for key, _ in keys[:MAX_TAG_KEYS]]
 

@@ -19,6 +19,7 @@ import governance_view
 import history
 import insights
 import landing_zone
+import network_view
 import priority
 import scope
 import security_view
@@ -225,6 +226,10 @@ def _data_sources(summary):
         ("available" if entra else "empty"), None,
         ("Needs Graph permissions for " + ", ".join(missing) + ".") if missing else "App credentials, guests and incidents.")
     add("Governance", "available" if summary.get("governance") else "empty", records("governance"), "Policy, access, locks and Defender plans.")
+    network = summary.get("network")
+    failed = sum(1 for e in errors if str(e.get("ruleId", "")).startswith("network-"))
+    add("Network topology", "partial" if network and failed else "available" if network else "empty", (network or {}).get("vnets"),
+        f"{failed} network query(ies) could not run." if network and failed else "Virtual networks, peerings, firewalls, gateways and security groups.")
     return rows
 
 @app.get("/")
@@ -1226,6 +1231,53 @@ def suppressions_page():
     entries = sorted(_suppressions(), key=lambda e: (bool(e["until"]) and e["until"] < today, e["ruleId"], e["resourceName"]))
     rows = [{**e, "expired": bool(e["until"]) and e["until"] < today} for e in entries]
     return render_template("suppressions.html", error=None, entries=rows, summary=summary, durations=suppress.DURATIONS)
+
+
+NETWORK_TABS = (("topology", "Topology"), ("networks", "Virtual networks"), ("security", "Security"), ("insights", "Insights"))
+
+
+def _network_context(summary):
+    """What the Network page draws from the latest run, for the filters; None when the run has no network data."""
+    if not summary or not summary.get("network"):
+        return None
+    chosen = _resolved(summary)
+    rows = data.rows_of(summary["runId"], "netrows")
+    vnets, devices = network_view.split_rows(rows)
+    vnets = [v for v in vnets if chosen.row_ok(network_view.probe(v))]
+    devices = [d for d in devices if chosen.row_ok(network_view.probe(d))]
+    names = {sub["id"].lower(): sub["name"] for sub in summary.get("subscriptions", [])}
+    findings = [f for f in _all_findings(summary) if f.get("ruleId") in network_view.NETWORK_RULES]
+    return {"vnets": vnets, "devices": devices, "names": names, "findings": findings, "by_resource": network_view.findings_by_resource(findings),
+            "facts": network_view.facts(vnets, devices), "truncated": bool(summary["network"].get("truncated"))}
+
+
+@app.get("/network")
+def network_page():
+    tab = _allowed(request.args.get("tab"), [key for key, _ in NETWORK_TABS]) or "topology"
+    try:
+        _, summary = _latest()
+        context = _network_context(summary)
+    except Exception:
+        logging.exception("Could not load the network data")
+        return render_template("network.html", error="The data store is not reachable right now.", ctx=None, summary=None, tabs=NETWORK_TABS, tab=tab), 503
+    extra = {}
+    if context:
+        selected = str(request.args.get("vnet") or "").lower()
+        extra["selected"] = next((v for v in context["vnets"] if str(v["id"]).lower() == selected), None)
+        if tab == "topology":
+            key = str(extra["selected"]["id"]).lower() if extra["selected"] else ""
+            extra["diagram"] = network_view.layout(context["vnets"], context["devices"], context["by_resource"], key) if context["vnets"] else None
+            if extra["selected"]:
+                attached = network_view.devices_by_vnet(context["devices"]).get(key, [])
+                extra["detail"] = {"subnets": network_view.subnet_rows(extra["selected"]), "devices": attached, "findings": context["by_resource"].get(key, []),
+                                   "peerings": extra["selected"].get("peerings", [])}
+        elif tab == "networks":
+            extra["rows"] = network_view.vnet_rows(context["vnets"], context["by_resource"], context["names"])
+        elif tab == "security":
+            extra["security"] = network_view.security_tables(context["vnets"], context["devices"], context["names"])
+        else:
+            extra["groups"] = network_view.insight_groups(context["findings"])
+    return render_template("network.html", error=None, ctx=context, summary=summary, tabs=NETWORK_TABS, tab=tab, labels=network_view.KIND_LABELS, **extra)
 
 
 CHARGEBACK_VIEWS = ("hierarchy", "tag")

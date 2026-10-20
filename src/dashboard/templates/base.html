@@ -8,6 +8,7 @@
   {%- elif name == 'performance' %}<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>
   {%- elif name == 'operations' %}<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/>
   {%- elif name == 'governance' %}<path d="M3 9l9-5 9 5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>
+  {%- elif name == 'network' %}<circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M12 7.2v4.3M12 11.5l-5.6 4.5M12 11.5l5.6 4.5"/>
   {%- elif name == 'history' %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
   {%- elif name == 'rightsizing' %}<path d="M5 20V10M12 20V4M19 20v-7"/><path d="M3 20h18"/>
   {%- elif name == 'resources' %}<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>
@@ -46,6 +47,7 @@
         {{ link('chargeback_page', 'Chargeback', 'cost', request.endpoint == 'chargeback_page') }}
         <p class="side-group">Manage</p>
         {{ link('resources_page', 'Resources', 'resources', request.endpoint in ('resources_page', 'resource_page')) }}
+        {{ link('network_page', 'Network', 'network', request.endpoint == 'network_page') }}
         {{ link('governance_page', 'Governance', 'governance', request.endpoint == 'governance_page') }}
         {{ link('suppressions_page', 'Suppressions', 'suppress', request.endpoint == 'suppressions_page') }}
           {{ link('history_page', 'History', 'history', request.endpoint in ('history_page', 'compare_page')) }}
