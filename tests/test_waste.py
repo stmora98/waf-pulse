@@ -72,6 +72,12 @@ def test_action_items_show_what_each_recommendation_saves(client, monkeypatch):
     assert "Saves (30 d)" not in client.get("/actions").get_data(as_text=True)
 
 
+def test_the_savings_column_stays_out_when_nothing_can_be_removed(client, monkeypatch):
+    serve(monkeypatch)
+    monkeypatch.setattr(data, "all_findings", lambda run_id, pillar=None, *a, **k: [f for f in FINDINGS if f["ruleId"] in ("COST-AHB-001", "SEC-X") and (not pillar or f["pillar"] == pillar)])
+    assert "Saves (30 d)" not in client.get("/actions").get_data(as_text=True)
+
+
 def test_the_cost_page_without_waste_has_no_panel(client, monkeypatch):
     serve(monkeypatch, costs=[{"id": "/other", "cost": 5.0}])
     html = client.get("/pillar/cost").get_data(as_text=True)

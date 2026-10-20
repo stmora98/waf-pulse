@@ -291,6 +291,7 @@ def actions_page():
     counts = {level: sum(1 for r in rules if r["severity"] == level) for level in data.SEVERITIES}
     shown = [r for r in rules if not severity or r["severity"] == severity]
     saved = _waste(summary, findings)
+    saved = saved if saved and saved["by_rule"] else None  # the column only appears when some recommendation has something to save
     return render_template(
         "actions.html", summary=summary, error=None, pillars=data.PILLARS, severities=data.SEVERITIES, sources=data.SOURCES, saves=saved,
         source_labels=data.SOURCE_LABELS, selected_pillar=pillar, selected_severity=severity, selected_source=source,
