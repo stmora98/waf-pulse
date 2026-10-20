@@ -520,3 +520,4 @@ ul.plain li { padding: 3px 0; }
 .tabs .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs .tab:hover { color: var(--text); }
 
+table .chip { white-space: nowrap; }

@@ -20,7 +20,7 @@
       <tbody>{% for r in expo.rules[:60] %}
         <tr><td><a href="{{ url_for('resource_page', id=r.id) }}">{{ r.nsg }}</a><br><span class="muted">{{ sec_names.get(r.subscriptionId, r.subscriptionId) }}</span></td>
           <td>{{ r.rule }}</td><td>{{ r.ports }}</td><td>{{ r.source }}</td><td>{{ r.priority if r.priority is not none else '–' }}</td>
-          <td>{% if r['class'] == 'any' %}<span class="chip critical">Any port</span>{% elif r['class'] == 'management' %}<span class="chip critical">Management port</span>{% elif r['class'] == 'database' %}<span class="chip high">Database or file sharing</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>
+          <td>{% if r['class'] == 'any' %}<span class="chip critical">Any port</span>{% elif r['class'] == 'management' %}<span class="chip critical">Admin port</span>{% elif r['class'] == 'database' %}<span class="chip high">Database port</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>
       {% endfor %}</tbody>
     </table></div>
   </section>

@@ -105,7 +105,7 @@ def test_vulnerabilities_tab(client, monkeypatch):
 def test_exposure_tab_marks_risky_rules(client, monkeypatch):
     serve(monkeypatch)
     html = page(client, "exposure")
-    assert "Inbound rules that allow the internet" in html and "Any port" in html and "Management port" in html and "20.1.2.3" in html and "nsg2" in html
+    assert "Inbound rules that allow the internet" in html and "Any port" in html and "Admin port" in html and "20.1.2.3" in html and "nsg2" in html
     assert "Public IP addresses" in html
 
 
