@@ -510,7 +510,7 @@ ul.plain li { padding: 3px 0; }
 .suppress-btn { font-size: 0.8rem; padding: 3px 10px; }
 
 /* global filter bar */
-.scopebar { margin: 4px 0 12px; }
+.scopebar { max-width: 1180px; margin: 4px auto 12px; padding: 0 20px; box-sizing: border-box; }
 .fpill .fremove { padding: 5px 10px; color: var(--muted); font-size: 1.1rem; line-height: 1; max-width: none; }
-.scope-note { margin: 0 0 8px; }
+.scope-note { max-width: 1140px; width: calc(100% - 40px); margin: 0 auto 8px; box-sizing: border-box; }
 
