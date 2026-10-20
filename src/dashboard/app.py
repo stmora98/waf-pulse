@@ -19,6 +19,7 @@ import history
 import insights
 import landing_zone
 import scope
+import security_view
 import suppress
 import rightsizing
 
@@ -302,15 +303,19 @@ def pillar_page(slug):
                                source_labels=data.SOURCE_LABELS), 503
     rules = insights.group_rules(findings)
     spend = _spend_context(summary, rules) if slug == "cost" else {}
+    tab = "posture"
     if slug == "security":
         spend = _security_context(summary)
+        tab = _allowed(request.args.get("tab"), security_view.TAB_KEYS) or "posture"
+        if tab != "posture":
+            spend = {**spend, **_security_tab_context(summary, tab)}
     if slug == "cost" and summary and scope.is_active(_scope()):
         try:
             spend = {**spend, "scoped_spend": _scoped_spend(summary)}
         except Exception:
             logging.exception("Could not read the spend of the filtered resources")
     return render_template(
-        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, **spend,
+        "pillar.html", pillar=pillar, slug=slug, summary=summary, error=None, severities=data.SEVERITIES, tab=tab, security_tabs=security_view.SECURITY_TABS, **spend,
         source_labels=data.SOURCE_LABELS, totals=insights.severity_totals(findings), rules=rules,
         partial=len(findings) >= data.MAX_FINDINGS, cap=data.MAX_FINDINGS,
         source_chart=charts.hbars([(data.SOURCE_LABELS.get(name, name), count, url_for("affected_page", pillar=pillar, source=name))
@@ -357,6 +362,37 @@ def _scoped_spend(summary):
     return {"currency": ((summary or {}).get("finops") or {}).get("currency", ""), "total": total, "resources": len(kept), "listed": len(costs),
             "share": round(100 * total / listed, 1) if listed else None, "unplaced": unplaced, "panels": panels, "have_costs": bool(costs),
             "top": sorted(kept, key=lambda r: -r["cost"])[:SCOPED_SPEND_ROWS], "names": names}
+
+
+def _security_rows(summary):
+    """The security rows the collector kept, for the filters (rows of a resource follow every filter, the rest only the subscription ones)."""
+    try:
+        rows = data.rows_of(summary["runId"], "secrows")
+    except Exception:
+        logging.exception("Could not read the security rows")
+        return [], False
+    chosen = _resolved(summary)
+    if chosen.active:
+        rows = [r for r in rows if (chosen.row_ok(r) if r.get("id") else chosen.sub_row_ok(r))]
+    return rows, True
+
+
+def _security_tab_context(summary, tab):
+    rows, ok = _security_rows(summary)
+    names = {sub["id"].lower(): sub["name"] for sub in (summary or {}).get("subscriptions", [])}
+    security = (summary or {}).get("security") or {}
+    context = {"sec_tab": tab, "sec_ok": ok, "sec_names": names, "sec_data": security, "sec_name_of": security_view.name_of}
+    if tab == "vulnerabilities":
+        context["vuln"] = security_view.vulnerabilities(rows)
+    elif tab == "exposure":
+        context["expo"] = security_view.exposure(rows)
+    elif tab == "alerts":
+        context["alerts"] = security_view.alerts(rows)
+    elif tab == "compliance":
+        context["comp"] = security_view.compliance(rows)
+    elif tab == "changes":
+        context["chg"] = security_view.changes(rows)
+    return context
 
 
 def _security_context(summary):

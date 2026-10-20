@@ -26,6 +26,10 @@
       {% for note in summary.scopeNotes or [] %}<p class="muted">{{ note }}</p>{% endfor %}
       {% if partial %}<p class="muted">Showing the first {{ cap }} findings of the run.</p>{% endif %}
 
+      {% if slug == 'security' %}{% include "_sec_nav.html" %}{% endif %}
+      {% if slug == 'security' and tab != 'posture' %}
+        {% include "_sec_" ~ tab ~ ".html" %}
+      {% else %}
       {% if slug == 'cost' %}
         {% if scoped_spend %}
           {% include "_finops_scoped.html" %}
@@ -68,6 +72,7 @@
         {% include "_p_controls.html" %}
       {% endif %}
 
+      {% endif %}
       <p class="muted">The recommendations for this pillar are in <a href="{{ url_for('actions_page', pillar=pillar) }}">Action items</a>.</p>
     {% endif %}
 {% endblock %}

@@ -1,0 +1,26 @@
+<h3 class="spend">Regulatory compliance</h3>
+{% if not sec_ok %}
+  <section class="notice error">The security data could not be read right now.</section>
+{% elif not comp.standards %}
+  <section class="notice">No regulatory compliance data{% if scope_active %} for the filters{% endif %}. Defender for Cloud assesses the standards you add under <strong>Regulatory compliance</strong> (the Microsoft cloud security benchmark comes by default with Defender CSPM or a Defender plan).</section>
+{% else %}
+  <section class="cards compact">
+    {% for s in comp.standards[:6] %}
+      <div class="card {% if s.percent is none %}na{% elif s.percent >= 80 %}good{% elif s.percent >= 50 %}warn{% else %}bad{% endif %}">
+        <span class="card-title">{{ s.standard }}</span>
+        <span class="card-score">{% if s.percent is none %}n/a{% else %}{{ s.percent }}%{% endif %}</span>
+        <span class="muted">{{ s.passed }} passed · {{ s.failed }} failed · {{ s.skipped }} skipped · {{ s.unsupported }} not supported</span>
+      </div>
+    {% endfor %}
+  </section>
+  {% if comp.controls %}
+    <section class="panel">
+      <h3>Failed controls</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Standard</th><th>Control</th><th>What it checks</th><th>Failed assessments</th></tr></thead>
+        <tbody>{% for c in comp.controls %}<tr><td>{{ c.standard }}</td><td>{{ c.control }}</td><td>{{ c.description }}</td><td>{{ c.failed }}</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+  {% endif %}
+  <p class="muted">The percentage is the share of controls that pass among the ones Defender could judge (passed and failed).</p>
+{% endif %}

@@ -246,6 +246,11 @@ class Resolved:
         kind = finding.get("resourceType") or (RESOURCE_GROUP_TYPE if resource_id.lower().count("/") == 4 else "")
         return self._resource_ok(self.attributes(resource_id, finding.get("subscriptionId"), kind))
 
+    def sub_row_ok(self, row):
+        """Rows that belong to a subscription but not to a resource (a compliance control, an installed package): they follow the
+        subscription and management group filters and leave a filter on a resource."""
+        return self.sub_ok(row.get("subscriptionId")) and not self.resource_level
+
     def row_ok(self, row):
         """Rows of the inventory, of the right-sizing data, of Advisor's advice and of the costs (all have an id)."""
         if not self.filters:

@@ -1,0 +1,50 @@
+{% from "_macros.html" import azure_link %}
+<section class="cards compact">
+  <div class="card {{ 'bad' if vuln.machines | selectattr('vulnerable') | list | length else 'na' }}"><span class="card-title">With vulnerable software</span><span class="card-score">{{ vuln.machines | selectattr('vulnerable') | list | length }}</span><span class="muted">virtual machine(s){% if sec_data.machines %} of {{ sec_data.machines.inventoried }} inventoried{% endif %}</span></div>
+  <div class="card {{ 'warn' if vuln.machines | selectattr('pastSupport') | list | length else 'na' }}"><span class="card-title">Past end of support</span><span class="card-score">{{ vuln.machines | selectattr('pastSupport') | list | length }}</span><span class="muted">virtual machine(s)</span></div>
+  <div class="card {{ 'bad' if vuln.patches | selectattr('critical') | list | length else 'na' }}"><span class="card-title">Critical patches pending</span><span class="card-score">{{ vuln.patches | selectattr('critical') | list | length }}</span><span class="muted">virtual machine(s)</span></div>
+  <div class="card {{ 'warn' if vuln.patches | length else 'na' }}"><span class="card-title">Security patches pending</span><span class="card-score">{{ vuln.patches | length }}</span><span class="muted">virtual machine(s) with critical or security patches</span></div>
+</section>
+{% if not sec_ok %}
+  <section class="notice error">The security data could not be read right now.</section>
+{% elif not vuln.machines and not vuln.patches and not vuln.software %}
+  <section class="notice">
+    Nothing to show{% if scope_active %} for the filters{% endif %}.
+    {% if not sec_data.available or not sec_data.available.software %}The software inventory comes from <strong>Defender for Servers</strong> (agentless scanning or the Defender vulnerability assessment).{% endif %}
+    {% if not sec_data.available or not sec_data.available.patches %}Pending patches come from <strong>Azure Update Manager</strong> (periodic assessment on the machines).{% endif %}
+  </section>
+{% endif %}
+{% if vuln.machines %}
+  <section class="panel">
+    <h3>Machines with vulnerable or unsupported software</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Machine</th><th>Subscription</th><th>Packages</th><th>With known vulnerabilities</th><th>Known vulnerabilities</th><th>Past end of support</th><th>Azure</th></tr></thead>
+      <tbody>{% for r in vuln.machines[:50] %}
+        <tr><td><a href="{{ url_for('resource_page', id=r.id) }}">{{ sec_name_of(r.id) }}</a>{% if r.worst %}<br><span class="muted">e.g. {{ r.worst }}</span>{% endif %}</td>
+          <td>{{ sec_names.get(r.subscriptionId, r.subscriptionId) }}</td><td>{{ r.software }}</td><td>{{ r.vulnerable }}</td><td>{{ r.vulnerabilities }}</td><td>{{ r.pastSupport }}</td><td>{{ azure_link(r.id) }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% if vuln.machines | length > 50 %}<p class="muted">Showing 50 of {{ vuln.machines | length }}.</p>{% endif %}
+  </section>
+{% endif %}
+{% if vuln.software %}
+  <section class="panel">
+    <h3>Software with known vulnerabilities on the most machines</h3>
+    <div class="table-wrap"><table class="narrow">
+      <thead><tr><th>Software</th><th>Machines</th><th>Known vulnerabilities (worst version)</th><th>Versions</th></tr></thead>
+      <tbody>{% for s in vuln.software %}<tr><td>{{ s.name }}</td><td>{{ s.machines }}</td><td>{{ s.vulnerabilities }}</td><td class="muted">{{ s.versions | join(', ') }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% if vuln.patches %}
+  <section class="panel">
+    <h3>Pending patches</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Machine</th><th>Subscription</th><th>OS</th><th>Critical</th><th>Security</th><th>Other</th><th>Assessed</th></tr></thead>
+      <tbody>{% for p in vuln.patches[:50] %}
+        <tr><td><a href="{{ url_for('resource_page', id=p.id) }}">{{ sec_name_of(p.id) }}</a></td><td>{{ sec_names.get(p.subscriptionId, p.subscriptionId) }}</td><td>{{ p.os }}</td><td>{{ p.critical }}</td><td>{{ p.security }}</td><td>{{ p.other }}</td><td class="muted">{{ p.assessed }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+<p class="muted">The findings behind these tables are in <a href="{{ url_for('actions_page', pillar='Security', source='security') }}">Action items</a>.</p>

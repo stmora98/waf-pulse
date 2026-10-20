@@ -1,0 +1,5 @@
+<nav class="tabs" aria-label="Security sections">
+  {% for key, label in security_tabs %}
+    <a class="tab{% if key == tab %} active{% endif %}" href="{{ url_for('pillar_page', slug='security') if key == 'posture' else url_for('pillar_page', slug='security', tab=key) }}"{% if key == tab %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>

@@ -514,3 +514,9 @@ ul.plain li { padding: 3px 0; }
 .fpill .fremove { padding: 5px 10px; color: var(--muted); font-size: 1.1rem; line-height: 1; max-width: none; }
 .scope-note { max-width: 1140px; width: calc(100% - 40px); margin: 0 auto 8px; box-sizing: border-box; }
 
+/* security tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 16px 0; border-bottom: 1px solid var(--line); }
+.tabs .tab { padding: 8px 14px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs .tab:hover { color: var(--text); }
+

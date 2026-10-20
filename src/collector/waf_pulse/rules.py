@@ -6,6 +6,7 @@ could have violated the rule, so one finding in a large tenant is not diluted by
 New rules (for example the Azure review checklists) are added to RULES and need no other change.
 """
 from .aoe_rules import RULES_EXTRA
+from .security_rules import RULES_SECURITY
 from .rule_model import Rule
 
 PILLARS = (
@@ -502,4 +503,4 @@ resources
     ),
 )
 
-RULES = RULES + RULES_EXTRA
+RULES = RULES + RULES_EXTRA + RULES_SECURITY

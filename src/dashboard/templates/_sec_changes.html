@@ -1,0 +1,22 @@
+{% from "_macros.html" import azure_link %}
+<h3 class="spend">Security-relevant changes · last {{ sec_data.changes.days if sec_data.changes else 14 }} days</h3>
+{% if not sec_ok %}
+  <section class="notice error">The security data could not be read right now.</section>
+{% elif not chg.changes %}
+  <section class="notice">No security-relevant changes{% if scope_active %} for the filters{% endif %}. These come from Azure Resource Graph change history (network security groups, public IPs, Key Vault, role and policy assignments, storage, SQL, firewalls, virtual machines...).</section>
+{% else %}
+  <section class="cards compact">
+    <div class="card na"><span class="card-title">Security-relevant changes</span><span class="card-score">{{ chg.changes | length }}</span><span class="muted">{% for kind, count in chg.byChange.items() %}{{ count }} {{ kind | lower }}{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+    <div class="card na"><span class="card-title">Made by</span><span class="card-score">{{ chg.byActor.get('User', 0) }}</span><span class="muted">by people{% for actor, count in chg.byActor.items() if actor != 'User' %} · {{ count }} {{ actor | lower }}{% endfor %}</span></div>
+  </section>
+  <section class="panel">
+    <h3>Latest changes</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>When (UTC)</th><th>Change</th><th>Resource</th><th>Type</th><th>By</th></tr></thead>
+      <tbody>{% for c in chg.changes[:80] %}
+        <tr><td class="muted">{{ c.ts }}</td><td>{{ c.changeType }}</td><td><a href="{{ url_for('resource_page', id=c.id) }}">{{ sec_name_of(c.id) }}</a></td>
+          <td class="muted">{{ c.type }}</td><td>{{ c.by or '–' }}{% if c.byType %} <span class="muted">· {{ c.byType | lower }}</span>{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}

@@ -1,0 +1,25 @@
+{% from "_macros.html" import azure_link %}
+<section class="cards compact">
+  {% for level, label in (('high', 'High'), ('medium', 'Medium'), ('low', 'Low'), ('informational', 'Informational')) %}
+    <div class="card {{ 'bad' if level == 'high' and alerts.bySeverity.get(level) else 'warn' if level == 'medium' and alerts.bySeverity.get(level) else 'na' }}"><span class="card-title">{{ label }} · active</span><span class="card-score">{{ alerts.bySeverity.get(level, 0) }}</span><span class="muted">alert(s)</span></div>
+  {% endfor %}
+</section>
+{% if not sec_ok %}
+  <section class="notice error">The security data could not be read right now.</section>
+{% elif not alerts.alerts %}
+  <section class="notice">No Defender for Cloud alerts{% if scope_active %} for the filters{% endif %}. Alerts come from the Defender plans that are on.</section>
+{% else %}
+  <section class="panel">
+    <h3>Alerts</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Alert</th><th>Severity</th><th>Status</th><th>Started</th><th>Resource</th><th>Defender</th></tr></thead>
+      <tbody>{% for a in alerts.alerts[:80] %}
+        <tr><td>{{ a.name }}{% if a.intent %}<br><span class="muted">{{ a.intent }}</span>{% endif %}{% if a.step %}<br><span class="muted">{{ a.step }}</span>{% endif %}</td>
+          <td><span class="chip {{ a.severity if a.severity in ('high', 'medium', 'low') else '' }}">{{ a.severity or 'n/a' }}</span></td><td>{{ a.status }}</td><td class="muted">{{ a.started }}</td>
+          <td>{% if '/providers/' in a.id %}<a href="{{ url_for('resource_page', id=a.id) }}">{{ a.entity or sec_name_of(a.id) }}</a>{% else %}{{ sec_names.get(a.subscriptionId, a.subscriptionId) }}{% endif %}</td>
+          <td>{% if a.uri and a.uri.startswith('https://') %}<a href="{{ a.uri }}" target="_blank" rel="noopener noreferrer">Open</a>{% else %}–{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% if alerts.alerts | length > 80 %}<p class="muted">Showing 80 of {{ alerts.alerts | length }}.</p>{% endif %}
+  </section>
+{% endif %}

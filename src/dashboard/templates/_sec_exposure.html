@@ -1,0 +1,37 @@
+{% from "_macros.html" import azure_link %}
+{% set sd = sec_data.exposure or {} %}
+<section class="cards compact">
+  <div class="card {{ 'bad' if expo.risky else 'na' }}"><span class="card-title">Risky inbound rules</span><span class="card-score">{{ expo.risky }}</span><span class="muted">management or database ports, or any port, from the internet</span></div>
+  <div class="card {{ 'warn' if expo.vms else 'na' }}"><span class="card-title">Machines with a public IP</span><span class="card-score">{{ expo.vms | length }}</span><span class="muted">virtual machine(s)</span></div>
+  <div class="card na"><span class="card-title">Internet inbound rules</span><span class="card-score">{{ expo.rules | length }}</span><span class="muted">allow rules open to the internet</span></div>
+  {% if sd and not scope_active %}<div class="card na"><span class="card-title">Public IP addresses</span><span class="card-score">{{ sd.publicIps }}</span><span class="muted">{{ sd.attached }} attached</span></div>{% endif %}
+</section>
+{% if not sec_ok %}
+  <section class="notice error">The security data could not be read right now.</section>
+{% elif not expo.rules and not expo.vms %}
+  <section class="notice">No internet-facing rules or machines with a public IP{% if scope_active %} for the filters{% endif %}.</section>
+{% endif %}
+{% if expo.rules %}
+  <section class="panel">
+    <h3>Inbound rules that allow the internet</h3>
+    <p class="muted">Each rule is judged on its own: the deny rules around it are not evaluated, so a rule here allows the traffic but may be blocked by another one.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Network security group</th><th>Rule</th><th>Ports</th><th>Source</th><th>Priority</th><th>Risk</th></tr></thead>
+      <tbody>{% for r in expo.rules[:60] %}
+        <tr><td><a href="{{ url_for('resource_page', id=r.id) }}">{{ r.nsg }}</a><br><span class="muted">{{ sec_names.get(r.subscriptionId, r.subscriptionId) }}</span></td>
+          <td>{{ r.rule }}</td><td>{{ r.ports }}</td><td>{{ r.source }}</td><td>{{ r.priority if r.priority is not none else '–' }}</td>
+          <td>{% if r['class'] == 'any' %}<span class="chip critical">Any port</span>{% elif r['class'] == 'management' %}<span class="chip critical">Management port</span>{% elif r['class'] == 'database' %}<span class="chip high">Database or file sharing</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% if expo.vms %}
+  <section class="panel">
+    <h3>Virtual machines with a public IP address</h3>
+    <div class="table-wrap"><table class="narrow">
+      <thead><tr><th>Machine</th><th>Subscription</th><th>Public IP</th><th>Azure</th></tr></thead>
+      <tbody>{% for v in expo.vms[:60] %}<tr><td><a href="{{ url_for('resource_page', id=v.id) }}">{{ sec_name_of(v.id) }}</a></td><td>{{ sec_names.get(v.subscriptionId, v.subscriptionId) }}</td><td>{{ v.ip or '–' }}</td><td>{{ azure_link(v.id) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+<p class="muted">The findings behind these tables are in <a href="{{ url_for('actions_page', pillar='Security') }}">Action items</a> (rules SEC-NSG-001 to 003 and SEC-VM-004).</p>
