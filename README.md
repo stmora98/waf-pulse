@@ -71,16 +71,88 @@ The command prints `appId` (client ID), `password` (client secret) and `tenant`.
 
 Granting a role at the root management group requires elevated access. Turn on **Microsoft Entra ID > Properties > Access management for Azure resources** first. If you prefer not to, assign `Reader` on each subscription instead by passing several `--scopes /subscriptions/<id>`.
 
-### Optional permissions
+### Permissions, one by one
 
-Each one unlocks extra findings. Skipping any of them is fine.
+The collector only **reads**. It never gets a write permission, an Owner/Contributor role, or access to a secret value. Everything below is
+granted to the service principal (or its app registration) that you create here. Each optional item is independent: leave it out and only the
+part that needs it shows as **Not available** in the **Data source coverage** table of the overview, with the exact permission that is missing.
 
-| Permission | How to grant | Unlocks |
+| Level | What to grant | What you get |
 |---|---|---|
-| `Cost Management Reader` | `az role assignment create --assignee <appId> --role "Cost Management Reader" --scope /providers/Microsoft.Management/managementGroups/<tenant-id>` | The Cost page: monthly spend, forecast and budgets |
-| `Security Reader` | Same command with `--role "Security Reader"` | Defender for Cloud posture |
-| `Key Vault Reader` | Same command with `--role "Key Vault Reader"` and a subscription or management group scope. Vaults that use access policies need a list permission for secrets, keys and certificates, and a vault with a firewall must allow the collector | Expired and expiring secrets, keys and certificates. Only metadata is read, never a value |
-| Microsoft Graph application permissions (each one is independent): `Application.Read.All`, `User.Read.All`, `SecurityIncident.Read.All`, and for the identity posture `Policy.Read.All`, `RoleManagement.Read.Directory`, `RoleEligibilitySchedule.Read.Directory`, `Reports.Read.All` with `AuditLog.Read.All`, `IdentityRiskyUser.Read.All`, `DirectoryRecommendations.Read.All` | App registration > API permissions > Add > Microsoft Graph > Application permissions, then **Grant admin consent** | Expiring app credentials, guest users, Defender incidents; Conditional Access, privileged directory roles, MFA registration, users at risk and Entra recommendations (some need Entra ID P1 or P2 and show as not available without them) |
+| **Minimum** | `Reader` on the tenant root management group | Inventory, findings from the built-in rules and the review checklists, Advisor, Defender recommendations and Secure Score, governance and landing zone, right-sizing with Azure Monitor metrics, security signals (alerts, vulnerable software, exposure, compliance, changes) and access and policy |
+| **Recommended** | Minimum + `Cost Management Reader` | + the Cost page, cost of each resource in right-sizing, spend of the filtered resources |
+| **Full** | Recommended + `Key Vault Reader` + the Microsoft Graph application permissions below | + expiring Key Vault objects, app credentials, guests, Defender XDR incidents, Conditional Access, privileged roles, MFA registration, users at risk and Entra recommendations |
+
+#### Azure roles
+
+Assign them to the service principal at the tenant root management group (or on each subscription).
+
+| Azure role | Required | Scope | What the collector reads with it | Without it |
+|---|---|---|---|---|
+| `Reader` | **Yes** | Tenant root management group, or every subscription you want assessed | Resource Graph tables `resources`, `resourcecontainers` (subscriptions and management groups), `advisorresources`, `securityresources` (Defender assessments, Secure Score, alerts, software inventory, regulatory compliance, pricing tiers), `policyresources` (assignments, compliance, exemptions), `authorizationresources` (role assignments and definitions), `patchassessmentresources`, `resourcechanges`; Azure Monitor metrics (`Microsoft.Insights/metrics/read`); the VM size catalog (`Microsoft.Compute/skus/read`); diagnostic settings; storage account lifecycle policies; Defender plan tiers (`Microsoft.Security/pricings/read`); the list of subscriptions | Nothing is assessed. With subscription scopes instead of the root group the management group tree and the landing zone view stay empty, and role assignments and policy at group scope are not seen |
+| `Cost Management Reader` | No | Same scope as `Reader` | Cost Management queries (billed and amortized cost, by service, group, region, type and resource) and budgets (`Microsoft.Consumption`) | The Cost page has no data, right-sizing has no cost column, the filtered spend panel is empty. Everything else works |
+| `Key Vault Reader` | No | Subscriptions or the root group | The metadata (names and expiry dates) of secrets, keys and certificates of vaults that use Azure RBAC. Vaults that use access policies need the **List** permission for secrets, keys and certificates on the collector; a vault with a firewall must allow the collector | The Key Vault expirations panel and its findings are empty. Only metadata is read, never a value |
+| `Security Reader` | **Not needed** | – | Everything WAF Pulse reads from Defender for Cloud is covered by `Reader` | – |
+
+You do not need a custom role: Resource Graph returns a resource only if the caller has `*/read` on it, so `Reader` is already the smallest role that works.
+
+Granting a role at the root management group needs [elevated access](https://learn.microsoft.com/azure/role-based-access-control/elevate-access-global-admin).
+
+```bash
+APP_ID=<client-id>
+ROOT=/providers/Microsoft.Management/managementGroups/<tenant-id>
+az role assignment create --assignee $APP_ID --role "Reader" --scope $ROOT                       # required
+az role assignment create --assignee $APP_ID --role "Cost Management Reader" --scope $ROOT      # optional
+az role assignment create --assignee $APP_ID --role "Key Vault Reader" --scope $ROOT            # optional
+```
+
+#### Microsoft Graph application permissions
+
+Add them to the **app registration** of the service principal (App registration > API permissions > Add a permission > Microsoft Graph > **Application permissions**) and select **Grant admin consent**. Granting consent needs a Privileged Role Administrator or a Global Administrator. They are all read-only and each one is independent.
+
+| Permission | ID | Required | Findings and views it feeds | License or condition |
+|---|---|---|---|---|
+| `Application.Read.All` | `9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30` | No | App registration secrets and certificates that expired, expire soon or live too long (SEC-APP-001, OPS-APP-002, SEC-APP-003) | None |
+| `User.Read.All` | `df021288-bdef-4463-88db-98f22de89214` | No | Guest invitations never accepted (SEC-GUEST-001) | None |
+| `SecurityIncident.Read.All` | `45cc0394-e837-488b-a098-1918f48d186c` | No | Open Defender XDR incidents (SEC-XDR-001) | Microsoft Defender XDR |
+| `Policy.Read.All` | `246dd0d5-5bd0-4def-940b-0421030a5b68` | No | Identity tab: Conditional Access policies and security defaults (SEC-CA-001 to 004) | Entra ID P1 for Conditional Access |
+| `RoleManagement.Read.Directory` | `483bed4a-2ad3-4361-a73b-c83ccdbdc53c` | No | Identity tab: privileged directory roles, Global Administrators, guests and service principals with a privileged role (SEC-ROLE-001 to 003) | None |
+| `RoleEligibilitySchedule.Read.Directory` | `ff278e11-4a33-4d0c-83d2-d01dc58929a5` | No | Whether privileged roles are managed with PIM (SEC-ROLE-004) | Entra ID P2 or Entra ID Governance |
+| `Reports.Read.All` and `AuditLog.Read.All` (both) | `230c1aed-a721-4c5d-9cb4-a90514e508ef`, `b0afded3-3588-46d8-8b3d-9842eff778da` | No | Identity tab: MFA registration, administrators and users without MFA (SEC-MFA-001, 002) | Entra ID P1 |
+| `IdentityRiskyUser.Read.All` | `dc5007c0-2d7d-4c42-879c-2dab87571379` | No | Identity tab: users at risk (SEC-RISK-001 to 003) | Entra ID P2 |
+| `DirectoryRecommendations.Read.All` | `ae73097b-cb2a-4447-b064-5d80f6093921` | No | Identity tab: Entra recommendations (SEC-ENTRA-001 to 003). Read from the Microsoft Graph **beta** endpoint, the only one that has them | None |
+
+```bash
+APP_ID=<client-id>
+GRAPH=00000003-0000-0000-c000-000000000000
+# Keep the lines you want. Each id comes from the table above.
+az ad app permission add --id $APP_ID --api $GRAPH --api-permissions \
+  9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30=Role df021288-bdef-4463-88db-98f22de89214=Role 45cc0394-e837-488b-a098-1918f48d186c=Role \
+  246dd0d5-5bd0-4def-940b-0421030a5b68=Role 483bed4a-2ad3-4361-a73b-c83ccdbdc53c=Role ff278e11-4a33-4d0c-83d2-d01dc58929a5=Role \
+  230c1aed-a721-4c5d-9cb4-a90514e508ef=Role b0afded3-3588-46d8-8b3d-9842eff778da=Role dc5007c0-2d7d-4c42-879c-2dab87571379=Role \
+  ae73097b-cb2a-4447-b064-5d80f6093921=Role
+az ad app permission admin-consent --id $APP_ID
+```
+
+A permission or a license that is missing is not an error: the part shows as **Not available** and names what to grant. The permissions can be granted at any time; the next refresh picks them up.
+
+#### Data that depends on a Defender plan or a service, not on a permission
+
+Some views are empty because the tenant does not produce the data, even with every permission above.
+
+| View | What the tenant needs |
+|---|---|
+| Security > Vulnerabilities: software with known vulnerabilities or past its end of support | Defender for Servers (software inventory and vulnerability assessment) |
+| Security > Vulnerabilities: pending patches | Azure Update Manager with periodic assessment on the machines |
+| Security > Alerts | The Defender plans you want alerts from |
+| Security > Compliance | Defender CSPM or a Defender plan, with the regulatory standards you want added in Defender for Cloud |
+| Defender coverage and Secure Score | Defender for Cloud enabled on the subscriptions |
+| Right-sizing for virtual machines: memory | The VM host metric *Available Memory Bytes*, which Azure Monitor publishes for running machines |
+| Advisor savings and commitments | Azure Advisor recommendations, which need a few days of usage |
+
+#### What the deployment itself needs and assigns
+
+The person who deploys needs `Owner`, or `Contributor` plus `User Access Administrator`, on the resource group, because the template assigns roles to the managed identity of the dashboard and the collector: `Key Vault Secrets User`, `Storage Blob Data Owner`, `Storage Queue Data Contributor`, `Storage Table Data Contributor`, the Cosmos DB `Built-in Data Contributor` data role and `Website Contributor` on the Function App (for the deployment script). Those are on the deployed resources only; they give no access to the rest of the tenant.
 
 ### Secret expiry
 
