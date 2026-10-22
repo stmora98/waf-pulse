@@ -421,7 +421,7 @@
    "waf": "Reliability",
    "service": "SAP",
    "link": "https://learn.microsoft.com/azure/sap/workloads/high-availability-guide-standard-load-balancer-outbound-connections",
-   "graph": "resources | where type =~ 'Microsoft.Network/loadBalancers' | extend bep = properties.backendAddressPools | extend BackEndPools = array_length(bep) | where BackEndPools =~ 0 | project name, id, Param1='backendPools', Param2=toint(0), tags | union (resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Standard' | extend bep = properties.backendAddressPools | extend BackEndPools = toint(array_length(bep)) | mv-expand bip = properties.backendAddressPools | extend BackendAddresses = array_length(bip.properties.loadBalancerBackendAddresses) | where toint(BackendAddresses) <= 1 | project name, id, tags, Param1='backendAddresses', Param2=toint(BackendAddresses)) | union ( resources | where type =~ 'Microsoft.Network/loadBalancers' | where sku.name =~ 'Basic' | mv-expand properties.backendAddressPools | extend backendPoolId = properties_backendAddressPools.id | project id, name, tags, tostring(backendPoolId), Param1='BackEndPools' | join kind = leftouter ( resources | where type =~ 'Microsoft.Network/networkInterfaces' | mv-expand properties.ipConfigurations | mv-expand properties_ipConfigurations.properties.loadBalancerBackendAddressPools | extend backendPoolId = tostring(properties_ipConfigurations_properties_loadBalancerBackendAddressPools.id) | summarize poolMembers = count() by backendPoolId | project tostring(backendPoolId), poolMembers ) on backendPoolId | where toint(poolMembers) <= 1 | extend BackendAddresses = poolMembers | project id, name, tags, Param1='backendAddresses', Param2=toint(BackendAddresses))"
+   "graph": "resources | where type =~ 'microsoft.network/loadbalancers' | project id, backendPools = properties.backendAddressPools | mv-expand pool = iff(array_length(backendPools) > 0, backendPools, dynamic([{}])) | extend poolId = tostring(pool.id), directMembers = coalesce(array_length(pool.properties.loadBalancerBackendAddresses), 0) | join kind=leftouter (resources | where type =~ 'microsoft.network/networkinterfaces' | mv-expand ipConfig = properties.ipConfigurations | mv-expand poolRef = ipConfig.properties.loadBalancerBackendAddressPools | project poolId = tostring(poolRef.id) | summarize nicMembers = count() by poolId) on poolId | extend poolMembers = directMembers + coalesce(nicMembers, 0) | summarize backendPoolCount = countif(isnotempty(poolId)), minPoolMembers = min(poolMembers) by id | extend compliant = backendPoolCount > 0 and minPoolMembers > 1 | project id, compliant"
   },
   {
    "guid": "f656e745-0cfb-453e-8008-0528fa21c933",
@@ -502,7 +502,7 @@
    "waf": "Reliability",
    "service": "SAP",
    "link": "https://learn.microsoft.com/azure/virtual-network/virtual-network-peering-overview",
-   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | mvexpand properties.virtualNetworkPeerings | project id, peeringName=properties_virtualNetworkPeerings.name, compliant = (properties_virtualNetworkPeerings.properties.allowVirtualNetworkAccess =~ True)"
+   "graph": "resources | where type =~ 'microsoft.network/virtualnetworks' | mv-expand peering = properties.virtualNetworkPeerings | project id, peeringName = tostring(peering.name), compliant = (tobool(peering.properties.allowVirtualNetworkAccess) == true)"
   },
   {
    "guid": "7d4bc7d2-c34a-452e-8f1d-6ae3c8eafcc3",

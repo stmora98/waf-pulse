@@ -14,6 +14,38 @@ from pathlib import Path
 KEEP = ("guid", "id", "text", "severity", "waf", "category", "subcategory", "service", "link", "graph")
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "src" / "collector" / "waf_pulse" / "checklists"
 
+# Keep these Resource Graph fixes when refreshing the upstream checklists.
+QUERY_FIXES = {
+    "4b69bad3-3aad-45e8-a68e-1d76667313b4": (
+        "resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionScope = id "
+        "| join kind=inner (authorizationresources | where type =~ 'microsoft.authorization/roleassignments' "
+        "| extend principalType = tostring(properties.principalType), scope = tostring(properties.scope) "
+        "| extend compliant = principalType =~ 'Group') on $left.subscriptionScope == $right.scope "
+        "| project id, compliant"
+    ),
+    "a3592829-e6e2-4061-9368-6af46791f893": (
+        "resources | where type =~ 'microsoft.network/virtualnetworks' "
+        "| mv-expand peering = properties.virtualNetworkPeerings "
+        "| project id, peeringName = tostring(peering.name), "
+        "compliant = (tobool(peering.properties.allowVirtualNetworkAccess) == true)"
+    ),
+    "a78b3d31-3170-44f2-b5d7-651a29f4ccf5": (
+        "resources | where type =~ 'microsoft.network/loadbalancers' "
+        "| project id, backendPools = properties.backendAddressPools "
+        "| mv-expand pool = iff(array_length(backendPools) > 0, backendPools, dynamic([{}])) "
+        "| extend poolId = tostring(pool.id), "
+        "directMembers = coalesce(array_length(pool.properties.loadBalancerBackendAddresses), 0) "
+        "| join kind=leftouter (resources | where type =~ 'microsoft.network/networkinterfaces' "
+        "| mv-expand ipConfig = properties.ipConfigurations "
+        "| mv-expand poolRef = ipConfig.properties.loadBalancerBackendAddressPools "
+        "| project poolId = tostring(poolRef.id) | summarize nicMembers = count() by poolId) on poolId "
+        "| extend poolMembers = directMembers + coalesce(nicMembers, 0) "
+        "| summarize backendPoolCount = countif(isnotempty(poolId)), minPoolMembers = min(poolMembers) by id "
+        "| extend compliant = backendPoolCount > 0 and minPoolMembers > 1 "
+        "| project id, compliant"
+    ),
+}
+
 
 def slim(checklist, stem):
     items = []
@@ -22,7 +54,7 @@ def slim(checklist, stem):
         if not graph or not item.get("guid"):
             continue
         entry = {key: item.get(key) for key in KEEP if item.get(key) is not None}
-        entry["graph"] = graph
+        entry["graph"] = QUERY_FIXES.get(item["guid"], graph)
         items.append(entry)
     name = checklist.get("metadata", {}).get("name") or stem
     return {"name": name, "items": items}

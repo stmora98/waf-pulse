@@ -300,7 +300,7 @@ git clone https://github.com/Azure/review-checklists
 python tools/update_checklists.py --source review-checklists/checklists
 ```
 
-Three upstream queries are not valid Resource Graph queries; they are reported as checks that could not run and do not affect the rest.
+The importer preserves local Resource Graph corrections for three upstream controls: group-based role assignments, VNet peering access, and load balancer backend redundancy. The corrected queries return resource IDs and compliance flags so the collector can evaluate them. Load balancer checks count both NIC-based and IP-based backends and include empty backend pools. Query failures are reported as checks that could not run; they do not stop the other checks.
 ## Security notes
 
 - The collector secret lives only in Key Vault and is read through a Key Vault reference. It is not stored in app settings, outputs or this repository.

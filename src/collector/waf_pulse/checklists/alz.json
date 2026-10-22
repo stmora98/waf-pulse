@@ -22,7 +22,7 @@
    "subcategory": "Identity",
    "service": "Entra",
    "link": "https://learn.microsoft.com/entra/fundamentals/how-to-manage-groups",
-   "graph": "resourcecontainers | where type == 'microsoft.resources/subscriptions' | project subscriptionId = id | join kind=inner (authorizationresources | where type == 'microsoft.authorization/roleassignments' | extend principalType = tostring(properties.principalType), roleDefinitionName = tostring(properties.roleDefinitionName), principalName = tostring(properties.principalName), scope = tostring(properties.scope), compliant = iff(principalType == 'Group', 1, 0)) on $left.subscriptionId == $right.scope | project subscriptionId, principalName, roleDefinitionName, principalType, compliant"
+   "graph": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionScope = id | join kind=inner (authorizationresources | where type =~ 'microsoft.authorization/roleassignments' | extend principalType = tostring(properties.principalType), scope = tostring(properties.scope) | extend compliant = principalType =~ 'Group') on $left.subscriptionScope == $right.scope | project id, compliant"
   },
   {
    "guid": "1559ab91-53e8-4908-ae28-c84c33b6b780",
